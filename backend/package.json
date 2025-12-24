@@ -1,0 +1,41 @@
+{
+  "name": "ttrpg-backend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "db:seed": "ts-node prisma/seed.ts",
+    "test": "jest"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.18.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "ttrpg-root": "file:.."
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^22.7.4",
+    "@types/supertest": "^6.0.3",
+    "jest": "^30.2.0",
+    "prisma": "^5.18.0",
+    "supertest": "^7.1.4",
+    "ts-jest": "^29.4.6",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.6.3"
+  }
+}

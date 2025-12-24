@@ -1,0 +1,404 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum PropertyValueType {
+  STRING
+  INTEGER
+  BOOLEAN
+  JSON
+  DECIMAL
+}
+
+enum CharacterCampaignStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SystemViewType {
+  LIST
+  FORM
+}
+
+enum RelatedListFieldSource {
+  RELATED
+  JOIN
+}
+
+enum SystemFieldType {
+  TEXT
+  TEXTAREA
+  NUMBER
+  BOOLEAN
+  SELECT
+  DATE
+  EMAIL
+  PASSWORD
+  REFERENCE
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  role         Role     @default(USER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ownedWorlds        World[]             @relation("WorldOwner")
+  ownedCampaigns     Campaign[]          @relation("CampaignOwner")
+  worldDelegations   WorldDelegate[]
+  campaignDelegation CampaignDelegate[]
+  characters         Character[]
+  systemRoles        SystemUserRole[]
+  systemPreferences  SystemUserPreference[]
+  architectWorlds    WorldArchitect[]
+  worldCampaignAccess WorldCampaignCreator[]
+  worldCharacterAccess WorldCharacterCreator[]
+  campaignCharacterAccess CampaignCharacterCreator[]
+  gmCampaigns        Campaign[]          @relation("CampaignGM")
+  createdCampaigns   Campaign[]          @relation("CampaignCreator")
+}
+
+model World {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  primaryArchitectId String
+  dmLabelKey  String?
+  themeKey    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  primaryArchitect User                @relation("WorldOwner", fields: [primaryArchitectId], references: [id])
+  campaigns         Campaign[]
+  delegates         WorldDelegate[]
+  architects        WorldArchitect[]
+  campaignCreators  WorldCampaignCreator[]
+  characterCreators WorldCharacterCreator[]
+  characters        Character[]
+
+  @@index([primaryArchitectId])
+}
+
+model Campaign {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  worldId     String
+  ownerId     String
+  gmUserId    String
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  world              World                    @relation(fields: [worldId], references: [id])
+  owner              User                     @relation("CampaignOwner", fields: [ownerId], references: [id])
+  gameMaster         User                     @relation("CampaignGM", fields: [gmUserId], references: [id])
+  createdBy          User                     @relation("CampaignCreator", fields: [createdById], references: [id])
+  delegates          CampaignDelegate[]
+  roster             CharacterCampaign[]
+  characterCreators  CampaignCharacterCreator[]
+
+  @@index([worldId])
+  @@index([ownerId])
+  @@index([gmUserId])
+  @@index([createdById])
+}
+
+model Character {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  playerId    String
+  worldId     String
+  statusKey   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  player    User               @relation(fields: [playerId], references: [id])
+  world     World              @relation(fields: [worldId], references: [id])
+  campaigns CharacterCampaign[]
+
+  @@index([playerId])
+  @@index([worldId])
+}
+
+model CharacterCampaign {
+  characterId String
+  campaignId  String
+  status      CharacterCampaignStatus @default(ACTIVE)
+  joinedAt    DateTime @default(now())
+
+  character Character @relation(fields: [characterId], references: [id])
+  campaign  Campaign  @relation(fields: [campaignId], references: [id])
+
+  @@id([characterId, campaignId])
+  @@index([campaignId])
+}
+
+model WorldDelegate {
+  worldId   String
+  userId    String
+  grantedAt DateTime @default(now())
+
+  world World @relation(fields: [worldId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@id([worldId, userId])
+  @@index([userId])
+}
+
+model CampaignDelegate {
+  campaignId String
+  userId     String
+  grantedAt  DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@id([campaignId, userId])
+  @@index([userId])
+}
+
+model WorldArchitect {
+  worldId   String
+  userId    String
+  grantedAt DateTime @default(now())
+
+  world World @relation(fields: [worldId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@id([worldId, userId])
+  @@index([userId])
+}
+
+model WorldCampaignCreator {
+  worldId   String
+  userId    String
+  grantedAt DateTime @default(now())
+
+  world World @relation(fields: [worldId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@id([worldId, userId])
+  @@index([userId])
+}
+
+model WorldCharacterCreator {
+  worldId   String
+  userId    String
+  grantedAt DateTime @default(now())
+
+  world World @relation(fields: [worldId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@id([worldId, userId])
+  @@index([userId])
+}
+
+model CampaignCharacterCreator {
+  campaignId String
+  userId     String
+  grantedAt  DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@id([campaignId, userId])
+  @@index([userId])
+}
+
+model SystemProperty {
+  id          String            @id @default(uuid())
+  key         String            @unique
+  valueType   PropertyValueType
+  value       String
+  description String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+model SystemUserPreferenceDefault {
+  id          String            @id @default(uuid())
+  key         String            @unique
+  valueType   PropertyValueType
+  value       String
+  description String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+model SystemUserPreference {
+  id        String            @id @default(uuid())
+  userId    String
+  key       String
+  valueType PropertyValueType
+  value     String
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, key])
+  @@index([userId])
+}
+
+model SystemChoice {
+  id        String   @id @default(uuid())
+  listKey   String
+  value     String
+  label     String
+  sortOrder Int?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([listKey, value])
+  @@index([listKey])
+}
+
+model SystemRole {
+  id          String            @id @default(uuid())
+  key         String            @unique
+  name        String
+  description String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  users    SystemUserRole[]
+  controls SystemRoleControl[]
+}
+
+model SystemControl {
+  id          String            @id @default(uuid())
+  key         String            @unique
+  description String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  roles SystemRoleControl[]
+}
+
+model SystemUserRole {
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+
+  user User       @relation(fields: [userId], references: [id])
+  role SystemRole @relation(fields: [roleId], references: [id])
+
+  @@id([userId, roleId])
+  @@index([roleId])
+}
+
+model SystemRoleControl {
+  roleId    String
+  controlId String
+  createdAt DateTime @default(now())
+
+  role    SystemRole    @relation(fields: [roleId], references: [id])
+  control SystemControl @relation(fields: [controlId], references: [id])
+
+  @@id([roleId, controlId])
+  @@index([controlId])
+}
+
+model SystemView {
+  id          String          @id @default(uuid())
+  key         String          @unique
+  title       String
+  entityKey   String
+  viewType    SystemViewType
+  endpoint    String
+  description String?
+  adminOnly   Boolean         @default(false)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  fields SystemViewField[]
+}
+
+model SystemViewField {
+  id             String          @id @default(uuid())
+  viewId         String
+  fieldKey       String
+  label          String
+  fieldType      SystemFieldType
+  listVisible    Boolean         @default(true)
+  formVisible    Boolean         @default(true)
+  listOrder      Int
+  formOrder      Int
+  required       Boolean         @default(false)
+  readOnly       Boolean         @default(false)
+  placeholder    String?
+  optionsListKey String?
+  referenceEntityKey String?
+  referenceLabelField String?
+  referenceScope String?
+  allowMultiple  Boolean         @default(false)
+  width          String?
+
+  view SystemView @relation(fields: [viewId], references: [id])
+
+  @@index([viewId])
+  @@unique([viewId, fieldKey])
+}
+
+model SystemRelatedList {
+  id               String   @id @default(uuid())
+  key              String   @unique
+  title            String
+  parentEntityKey  String
+  relatedEntityKey String
+  joinEntityKey    String
+  parentFieldKey   String
+  relatedFieldKey  String
+  listOrder        Int      @default(0)
+  adminOnly        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  fields SystemRelatedListField[]
+}
+
+model SystemRelatedListField {
+  id             String                 @id @default(uuid())
+  relatedListId  String
+  fieldKey       String
+  label          String
+  source         RelatedListFieldSource
+  listOrder      Int
+  width          String?
+
+  relatedList SystemRelatedList @relation(fields: [relatedListId], references: [id])
+
+  @@index([relatedListId])
+  @@unique([relatedListId, fieldKey, source])
+}
+
+model SystemDictionary {
+  id                 String          @id @default(uuid())
+  entityKey          String
+  fieldKey           String
+  label              String
+  fieldType          SystemFieldType
+  referenceEntityKey String?
+  isLabel            Boolean         @default(false)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@unique([entityKey, fieldKey])
+  @@index([entityKey])
+}
