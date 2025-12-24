@@ -334,13 +334,14 @@ body {
   display: flex;
   gap: 0.75rem;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .list-view__search {
   padding: 0.5rem 0.75rem;
   border-radius: 0.6rem;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 75%, transparent);
   min-width: 220px;
   color: var(--text);
 }
@@ -352,6 +353,7 @@ body {
   overflow: hidden;
   background: var(--surface);
   box-shadow: 0 18px 35px var(--shadow);
+  position: relative;
 }
 
 .list-view__row {
@@ -366,6 +368,7 @@ body {
   text-align: left;
   cursor: pointer;
   width: 100%;
+  align-items: center;
 }
 
 .list-view__row:not(.list-view__row--header):nth-child(even) {
@@ -383,6 +386,9 @@ body {
   letter-spacing: 0.08em;
   color: var(--text-muted);
   cursor: default;
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 .list-view__row--header:hover {
@@ -400,6 +406,120 @@ body {
   white-space: nowrap;
 }
 
+.list-view__cell--numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.list-view__cell--boolean {
+  text-align: center;
+}
+
+.list-view__cell--actions {
+  text-align: right;
+}
+
+.list-view__row-action {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.list-view__row:hover .list-view__row-action,
+.list-view__row:focus-within .list-view__row-action {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  color: var(--text);
+}
+
+.status-badge--success {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #10b981;
+}
+
+.status-badge--warning {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #f59e0b;
+}
+
+.status-badge--danger {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #ef4444;
+}
+
+.list-view__cards {
+  display: none;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.list-card {
+  background: color-mix(in srgb, var(--surface) 92%, var(--surface-2));
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: 1rem;
+  padding: 1.25rem;
+  display: grid;
+  gap: 1rem;
+  box-shadow: 0 18px 35px var(--shadow);
+}
+
+.list-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.list-card__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.list-card__body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.list-card__field {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.list-card__label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.list-card__value {
+  font-size: 0.95rem;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.list-card__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .list-view__empty {
   padding: 1.5rem 2rem;
   background: var(--surface);
@@ -407,13 +527,14 @@ body {
 }
 
 .form-view__form {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 92%, var(--surface-2));
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
   border-top: none;
   border-radius: 0 0 1rem 1rem;
   padding: 2rem;
   display: grid;
   gap: 1.5rem;
+  box-shadow: 0 18px 35px var(--shadow);
 }
 
 .form-view__field {
@@ -449,8 +570,9 @@ body {
 .form-view__field select {
   padding: 0.6rem 0.75rem;
   border-radius: 0.6rem;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  color: var(--text);
 }
 
 .form-view__field textarea {
@@ -471,7 +593,7 @@ body {
   z-index: 5;
   width: 100%;
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   border-radius: 0.6rem;
   margin-top: 0.4rem;
   max-height: 180px;
@@ -496,8 +618,8 @@ body {
 }
 
 .reference-field__chip {
-  border: 1px solid var(--border);
-  background: var(--surface-2);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
   border-radius: 999px;
   padding: 0.25rem 0.6rem;
   cursor: pointer;
@@ -510,6 +632,7 @@ body {
   background: none;
   border: none;
   cursor: pointer;
+  color: var(--text);
 }
 
 .reference-field__options button:hover {
@@ -524,12 +647,13 @@ body {
 
 .related-lists {
   margin-top: 2rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 92%, var(--surface-2));
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
   border-radius: 1rem;
   padding: 1.5rem;
   display: grid;
   gap: 1rem;
+  box-shadow: 0 18px 35px var(--shadow);
 }
 
 .related-lists--disabled {
@@ -862,5 +986,31 @@ body {
 
   .app__context {
     gap: 0.5rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .list-view__row {
+    padding: 0.75rem 1.25rem;
+    grid-auto-columns: minmax(100px, 1fr);
+  }
+}
+
+@media (max-width: 767px) {
+  .list-view__table {
+    display: none;
+  }
+
+  .list-view__cards {
+    display: grid;
+  }
+
+  .list-view__actions {
+    width: 100%;
+  }
+
+  .list-view__search {
+    flex: 1 1 100%;
+    min-width: 0;
   }
 }

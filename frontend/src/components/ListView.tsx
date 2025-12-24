@@ -49,6 +49,26 @@ const filterRows = (rows: Record<string, unknown>[], fields: ViewField[], query:
   );
 };
 
+const isStatusField = (field: ViewField) => {
+  const key = field.fieldKey.toLowerCase();
+  const label = field.label.toLowerCase();
+  return key.includes("status") || label.includes("status");
+};
+
+const getStatusTone = (value: string) => {
+  const normalized = value.toLowerCase();
+  if (normalized.includes("active") || normalized.includes("alive") || normalized.includes("enabled")) {
+    return "success";
+  }
+  if (normalized.includes("inactive") || normalized.includes("dead") || normalized.includes("disabled")) {
+    return "danger";
+  }
+  if (normalized.includes("pending") || normalized.includes("draft")) {
+    return "warning";
+  }
+  return "neutral";
+};
+
 export default function ListView({ token, viewKey, formViewKey, onOpenForm }: ListViewProps) {
   const [view, setView] = useState<SystemView | null>(null);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -199,6 +219,39 @@ export default function ListView({ token, viewKey, formViewKey, onOpenForm }: Li
   }, [view]);
 
   const filteredRows = useMemo(() => filterRows(rows, listFields, query), [rows, listFields, query]);
+  const primaryField = listFields[0];
+  const statusField = listFields.find((field) => field.fieldType === "SELECT" && isStatusField(field));
+  const secondaryFields = listFields.filter((field) => field !== primaryField);
+
+  const getDisplayValue = (field: ViewField, row: Record<string, unknown>) => {
+    const rawValue = row[field.fieldKey];
+    if (rawValue === null || rawValue === undefined) return "";
+
+    if (field.fieldType === "BOOLEAN") {
+      const boolValue = rawValue === true || rawValue === "true" || rawValue === 1;
+      return boolValue ? "Yes" : "No";
+    }
+
+    const listKey = field.optionsListKey ?? "";
+    const mapped = listKey && rawValue != null ? choiceMaps[listKey]?.[String(rawValue)] : undefined;
+    const referenceEntity = field.referenceEntityKey ?? "";
+    const referenceLabel =
+      field.fieldType === "REFERENCE" && rawValue != null
+        ? referenceMaps[referenceEntity]?.[String(rawValue)]
+        : undefined;
+
+    return mapped ?? referenceLabel ?? rawValue;
+  };
+
+  const renderCellValue = (field: ViewField, row: Record<string, unknown>) => {
+    const display = getDisplayValue(field, row);
+    const text = String(display ?? "");
+    if (field.fieldType === "SELECT" && isStatusField(field) && text) {
+      const tone = getStatusTone(text);
+      return <span className={`status-badge status-badge--${tone}`}>{text}</span>;
+    }
+    return text;
+  };
 
   if (loading) {
     return <div className="view-state">Loading view...</div>;
@@ -218,17 +271,18 @@ export default function ListView({ token, viewKey, formViewKey, onOpenForm }: Li
         <div className="list-view__actions">
           <input
             className="list-view__search"
-            placeholder="Search (coming soon)"
+            placeholder="Search records"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
-          <button type="button" className="primary-button" onClick={() => onOpenForm("new")}
-            >New</button>
+          <button type="button" className="primary-button" onClick={() => onOpenForm("new")}>
+            New
+          </button>
         </div>
       </div>
 
       <div className="list-view__table">
-        <div className="list-view__row list-view__row--header">
+        <div className="list-view__row list-view__row--header" role="row">
           {listFields.map((field) => (
             <div
               key={field.fieldKey}
@@ -238,36 +292,91 @@ export default function ListView({ token, viewKey, formViewKey, onOpenForm }: Li
               {field.label}
             </div>
           ))}
+          <div className="list-view__cell list-view__cell--actions">Actions</div>
         </div>
         {filteredRows.length === 0 ? (
           <div className="list-view__empty">No records yet.</div>
         ) : (
           filteredRows.map((row) => (
-            <button
-              type="button"
+            <div
               key={String(row.id)}
               className="list-view__row"
+              role="button"
+              tabIndex={0}
               onClick={() => onOpenForm(String(row.id))}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onOpenForm(String(row.id));
+                }
+              }}
             >
               {listFields.map((field) => {
-                const rawValue = row[field.fieldKey];
-                const listKey = field.optionsListKey ?? "";
-                const mapped = listKey && rawValue != null ? choiceMaps[listKey]?.[String(rawValue)] : undefined;
-                const referenceEntity = field.referenceEntityKey ?? "";
-                const referenceLabel =
-                  field.fieldType === "REFERENCE" && rawValue != null
-                    ? referenceMaps[referenceEntity]?.[String(rawValue)]
-                    : undefined;
-                const value = mapped ?? referenceLabel ?? rawValue ?? "";
+                const value = renderCellValue(field, row);
+                const typeClass =
+                  field.fieldType === "NUMBER"
+                    ? "list-view__cell--numeric"
+                    : field.fieldType === "BOOLEAN"
+                      ? "list-view__cell--boolean"
+                      : "";
 
                 return (
-                  <div key={field.fieldKey} className="list-view__cell">
-                    {String(value)}
+                  <div key={field.fieldKey} className={`list-view__cell ${typeClass}`}>
+                    {value}
                   </div>
                 );
               })}
-            </button>
+              <div className="list-view__cell list-view__cell--actions">
+                <button
+                  type="button"
+                  className="ghost-button list-view__row-action"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenForm(String(row.id));
+                  }}
+                >
+                  Open
+                </button>
+              </div>
+            </div>
           ))
+        )}
+      </div>
+
+      <div className="list-view__cards">
+        {filteredRows.length === 0 ? (
+          <div className="list-view__empty">No records yet.</div>
+        ) : (
+          filteredRows.map((row) => {
+            const titleValue = primaryField ? renderCellValue(primaryField, row) : "Record";
+            const statusValue = statusField ? renderCellValue(statusField, row) : null;
+
+            return (
+              <div key={String(row.id)} className="list-card">
+                <div className="list-card__header">
+                  <div className="list-card__title">{titleValue}</div>
+                  {statusValue ? <div className="list-card__badge">{statusValue}</div> : null}
+                </div>
+                <div className="list-card__body">
+                  {secondaryFields.map((field) => (
+                    <div key={field.fieldKey} className="list-card__field">
+                      <span className="list-card__label">{field.label}</span>
+                      <span className="list-card__value">{renderCellValue(field, row)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="list-card__actions">
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => onOpenForm(String(row.id))}
+                  >
+                    View
+                  </button>
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
     </div>
