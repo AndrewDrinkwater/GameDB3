@@ -219,4 +219,27 @@ describe("Context filters", () => {
     const ids = response.body.map((item: { id: string }) => item.id);
     expect(ids).toContain(context.characterId);
   });
+
+  it("includes ownerLabel for character references when GM", async () => {
+    const response = await request(app)
+      .get(`/api/references?entityKey=characters&campaignId=${context.campaignId}`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(response.status).toBe(200);
+    const entry = response.body.find((item: { id: string }) => item.id === context.characterId);
+    expect(entry.ownerLabel).toBeTruthy();
+  });
+
+  it("returns context summary roles", async () => {
+    const response = await request(app)
+      .get(
+        `/api/context/summary?worldId=${context.worldId}&campaignId=${context.campaignId}&characterId=${context.characterId}`
+      )
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.worldRole).toBe("Architect");
+    expect(response.body.campaignRole).toBe("GM");
+    expect(response.body.characterOwnerLabel).toBeTruthy();
+  });
 });

@@ -86,10 +86,14 @@ function App() {
   const [theme, setTheme] = useState<Theme>("light");
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>("collapsed");
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
+  const [adminExpanded, setAdminExpanded] = useState(true);
   const [route, setRoute] = useState("/home");
   const [homepage, setHomepage] = useState("/home");
   const [context, setContext] = useState<ContextSelection>({});
   const [contextDefaults, setContextDefaults] = useState<ContextDefaults>({ enabled: false });
+  const [contextSummary, setContextSummary] = useState<string | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
 
   const contextStorageKey = "ttrpg.context";
 
@@ -163,6 +167,48 @@ function App() {
   useEffect(() => {
     sessionStorage.setItem(contextStorageKey, JSON.stringify(context));
   }, [context]);
+
+  useEffect(() => {
+    if (!token) return;
+    if (!context.worldId && !context.campaignId && !context.characterId) {
+      setContextSummary(null);
+      return;
+    }
+    const loadSummary = async () => {
+      const params = new URLSearchParams();
+      if (context.worldId) params.set("worldId", context.worldId);
+      if (context.campaignId) params.set("campaignId", context.campaignId);
+      if (context.characterId) params.set("characterId", context.characterId);
+      const response = await fetch(`/api/context/summary?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) return;
+      const data = (await response.json()) as {
+        worldRole?: string | null;
+        campaignRole?: string | null;
+        characterOwnerLabel?: string | null;
+      };
+      const parts: string[] = [];
+      if (context.worldLabel) {
+        parts.push(
+          data.worldRole ? `${context.worldLabel} (${data.worldRole})` : context.worldLabel
+        );
+      }
+      if (context.campaignLabel) {
+        parts.push(
+          data.campaignRole
+            ? `${context.campaignLabel} (${data.campaignRole})`
+            : context.campaignLabel
+        );
+      }
+      if (context.characterLabel) {
+        const owner = data.characterOwnerLabel ? `Owner: ${data.characterOwnerLabel}` : undefined;
+        parts.push(owner ? `${context.characterLabel} - ${owner}` : context.characterLabel);
+      }
+      setContextSummary(parts.length > 0 ? parts.join(" / ") : null);
+    };
+    void loadSummary();
+  }, [token, context]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -736,33 +782,91 @@ function App() {
             <div className="app__header-nav">
               <button
                 type="button"
-                className={`ghost-button ${sidebarMode === "menu" ? "is-active" : ""}`}
+                className={`header-link ${sidebarMode === "menu" ? "is-active" : ""}`}
                 onClick={() => toggleSidebar("menu")}
               >
                 Menu
               </button>
               <button
                 type="button"
-                className={`ghost-button ${sidebarMode === "favorites" ? "is-active" : ""}`}
+                className={`header-link ${sidebarMode === "favorites" ? "is-active" : ""}`}
                 onClick={() => toggleSidebar("favorites")}
               >
                 Favorites
               </button>
             </div>
 
-            <ContextBar token={token} context={context} onChange={setContext} />
+            <div className="app__context">
+              <div
+                className="context-panel"
+                onBlur={(event) => {
+                  const nextTarget = event.relatedTarget as Node | null;
+                  if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                  setContextOpen(false);
+                }}
+              >
+                <button
+                  type="button"
+                  className="context-pill context-pill--button"
+                  aria-haspopup="dialog"
+                  aria-expanded={contextOpen}
+                  onClick={() => setContextOpen((open) => !open)}
+                >
+                  <span className="context-pill__title">Game Context</span>
+                  <span className="context-pill__value">
+                    {contextSummary ?? "No context selected"}
+                  </span>
+                </button>
+                {contextOpen ? (
+                  <div className="context-popover" role="dialog" aria-label="Game context">
+                    <ContextBar
+                      token={token}
+                      context={context}
+                      onChange={setContext}
+                      onReset={() => setContext({})}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </div>
 
             <div className="app__header-actions">
-              <div className="app__user">
-                <span>
-                  {user.name ?? user.email} - {user.role}
-                </span>
-                <a className="profile-link" href="#/profile">
-                  {user.name ?? "Profile"}
-                </a>
-                <button type="button" className="ghost-button" onClick={handleLogout}>
-                  Log out
+              <div
+                className="app__user"
+                onBlur={(event) => {
+                  const nextTarget = event.relatedTarget as Node | null;
+                  if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                  setProfileOpen(false);
+                }}
+              >
+                <button
+                  type="button"
+                  className="profile-button"
+                  aria-haspopup="menu"
+                  aria-expanded={profileOpen}
+                  onClick={() => setProfileOpen((open) => !open)}
+                >
+                  {(user.name ?? user.email).charAt(0).toUpperCase()}
                 </button>
+                {profileOpen ? (
+                  <div className="profile-menu" role="menu">
+                    <div className="profile-menu__header">
+                      <div className="profile-menu__name">{user.name ?? user.email}</div>
+                      <div className="profile-menu__meta">{user.role}</div>
+                    </div>
+                    <a className="profile-menu__item" href="#/profile" role="menuitem">
+                      Profile
+                    </a>
+                    <button
+                      type="button"
+                      className="profile-menu__item profile-menu__item--danger"
+                      onClick={handleLogout}
+                      role="menuitem"
+                    >
+                      Log out
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </div>
           </header>
@@ -789,7 +893,7 @@ function App() {
                     </span>
                   </button>
                 </div>
-                {sidebarMode === "menu" ? (
+                  {sidebarMode === "menu" ? (
                   <nav className="sidebar__nav">
                     <button
                       type="button"
@@ -820,7 +924,18 @@ function App() {
                     </button>
                     {user.role === "ADMIN" ? (
                       <div className="sidebar__section">
-                        <div className="sidebar__section-title">Admin</div>
+                        <button
+                          type="button"
+                          className="sidebar__section-toggle"
+                          onClick={() => setAdminExpanded((current) => !current)}
+                        >
+                          <span className="sidebar__section-title">Admin</span>
+                          <span className={`sidebar__chevron ${adminExpanded ? "is-open" : ""}`}>
+                            ▾
+                          </span>
+                        </button>
+                        {adminExpanded ? (
+                        <div className="sidebar__section-body">
                         <button
                           type="button"
                           onClick={() => {
@@ -884,6 +999,8 @@ function App() {
                         >
                           Users
                         </button>
+                        </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </nav>

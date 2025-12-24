@@ -9,12 +9,13 @@ export type ContextSelection = {
   characterLabel?: string;
 };
 
-type Choice = { value: string; label: string };
+type Choice = { value: string; label: string; meta?: string };
 
 type ContextBarProps = {
   token: string;
   context: ContextSelection;
   onChange: (next: ContextSelection) => void;
+  onReset?: () => void;
 };
 
 type DropdownState = {
@@ -41,8 +42,12 @@ const fetchOptions = async (
   });
 
   if (!response.ok) return [];
-  const data = (await response.json()) as Array<{ id: string; label: string }>;
-  return data.map((item) => ({ value: item.id, label: item.label }));
+  const data = (await response.json()) as Array<{ id: string; label: string; ownerLabel?: string }>;
+  return data.map((item) => ({
+    value: item.id,
+    label: item.label,
+    meta: item.ownerLabel ? `Owner: ${item.ownerLabel}` : undefined
+  }));
 };
 
 const useDropdown = (initialLabel?: string) => {
@@ -59,10 +64,11 @@ const useDropdown = (initialLabel?: string) => {
   return { state, setState };
 };
 
-export default function ContextBar({ token, context, onChange }: ContextBarProps) {
+export default function ContextBar({ token, context, onChange, onReset }: ContextBarProps) {
   const worldDropdown = useDropdown(context.worldLabel);
   const campaignDropdown = useDropdown(context.campaignLabel);
   const characterDropdown = useDropdown(context.characterLabel);
+  const hasContext = Boolean(context.worldId || context.campaignId || context.characterId);
 
   const applyContext = (next: ContextSelection) => {
     onChange(next);
@@ -190,7 +196,8 @@ export default function ContextBar({ token, context, onChange }: ContextBarProps
                   dropdown.setState({ query: option.label, options: [], open: false });
                 }}
               >
-                {option.label}
+                <span>{option.label}</span>
+                {option.meta ? <span className="context-field__meta">{option.meta}</span> : null}
               </button>
             ))
           ) : (
@@ -247,6 +254,19 @@ export default function ContextBar({ token, context, onChange }: ContextBarProps
           }),
         characterOptionsLoader
       )}
+      {onReset ? (
+        <button
+          type="button"
+          className={`context-bar__reset ${hasContext ? "" : "is-hidden"}`}
+          onClick={onReset}
+          aria-label="Reset context"
+          title="Reset context"
+        >
+          <svg viewBox="0 0 24 24" role="presentation" focusable="false" aria-hidden="true">
+            <path d="M12 5a7 7 0 1 1-6.32 4H3l3.5-3.5L10 9H7.7A5 5 0 1 0 12 7c.64 0 1.26.12 1.82.33l1.1-1.1A6.96 6.96 0 0 0 12 5Z" />
+          </svg>
+        </button>
+      ) : null}
     </div>
   );
 }

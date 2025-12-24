@@ -793,6 +793,10 @@ app.get("/api/references", requireAuth, async (req, res) => {
   }
 
   const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
   const ids = idsParam ? idsParam.split(",").map((id) => id.trim()).filter(Boolean) : undefined;
   const queryValue = query?.trim();
 
@@ -874,21 +878,31 @@ app.get("/api/references", requireAuth, async (req, res) => {
     const whereClause: Prisma.CharacterWhereInput =
       filters.length > 1 ? { AND: filters } : baseClause;
 
-    const select: Record<string, boolean> = { id: true };
-    select[labelField] = true;
-
     const characters = await prisma.character.findMany({
       where: whereClause,
-      select: select as Record<string, true>,
+      include: {
+        player: { select: { name: true, email: true, id: true } },
+        world: { select: { primaryArchitectId: true, architects: { select: { userId: true } } } },
+        campaigns: { select: { campaign: { select: { gmUserId: true } } } }
+      },
       orderBy: { name: "asc" },
       take: 25
     });
 
     const results = characters.map((character) => {
       const labelValue = (character as Record<string, unknown>)[labelField];
+      const canSeeOwner =
+        isAdmin(user) ||
+        character.world.primaryArchitectId === user.id ||
+        character.world.architects.some((entry) => entry.userId === user.id) ||
+        character.campaigns.some((entry) => entry.campaign.gmUserId === user.id);
+      const ownerLabel = canSeeOwner
+        ? character.player.name ?? character.player.email ?? character.player.id
+        : undefined;
       return {
         id: character.id,
-        label: labelValue ? String(labelValue) : character.id
+        label: labelValue ? String(labelValue) : character.id,
+        ownerLabel
       };
     });
 
@@ -941,6 +955,71 @@ app.get("/api/references", requireAuth, async (req, res) => {
     }
   }
   res.json(results);
+});
+
+app.get("/api/context/summary", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+  const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+  const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+
+  let worldRole: string | null = null;
+  let campaignRole: string | null = null;
+  let characterOwnerLabel: string | null = null;
+
+  if (worldId) {
+    const world = await prisma.world.findUnique({
+      where: { id: worldId },
+      select: {
+        primaryArchitectId: true,
+        architects: { select: { userId: true } }
+      }
+    });
+    if (world) {
+      const isArchitect =
+        world.primaryArchitectId === user.id ||
+        world.architects.some((entry) => entry.userId === user.id);
+      worldRole = isArchitect ? "Architect" : "Member";
+    }
+  }
+
+  if (campaignId) {
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: campaignId },
+      select: { gmUserId: true }
+    });
+    if (campaign) {
+      campaignRole = campaign.gmUserId === user.id ? "GM" : "Player";
+    }
+  }
+
+  if (characterId) {
+    const character = await prisma.character.findUnique({
+      where: { id: characterId },
+      select: {
+        player: { select: { name: true, email: true, id: true } },
+        world: { select: { primaryArchitectId: true, architects: { select: { userId: true } } } },
+        campaigns: { select: { campaign: { select: { gmUserId: true } } } }
+      }
+    });
+    if (character) {
+      const canSeeOwner =
+        isAdmin(user) ||
+        character.world.primaryArchitectId === user.id ||
+        character.world.architects.some((entry) => entry.userId === user.id) ||
+        character.campaigns.some((entry) => entry.campaign.gmUserId === user.id);
+      characterOwnerLabel = canSeeOwner
+        ? character.player.name ?? character.player.email ?? character.player.id
+        : null;
+    }
+  }
+
+  res.json({ worldRole, campaignRole, characterOwnerLabel });
 });
 
 app.post("/api/views", requireAuth, requireSystemAdmin, async (req, res) => {
