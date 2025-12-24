@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import ListView from "./components/ListView";
 import FormView from "./components/FormView";
+import ContextBar, { ContextSelection } from "./components/ContextBar";
 
 type User = {
   id: string;
@@ -20,6 +21,16 @@ const sidebarStorageKey = "ttrpg.sidebar";
 
 type Theme = "light" | "dark";
 type SidebarMode = "menu" | "favorites" | "collapsed";
+
+type ContextDefaults = {
+  enabled: boolean;
+  worldId?: string;
+  campaignId?: string;
+  characterId?: string;
+  worldLabel?: string;
+  campaignLabel?: string;
+  characterLabel?: string;
+};
 
 const viewRegistry: Record<string, ViewConfig> = {
   worlds: { listKey: "worlds.list", formKey: "worlds.form", label: "Worlds" },
@@ -77,6 +88,10 @@ function App() {
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [route, setRoute] = useState("/home");
   const [homepage, setHomepage] = useState("/home");
+  const [context, setContext] = useState<ContextSelection>({});
+  const [contextDefaults, setContextDefaults] = useState<ContextDefaults>({ enabled: false });
+
+  const contextStorageKey = "ttrpg.context";
 
   const resolveSidebarMode = (pinned: boolean) => {
     if (!pinned) return "collapsed";
@@ -107,10 +122,11 @@ function App() {
         }
         return response.json();
       })
-      .then((data: User) => {
+      .then(async (data: User) => {
         setUser(data);
         setToken(tokenValue);
-        void resolvePreferences(tokenValue);
+        const defaultsValue = await resolvePreferences(tokenValue);
+        await resolveContextFromDefaults(tokenValue, defaultsValue);
       })
       .catch(() => {
         localStorage.removeItem(tokenStorageKey);
@@ -134,6 +150,21 @@ function App() {
   }, [homepage]);
 
   useEffect(() => {
+    const stored = sessionStorage.getItem(contextStorageKey);
+    if (!stored) return;
+    try {
+      const data = JSON.parse(stored) as ContextSelection;
+      setContext(data ?? {});
+    } catch {
+      setContext({});
+    }
+  }, []);
+
+  useEffect(() => {
+    sessionStorage.setItem(contextStorageKey, JSON.stringify(context));
+  }, [context]);
+
+  useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
@@ -143,7 +174,7 @@ function App() {
 
   const isSidebarOpen = sidebarMode !== "collapsed";
 
-  const resolvePreferences = async (tokenValue: string) => {
+  const resolvePreferences = async (tokenValue: string): Promise<ContextDefaults> => {
     try {
       const [userPrefsResponse, defaultsResponse] = await Promise.all([
         fetch("/api/user/preferences", {
@@ -173,6 +204,10 @@ function App() {
       const defaultTheme = defaults.find((pref) => pref.key === "theme")?.value;
       const userPinned = userPrefs.find((pref) => pref.key === "sidebarPinned")?.value;
       const defaultPinned = defaults.find((pref) => pref.key === "sidebarPinned")?.value;
+      const useDefaultContext = userPrefs.find((pref) => pref.key === "contextUseDefault")?.value;
+      const defaultWorldId = userPrefs.find((pref) => pref.key === "contextWorldId")?.value || undefined;
+      const defaultCampaignId = userPrefs.find((pref) => pref.key === "contextCampaignId")?.value || undefined;
+      const defaultCharacterId = userPrefs.find((pref) => pref.key === "contextCharacterId")?.value || undefined;
 
       setHomepage(userHomepage ?? defaultHomepage ?? "/home");
       setTheme(
@@ -188,11 +223,23 @@ function App() {
           : defaultPinned === "true";
       setIsSidebarPinned(pinned);
       setSidebarMode(resolveSidebarMode(pinned));
+
+      const defaultsValue: ContextDefaults = {
+        enabled: useDefaultContext === "true",
+        worldId: defaultWorldId ?? undefined,
+        campaignId: defaultCampaignId ?? undefined,
+        characterId: defaultCharacterId ?? undefined
+      };
+      setContextDefaults(defaultsValue);
+      return defaultsValue;
     } catch {
       setHomepage("/home");
       setTheme("light");
       setIsSidebarPinned(true);
       setSidebarMode(resolveSidebarMode(true));
+      const fallback = { enabled: false };
+      setContextDefaults(fallback);
+      return fallback;
     }
   };
 
@@ -219,7 +266,8 @@ function App() {
       setToken(data.token);
       setEmail("");
       setPassword("");
-      await resolvePreferences(data.token);
+      const defaultsValue = await resolvePreferences(data.token);
+      await resolveContextFromDefaults(data.token, defaultsValue);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Login failed");
     } finally {
@@ -241,6 +289,9 @@ function App() {
     setHomepage("/home");
     setTheme("light");
     setIsSidebarPinned(true);
+    setContext({});
+    setContextDefaults({ enabled: false });
+    sessionStorage.removeItem(contextStorageKey);
   };
 
   const setThemePreference = async (nextTheme: Theme) => {
@@ -298,6 +349,109 @@ function App() {
   const toggleSidebarPin = () => {
     void setSidebarPinnedPreference(!isSidebarPinned);
   };
+
+  const resolveContextFromDefaults = async (
+    tokenValue: string,
+    defaultsValue: ContextDefaults = contextDefaults
+  ) => {
+    const stored = sessionStorage.getItem(contextStorageKey);
+    if (stored) return;
+    if (!defaultsValue.enabled) return;
+
+    const applyContext = (next: ContextSelection) => {
+      setContext(next);
+      sessionStorage.setItem(contextStorageKey, JSON.stringify(next));
+    };
+
+    if (defaultsValue.characterId) {
+      const response = await fetch(`/api/characters/${defaultsValue.characterId}`, {
+        headers: { Authorization: `Bearer ${tokenValue}` }
+      });
+      if (response.ok) {
+        const data = (await response.json()) as { worldId: string; campaignIds?: string[] };
+        const campaignId =
+          Array.isArray(data.campaignIds) && data.campaignIds.length === 1
+            ? data.campaignIds[0]
+            : defaultsValue.campaignId;
+        applyContext({
+          worldId: data.worldId,
+          campaignId,
+          characterId: defaultsValue.characterId
+        });
+        return;
+      }
+    }
+
+    if (defaultsValue.campaignId) {
+      const response = await fetch(`/api/campaigns/${defaultsValue.campaignId}`, {
+        headers: { Authorization: `Bearer ${tokenValue}` }
+      });
+      if (response.ok) {
+        const data = (await response.json()) as { worldId: string };
+        applyContext({
+          worldId: data.worldId,
+          campaignId: defaultsValue.campaignId
+        });
+        return;
+      }
+    }
+
+    if (defaultsValue.worldId) {
+      applyContext({
+        worldId: defaultsValue.worldId
+      });
+    }
+  };
+
+  const resolveLabel = async (tokenValue: string, entityKey: string, id?: string) => {
+    if (!id) return undefined;
+    const response = await fetch(`/api/references?entityKey=${entityKey}&ids=${id}`, {
+      headers: { Authorization: `Bearer ${tokenValue}` }
+    });
+    if (!response.ok) return undefined;
+    const data = (await response.json()) as Array<{ id: string; label: string }>;
+    return data[0]?.label;
+  };
+
+  useEffect(() => {
+    if (!token) return;
+    const fillLabels = async () => {
+      const next: ContextSelection = { ...context };
+      if (context.worldId && !context.worldLabel) {
+        next.worldLabel = await resolveLabel(token, "worlds", context.worldId);
+      }
+      if (context.campaignId && !context.campaignLabel) {
+        next.campaignLabel = await resolveLabel(token, "campaigns", context.campaignId);
+      }
+      if (context.characterId && !context.characterLabel) {
+        next.characterLabel = await resolveLabel(token, "characters", context.characterId);
+      }
+      if (JSON.stringify(next) !== JSON.stringify(context)) {
+        setContext(next);
+      }
+    };
+    void fillLabels();
+  }, [token, context]);
+
+  useEffect(() => {
+    if (!token) return;
+    const fillDefaultLabels = async () => {
+      const next: ContextDefaults = { ...contextDefaults };
+      if (contextDefaults.worldId && !contextDefaults.worldLabel) {
+        next.worldLabel = await resolveLabel(token, "worlds", contextDefaults.worldId);
+      }
+      if (contextDefaults.campaignId && !contextDefaults.campaignLabel) {
+        next.campaignLabel = await resolveLabel(token, "campaigns", contextDefaults.campaignId);
+      }
+      if (contextDefaults.characterId && !contextDefaults.characterLabel) {
+        next.characterLabel = await resolveLabel(token, "characters", contextDefaults.characterId);
+      }
+      if (JSON.stringify(next) !== JSON.stringify(contextDefaults)) {
+        setContextDefaults(next);
+      }
+    };
+    void fillDefaultLabels();
+  }, [token, contextDefaults]);
 
   const sidebarTitle = useMemo(() => {
     if (sidebarMode === "menu") return "Menu";
@@ -357,6 +511,85 @@ function App() {
                 </button>
               </div>
             </div>
+
+            <div className="profile__section">
+              <h2>Default context</h2>
+              <div className="profile__grid">
+                <label className="profile__label">
+                  <input
+                    type="checkbox"
+                    checked={contextDefaults.enabled}
+                    onChange={async (event) => {
+                      const enabled = event.target.checked;
+                      setContextDefaults((current) => ({ ...current, enabled }));
+                      const tokenValue = localStorage.getItem(tokenStorageKey);
+                      if (!tokenValue) return;
+                      await fetch("/api/user/preferences/contextUseDefault", {
+                        method: "PUT",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: `Bearer ${tokenValue}`
+                        },
+                        body: JSON.stringify({ valueType: "BOOLEAN", value: String(enabled) })
+                      });
+                    }}
+                  />
+                  Use default context on login
+                </label>
+              </div>
+              <div className="profile__section">
+                <ContextBar
+                  token={token}
+                  context={{
+                    worldId: contextDefaults.worldId,
+                    worldLabel: contextDefaults.worldLabel,
+                    campaignId: contextDefaults.campaignId,
+                    campaignLabel: contextDefaults.campaignLabel,
+                    characterId: contextDefaults.characterId,
+                    characterLabel: contextDefaults.characterLabel
+                  }}
+                  onChange={async (next) => {
+                    setContextDefaults((current) => ({
+                      ...current,
+                      worldId: next.worldId,
+                      worldLabel: next.worldLabel,
+                      campaignId: next.campaignId,
+                      campaignLabel: next.campaignLabel,
+                      characterId: next.characterId,
+                      characterLabel: next.characterLabel
+                    }));
+                    const tokenValue = localStorage.getItem(tokenStorageKey);
+                    if (!tokenValue) return;
+                    await Promise.all([
+                      fetch("/api/user/preferences/contextWorldId", {
+                        method: "PUT",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: `Bearer ${tokenValue}`
+                        },
+                        body: JSON.stringify({ valueType: "STRING", value: next.worldId ?? "" })
+                      }),
+                      fetch("/api/user/preferences/contextCampaignId", {
+                        method: "PUT",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: `Bearer ${tokenValue}`
+                        },
+                        body: JSON.stringify({ valueType: "STRING", value: next.campaignId ?? "" })
+                      }),
+                      fetch("/api/user/preferences/contextCharacterId", {
+                        method: "PUT",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: `Bearer ${tokenValue}`
+                        },
+                        body: JSON.stringify({ valueType: "STRING", value: next.characterId ?? "" })
+                      })
+                    ]);
+                  }}
+                />
+              </div>
+            </div>
           </div>
         </section>
       );
@@ -371,6 +604,9 @@ function App() {
             token={token}
             viewKey={config.listKey}
             formViewKey={config.formKey}
+            contextWorldId={context.worldId}
+            contextCampaignId={context.campaignId}
+            contextCharacterId={context.characterId}
             onOpenForm={(id) => {
               window.location.hash = `/form/${routeParts[1]}/${id}`;
               handleSidebarSelect();
@@ -383,6 +619,22 @@ function App() {
     if (routeParts[0] === "form" && routeParts[1] && routeParts[2]) {
       const config = viewRegistry[routeParts[1]];
       if (!config) return null;
+      const initialValues =
+        routeParts[2] === "new"
+          ? routeParts[1] === "campaigns"
+            ? context.worldId
+              ? { worldId: context.worldId }
+              : undefined
+            : routeParts[1] === "characters"
+              ? context.worldId
+                ? { worldId: context.worldId }
+                : undefined
+              : undefined
+          : undefined;
+      const initialLabels =
+        routeParts[2] === "new" && context.worldLabel
+          ? { worldId: context.worldLabel }
+          : undefined;
       return (
         <section className="app__panel app__panel--wide">
           <FormView
@@ -395,6 +647,8 @@ function App() {
             currentUserId={user.id}
             currentUserLabel={user.name ?? user.email}
             currentUserRole={user.role}
+            initialValues={initialValues}
+            initialLabels={initialLabels}
           />
         </section>
       );
@@ -496,11 +750,7 @@ function App() {
               </button>
             </div>
 
-            <div className="app__context">
-              <div className="context-pill">World</div>
-              <div className="context-pill">Campaign</div>
-              <div className="context-pill">Character</div>
-            </div>
+            <ContextBar token={token} context={context} onChange={setContext} />
 
             <div className="app__header-actions">
               <div className="app__user">

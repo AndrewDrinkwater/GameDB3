@@ -84,6 +84,89 @@ body {
   flex-wrap: wrap;
 }
 
+.context-bar {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  align-items: end;
+  width: 100%;
+  max-width: 560px;
+}
+
+.context-field {
+  display: grid;
+  gap: 0.35rem;
+  position: relative;
+}
+
+.context-field__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+}
+
+.context-field__input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.context-field input {
+  width: 100%;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  border-radius: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 75%, transparent);
+  color: var(--text);
+}
+
+.context-field__clear {
+  position: absolute;
+  right: 0.4rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.4rem;
+}
+
+.context-field__options {
+  position: absolute;
+  z-index: 6;
+  top: 100%;
+  width: 100%;
+  margin-top: 0.35rem;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 0.6rem;
+  box-shadow: 0 12px 24px var(--shadow);
+  max-height: 200px;
+  overflow: auto;
+}
+
+.context-field__options button {
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.7rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.context-field__options button:hover,
+.context-field__options button:focus-visible {
+  background: var(--accent-soft);
+}
+
+.context-field__empty {
+  padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
 .context-pill {
   padding: 0.5rem 0.9rem;
   border-radius: 999px;

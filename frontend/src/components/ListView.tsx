@@ -35,6 +35,9 @@ type ListViewProps = {
   viewKey: string;
   formViewKey: string;
   onOpenForm: (id: string | "new") => void;
+  contextWorldId?: string;
+  contextCampaignId?: string;
+  contextCharacterId?: string;
 };
 
 const fieldSorter = (a: ViewField, b: ViewField) => a.listOrder - b.listOrder;
@@ -69,7 +72,15 @@ const getStatusTone = (value: string) => {
   return "neutral";
 };
 
-export default function ListView({ token, viewKey, formViewKey, onOpenForm }: ListViewProps) {
+export default function ListView({
+  token,
+  viewKey,
+  formViewKey,
+  onOpenForm,
+  contextWorldId,
+  contextCampaignId,
+  contextCharacterId
+}: ListViewProps) {
   const [view, setView] = useState<SystemView | null>(null);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
@@ -127,7 +138,26 @@ export default function ListView({ token, viewKey, formViewKey, onOpenForm }: Li
         });
         setChoiceMaps(newChoiceMaps);
 
-        const dataResponse = await fetch(viewData.endpoint, {
+        const params = new URLSearchParams();
+        if (viewData.entityKey === "worlds" && contextWorldId) {
+          params.set("worldId", contextWorldId);
+        }
+        if (viewData.entityKey === "campaigns") {
+          if (contextWorldId) params.set("worldId", contextWorldId);
+          if (contextCampaignId) params.set("campaignId", contextCampaignId);
+          if (contextCharacterId) params.set("characterId", contextCharacterId);
+        }
+        if (viewData.entityKey === "characters") {
+          if (contextWorldId) params.set("worldId", contextWorldId);
+          if (contextCampaignId) params.set("campaignId", contextCampaignId);
+          if (contextCharacterId) params.set("characterId", contextCharacterId);
+        }
+
+        const dataUrl = params.toString()
+          ? `${viewData.endpoint}?${params.toString()}`
+          : viewData.endpoint;
+
+        const dataResponse = await fetch(dataUrl, {
           headers: { Authorization: `Bearer ${token}` }
         });
 
@@ -152,7 +182,7 @@ export default function ListView({ token, viewKey, formViewKey, onOpenForm }: Li
     return () => {
       ignore = true;
     };
-  }, [token, viewKey]);
+  }, [token, viewKey, contextWorldId, contextCampaignId, contextCharacterId]);
 
   useEffect(() => {
     let ignore = false;

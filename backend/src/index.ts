@@ -783,17 +783,122 @@ app.get("/api/references", requireAuth, async (req, res) => {
   const query = typeof req.query.query === "string" ? req.query.query : undefined;
   const idsParam = typeof req.query.ids === "string" ? req.query.ids : undefined;
   const scope = typeof req.query.scope === "string" ? req.query.scope : undefined;
+  const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+  const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+  const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
 
   if (!entityKey) {
     res.status(400).json({ error: "entityKey is required." });
     return;
   }
 
+  const user = (req as AuthRequest).user;
   const ids = idsParam ? idsParam.split(",").map((id) => id.trim()).filter(Boolean) : undefined;
+  const queryValue = query?.trim();
+
+  if (entityKey === "campaigns") {
+    const labelField = await getLabelFieldForEntity(entityKey);
+    const baseClause: Prisma.CampaignWhereInput = ids
+      ? { id: { in: ids } }
+      : queryValue
+        ? { name: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
+        : {};
+
+    const filters: Prisma.CampaignWhereInput[] = [baseClause];
+    if (worldId) filters.push({ worldId });
+    if (characterId) {
+      filters.push({ roster: { some: { characterId } } });
+    }
+
+    if (user && !isAdmin(user)) {
+      filters.push({
+        OR: [
+          { gmUserId: user.id },
+          { createdById: user.id },
+          { world: { primaryArchitectId: user.id } },
+          { world: { architects: { some: { userId: user.id } } } }
+        ]
+      });
+    }
+
+    const whereClause: Prisma.CampaignWhereInput =
+      filters.length > 1 ? { AND: filters } : baseClause;
+
+    const select: Record<string, boolean> = { id: true };
+    select[labelField] = true;
+
+    const campaigns = await prisma.campaign.findMany({
+      where: whereClause,
+      select: select as Record<string, true>,
+      orderBy: { name: "asc" },
+      take: 25
+    });
+
+    const results = campaigns.map((campaign) => {
+      const labelValue = (campaign as Record<string, unknown>)[labelField];
+      return {
+        id: campaign.id,
+        label: labelValue ? String(labelValue) : campaign.id
+      };
+    });
+
+    res.json(results);
+    return;
+  }
+
+  if (entityKey === "characters") {
+    const labelField = await getLabelFieldForEntity(entityKey);
+    const baseClause: Prisma.CharacterWhereInput = ids
+      ? { id: { in: ids } }
+      : queryValue
+        ? { name: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
+        : {};
+
+    const filters: Prisma.CharacterWhereInput[] = [baseClause];
+    if (worldId) filters.push({ worldId });
+    if (campaignId) {
+      filters.push({ campaigns: { some: { campaignId } } });
+    }
+
+    if (user && !isAdmin(user)) {
+      filters.push({
+        OR: [
+          { playerId: user.id },
+          { world: { primaryArchitectId: user.id } },
+          { world: { architects: { some: { userId: user.id } } } },
+          { campaigns: { some: { campaign: { gmUserId: user.id } } } }
+        ]
+      });
+    }
+
+    const whereClause: Prisma.CharacterWhereInput =
+      filters.length > 1 ? { AND: filters } : baseClause;
+
+    const select: Record<string, boolean> = { id: true };
+    select[labelField] = true;
+
+    const characters = await prisma.character.findMany({
+      where: whereClause,
+      select: select as Record<string, true>,
+      orderBy: { name: "asc" },
+      take: 25
+    });
+
+    const results = characters.map((character) => {
+      const labelValue = (character as Record<string, unknown>)[labelField];
+      return {
+        id: character.id,
+        label: labelValue ? String(labelValue) : character.id
+      };
+    });
+
+    res.json(results);
+    return;
+  }
+
   let results = await getReferenceResults(entityKey, query, ids);
 
   if (entityKey === "worlds") {
-    const user = (req as AuthRequest).user;
     if (user && !isAdmin(user) && !ids) {
       let whereClause = {
         OR: [
@@ -830,6 +935,9 @@ app.get("/api/references", requireAuth, async (req, res) => {
       });
       const allowedIds = new Set(allowedWorlds.map((world) => world.id));
       results = results.filter((item) => allowedIds.has(item.id));
+    }
+    if (worldId) {
+      results = results.filter((item) => item.id === worldId);
     }
   }
   res.json(results);
@@ -1620,7 +1728,8 @@ app.get("/api/worlds", requireAuth, async (req, res) => {
     return;
   }
 
-  const whereClause = isAdmin(user)
+  const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+  const accessClause: Prisma.WorldWhereInput = isAdmin(user)
     ? {}
     : {
         OR: [
@@ -1630,6 +1739,10 @@ app.get("/api/worlds", requireAuth, async (req, res) => {
           { characterCreators: { some: { userId: user.id } } }
         ]
       };
+
+  const whereClause: Prisma.WorldWhereInput = worldId
+    ? { AND: [accessClause, { id: worldId }] }
+    : accessClause;
 
   const worlds = await prisma.world.findMany({
     where: whereClause,
@@ -1977,24 +2090,27 @@ app.get("/api/campaigns", requireAuth, async (req, res) => {
   }
 
   const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+  const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+  const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
 
-  const whereClause = isAdmin(user)
-    ? worldId
-      ? { worldId }
-      : {}
+  const accessClause: Prisma.CampaignWhereInput = isAdmin(user)
+    ? {}
     : {
-        AND: [
-          worldId ? { worldId } : {},
-          {
-            OR: [
-              { gmUserId: user.id },
-              { createdById: user.id },
-              { world: { primaryArchitectId: user.id } },
-              { world: { architects: { some: { userId: user.id } } } }
-            ]
-          }
+        OR: [
+          { gmUserId: user.id },
+          { createdById: user.id },
+          { world: { primaryArchitectId: user.id } },
+          { world: { architects: { some: { userId: user.id } } } }
         ]
       };
+
+  const filters: Prisma.CampaignWhereInput[] = [accessClause];
+  if (worldId) filters.push({ worldId });
+  if (campaignId) filters.push({ id: campaignId });
+  if (characterId) filters.push({ roster: { some: { characterId } } });
+
+  const whereClause: Prisma.CampaignWhereInput =
+    filters.length > 1 ? { AND: filters } : accessClause;
 
   const campaigns = await prisma.campaign.findMany({
     where: whereClause,
@@ -2263,23 +2379,27 @@ app.get("/api/characters", requireAuth, async (req, res) => {
   }
 
   const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+  const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+  const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
 
-  const whereClause = isAdmin(user)
-    ? worldId
-      ? { worldId }
-      : {}
+  const accessClause: Prisma.CharacterWhereInput = isAdmin(user)
+    ? {}
     : {
-        AND: [
-          worldId ? { worldId } : {},
-          {
-            OR: [
-              { playerId: user.id },
-              { world: { primaryArchitectId: user.id } },
-              { world: { architects: { some: { userId: user.id } } } }
-            ]
-          }
+        OR: [
+          { playerId: user.id },
+          { world: { primaryArchitectId: user.id } },
+          { world: { architects: { some: { userId: user.id } } } },
+          { campaigns: { some: { campaign: { gmUserId: user.id } } } }
         ]
       };
+
+  const filters: Prisma.CharacterWhereInput[] = [accessClause];
+  if (worldId) filters.push({ worldId });
+  if (campaignId) filters.push({ campaigns: { some: { campaignId } } });
+  if (characterId) filters.push({ id: characterId });
+
+  const whereClause: Prisma.CharacterWhereInput =
+    filters.length > 1 ? { AND: filters } : accessClause;
 
   const characters = await prisma.character.findMany({
     where: whereClause,
@@ -2371,7 +2491,10 @@ app.get("/api/characters/:id", requireAuth, async (req, res) => {
   const { id } = req.params;
   const character = await prisma.character.findUnique({
     where: { id },
-    include: { world: { include: { architects: true } } }
+    include: {
+      world: { include: { architects: true } },
+      campaigns: { include: { campaign: { select: { gmUserId: true } } } }
+    }
   });
 
   if (!character) {
@@ -2383,14 +2506,19 @@ app.get("/api/characters/:id", requireAuth, async (req, res) => {
     isAdmin(user) ||
     character.playerId === user.id ||
     character.world.primaryArchitectId === user.id ||
-    character.world.architects.some((architect) => architect.userId === user.id);
+    character.world.architects.some((architect) => architect.userId === user.id) ||
+    character.campaigns.some((entry) => entry.campaign.gmUserId === user.id);
 
   if (!canAccess) {
     res.status(403).json({ error: "Forbidden." });
     return;
   }
 
-  res.json(character);
+  const { campaigns, ...characterData } = character;
+  res.json({
+    ...characterData,
+    campaignIds: campaigns.map((campaign) => campaign.campaignId)
+  });
 });
 
 app.put("/api/characters/:id", requireAuth, async (req, res) => {

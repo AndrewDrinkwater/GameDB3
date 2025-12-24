@@ -72,6 +72,21 @@ beforeAll(async () => {
     }
   });
   context.characterId = character.id;
+
+  await prisma.characterCampaign.upsert({
+    where: {
+      characterId_campaignId: {
+        characterId: character.id,
+        campaignId: campaign.id
+      }
+    },
+    update: {},
+    create: {
+      characterId: character.id,
+      campaignId: campaign.id,
+      status: "ACTIVE"
+    }
+  });
 });
 
 afterAll(async () => {
@@ -162,5 +177,46 @@ describe("Related lists", () => {
     expect(response.status).toBe(200);
     const ids = response.body.items.map((item: { relatedId: string }) => item.relatedId);
     expect(ids).toContain(context.adminId);
+  });
+});
+
+describe("Context filters", () => {
+  it("returns campaignIds on character detail", async () => {
+    const response = await request(app)
+      .get(`/api/characters/${context.characterId}`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.campaignIds).toContain(context.campaignId);
+  });
+
+  it("filters characters by campaign", async () => {
+    const response = await request(app)
+      .get(`/api/characters?campaignId=${context.campaignId}`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(response.status).toBe(200);
+    const ids = response.body.map((item: { id: string }) => item.id);
+    expect(ids).toContain(context.characterId);
+  });
+
+  it("filters campaigns by character", async () => {
+    const response = await request(app)
+      .get(`/api/campaigns?characterId=${context.characterId}`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(response.status).toBe(200);
+    const ids = response.body.map((item: { id: string }) => item.id);
+    expect(ids).toContain(context.campaignId);
+  });
+
+  it("filters character references by campaign", async () => {
+    const response = await request(app)
+      .get(`/api/references?entityKey=characters&campaignId=${context.campaignId}`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(response.status).toBe(200);
+    const ids = response.body.map((item: { id: string }) => item.id);
+    expect(ids).toContain(context.characterId);
   });
 });

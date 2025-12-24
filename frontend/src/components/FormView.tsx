@@ -41,6 +41,8 @@ type FormViewProps = {
   currentUserId?: string;
   currentUserLabel?: string;
   currentUserRole?: string;
+  initialValues?: Record<string, unknown>;
+  initialLabels?: Record<string, string>;
 };
 
 const fieldSorter = (a: ViewField, b: ViewField) => a.formOrder - b.formOrder;
@@ -60,7 +62,9 @@ export default function FormView({
   onBack,
   currentUserId,
   currentUserLabel,
-  currentUserRole
+  currentUserRole,
+  initialValues,
+  initialLabels
 }: FormViewProps) {
   const [view, setView] = useState<SystemView | null>(null);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
@@ -139,7 +143,10 @@ export default function FormView({
             setFormData(record);
           }
         } else {
-          setFormData({});
+          setFormData(initialValues ?? {});
+          if (initialLabels) {
+            setReferenceLabels((current) => ({ ...current, ...initialLabels }));
+          }
         }
       } catch (err) {
         if (!ignore) {
@@ -155,7 +162,15 @@ export default function FormView({
     return () => {
       ignore = true;
     };
-  }, [token, viewKey, recordId, isNew]);
+  }, [token, viewKey, recordId, isNew, initialValues, initialLabels]);
+
+  useEffect(() => {
+    if (!isNew || !initialValues) return;
+    setFormData((current) => ({ ...initialValues, ...current }));
+    if (initialLabels) {
+      setReferenceLabels((current) => ({ ...current, ...initialLabels }));
+    }
+  }, [isNew, initialValues, initialLabels]);
 
   useEffect(() => {
     if (!view || !isNew) return;
