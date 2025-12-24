@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { dispatchUnauthorized } from "./utils/auth";
 import ListView from "./components/ListView";
 import FormView from "./components/FormView";
 import ContextBar, { ContextSelection } from "./components/ContextBar";
@@ -35,7 +36,15 @@ type ContextDefaults = {
 const viewRegistry: Record<string, ViewConfig> = {
   worlds: { listKey: "worlds.list", formKey: "worlds.form", label: "Worlds" },
   campaigns: { listKey: "campaigns.list", formKey: "campaigns.form", label: "Campaigns" },
-  characters: { listKey: "characters.list", formKey: "characters.form", label: "Characters" }
+  characters: { listKey: "characters.list", formKey: "characters.form", label: "Characters" },
+  entity_types: { listKey: "entity_types.list", formKey: "entity_types.form", label: "Entity Types" },
+  entity_fields: { listKey: "entity_fields.list", formKey: "entity_fields.form", label: "Entity Fields" },
+  entity_field_choices: {
+    listKey: "entity_field_choices.list",
+    formKey: "entity_field_choices.form",
+    label: "Entity Field Choices"
+  },
+  entities: { listKey: "entities.list", formKey: "entities.form", label: "Entities" }
 };
 
 const adminViewRegistry: Record<string, ViewConfig> = {
@@ -94,8 +103,19 @@ function App() {
   const [contextSummary, setContextSummary] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
+  const [worldAdminExpanded, setWorldAdminExpanded] = useState(true);
+  const [worldAdminAllowed, setWorldAdminAllowed] = useState(false);
 
   const contextStorageKey = "ttrpg.context";
+  const contextPanelRef = useRef<HTMLDivElement | null>(null);
+
+  const handleUnauthorized = (response: Response) => {
+    if (response.status === 401) {
+      dispatchUnauthorized();
+      return true;
+    }
+    return false;
+  };
 
   const resolveSidebarMode = (pinned: boolean) => {
     if (!pinned) return "collapsed";
@@ -134,8 +154,22 @@ function App() {
       })
       .catch(() => {
         localStorage.removeItem(tokenStorageKey);
+        sessionStorage.removeItem(contextStorageKey);
         setToken(null);
+        setUser(null);
       });
+  }, []);
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      localStorage.removeItem(tokenStorageKey);
+      sessionStorage.removeItem(contextStorageKey);
+      setToken(null);
+      setUser(null);
+    };
+
+    window.addEventListener("ttrpg:unauthorized", handleUnauthorized);
+    return () => window.removeEventListener("ttrpg:unauthorized", handleUnauthorized);
   }, []);
 
   useEffect(() => {
@@ -182,6 +216,7 @@ function App() {
       const response = await fetch(`/api/context/summary?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      if (handleUnauthorized(response)) return;
       if (!response.ok) return;
       const data = (await response.json()) as {
         worldRole?: string | null;
@@ -211,8 +246,58 @@ function App() {
   }, [token, context]);
 
   useEffect(() => {
+    let ignore = false;
+    if (!user) return;
+
+    if (user.role === "ADMIN") {
+      setWorldAdminAllowed(true);
+      return;
+    }
+
+    if (!context.worldId) {
+      setWorldAdminAllowed(false);
+      return;
+    }
+
+    const loadWorldAdminAccess = async () => {
+      const response = await fetch(`/api/worlds/${context.worldId}/world-admin`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (handleUnauthorized(response)) return;
+      if (!response.ok) {
+        if (!ignore) setWorldAdminAllowed(false);
+        return;
+      }
+      const data = (await response.json()) as { allowed: boolean };
+      if (!ignore) setWorldAdminAllowed(data.allowed);
+    };
+
+    void loadWorldAdminAccess();
+
+    return () => {
+      ignore = true;
+    };
+  }, [user, token, context.worldId]);
+
+  useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (!contextOpen) return;
+    const handlePointer = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (contextPanelRef.current?.contains(target)) return;
+      setContextOpen(false);
+    };
+    window.addEventListener("mousedown", handlePointer);
+    window.addEventListener("touchstart", handlePointer);
+    return () => {
+      window.removeEventListener("mousedown", handlePointer);
+      window.removeEventListener("touchstart", handlePointer);
+    };
+  }, [contextOpen]);
 
   useEffect(() => {
     localStorage.setItem(sidebarStorageKey, sidebarMode);
@@ -230,6 +315,10 @@ function App() {
           headers: { Authorization: `Bearer ${tokenValue}` }
         })
       ]);
+
+      if (handleUnauthorized(userPrefsResponse) || handleUnauthorized(defaultsResponse)) {
+        return { enabled: false };
+      }
 
       if (!userPrefsResponse.ok || !defaultsResponse.ok) {
         return;
@@ -312,6 +401,8 @@ function App() {
       setToken(data.token);
       setEmail("");
       setPassword("");
+      sessionStorage.removeItem(contextStorageKey);
+      setContext({});
       const defaultsValue = await resolvePreferences(data.token);
       await resolveContextFromDefaults(data.token, defaultsValue);
     } catch (error) {
@@ -401,7 +492,17 @@ function App() {
     defaultsValue: ContextDefaults = contextDefaults
   ) => {
     const stored = sessionStorage.getItem(contextStorageKey);
-    if (stored) return;
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored) as ContextSelection;
+        if (parsed?.worldId || parsed?.campaignId || parsed?.characterId) {
+          return;
+        }
+      } catch {
+        // ignore invalid stored value
+      }
+      sessionStorage.removeItem(contextStorageKey);
+    }
     if (!defaultsValue.enabled) return;
 
     const applyContext = (next: ContextSelection) => {
@@ -413,6 +514,7 @@ function App() {
       const response = await fetch(`/api/characters/${defaultsValue.characterId}`, {
         headers: { Authorization: `Bearer ${tokenValue}` }
       });
+      if (handleUnauthorized(response)) return;
       if (response.ok) {
         const data = (await response.json()) as { worldId: string; campaignIds?: string[] };
         const campaignId =
@@ -432,6 +534,7 @@ function App() {
       const response = await fetch(`/api/campaigns/${defaultsValue.campaignId}`, {
         headers: { Authorization: `Bearer ${tokenValue}` }
       });
+      if (handleUnauthorized(response)) return;
       if (response.ok) {
         const data = (await response.json()) as { worldId: string };
         applyContext({
@@ -454,6 +557,7 @@ function App() {
     const response = await fetch(`/api/references?entityKey=${entityKey}&ids=${id}`, {
       headers: { Authorization: `Bearer ${tokenValue}` }
     });
+    if (handleUnauthorized(response)) return undefined;
     if (!response.ok) return undefined;
     const data = (await response.json()) as Array<{ id: string; label: string }>;
     return data[0]?.label;
@@ -675,6 +779,10 @@ function App() {
               ? context.worldId
                 ? { worldId: context.worldId }
                 : undefined
+              : routeParts[1] === "entities"
+                ? context.worldId
+                  ? { worldId: context.worldId }
+                  : undefined
               : undefined
           : undefined;
       const initialLabels =
@@ -683,19 +791,22 @@ function App() {
           : undefined;
       return (
         <section className="app__panel app__panel--wide">
-          <FormView
-            token={token}
-            viewKey={config.formKey}
-            recordId={routeParts[2]}
-            onBack={() => {
-              window.location.hash = `/list/${routeParts[1]}`;
-            }}
-            currentUserId={user.id}
-            currentUserLabel={user.name ?? user.email}
-            currentUserRole={user.role}
-            initialValues={initialValues}
-            initialLabels={initialLabels}
-          />
+            <FormView
+              token={token}
+              viewKey={config.formKey}
+              recordId={routeParts[2]}
+              onBack={() => {
+                window.location.hash = `/list/${routeParts[1]}`;
+              }}
+              currentUserId={user.id}
+              currentUserLabel={user.name ?? user.email}
+              currentUserRole={user.role}
+              initialValues={initialValues}
+              initialLabels={initialLabels}
+              contextWorldId={context.worldId}
+              contextCampaignId={context.campaignId}
+              contextCharacterId={context.characterId}
+            />
         </section>
       );
     }
@@ -799,6 +910,7 @@ function App() {
             <div className="app__context">
               <div
                 className="context-panel"
+                ref={contextPanelRef}
                 onBlur={(event) => {
                   const nextTarget = event.relatedTarget as Node | null;
                   if (nextTarget && event.currentTarget.contains(nextTarget)) return;
@@ -922,6 +1034,60 @@ function App() {
                     >
                       Characters
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.location.hash = "/list/entities";
+                        handleSidebarSelect();
+                      }}
+                    >
+                      Entities
+                    </button>
+                    {worldAdminAllowed ? (
+                      <div className="sidebar__section">
+                        <button
+                          type="button"
+                          className="sidebar__section-toggle"
+                          onClick={() => setWorldAdminExpanded((current) => !current)}
+                        >
+                          <span className="sidebar__section-title">World Admin</span>
+                          <span className={`sidebar__chevron ${worldAdminExpanded ? "is-open" : ""}`}>
+                            ƒ-_
+                          </span>
+                        </button>
+                        {worldAdminExpanded ? (
+                          <div className="sidebar__section-body">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                window.location.hash = "/list/entity_types";
+                                handleSidebarSelect();
+                              }}
+                            >
+                              Entity Types
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                window.location.hash = "/list/entity_fields";
+                                handleSidebarSelect();
+                              }}
+                            >
+                              Entity Fields
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                window.location.hash = "/list/entity_field_choices";
+                                handleSidebarSelect();
+                              }}
+                            >
+                              Field Choices
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {user.role === "ADMIN" ? (
                       <div className="sidebar__section">
                         <button

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { dispatchUnauthorized } from "../utils/auth";
 
 export type ContextSelection = {
   worldId?: string;
@@ -40,6 +41,11 @@ const fetchOptions = async (
   const response = await fetch(`/api/references?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` }
   });
+
+  if (response.status === 401) {
+    dispatchUnauthorized();
+    return [];
+  }
 
   if (!response.ok) return [];
   const data = (await response.json()) as Array<{ id: string; label: string; ownerLabel?: string }>;
@@ -86,6 +92,11 @@ export default function ContextBar({ token, context, onChange, onReset }: Contex
       headers: { Authorization: `Bearer ${token}` }
     });
 
+    if (response.status === 401) {
+      dispatchUnauthorized();
+      return;
+    }
+
     if (!response.ok) return;
     const data = (await response.json()) as { worldId: string };
 
@@ -108,6 +119,11 @@ export default function ContextBar({ token, context, onChange, onReset }: Contex
     const response = await fetch(`/api/characters/${option.value}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
+
+    if (response.status === 401) {
+      dispatchUnauthorized();
+      return;
+    }
 
     if (!response.ok) return;
     const data = (await response.json()) as {

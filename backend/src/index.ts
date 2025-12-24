@@ -6,9 +6,15 @@ import { randomUUID } from "crypto";
 import {
   Prisma,
   PrismaClient,
+  EntityAccessScope,
+  EntityAccessType,
+  EntityFieldType,
+  EntityFormSectionLayout,
   PropertyValueType,
   RelatedListFieldSource,
   Role,
+  SystemFieldType,
+  WorldEntityPermissionScope,
   SystemViewType,
   User
 } from "@prisma/client";
@@ -123,6 +129,43 @@ const canCreateCharacterInWorld = async (userId: string, worldId: string) => {
   return Boolean(allowed);
 };
 
+const isWorldGm = async (userId: string, worldId: string) => {
+  const campaign = await prisma.campaign.findFirst({
+    where: { worldId, gmUserId: userId },
+    select: { id: true }
+  });
+  return Boolean(campaign);
+};
+
+const isWorldPlayer = async (userId: string, worldId: string) => {
+  const character = await prisma.character.findFirst({
+    where: { worldId, playerId: userId },
+    select: { id: true }
+  });
+  return Boolean(character);
+};
+
+const canCreateEntityInWorld = async (userId: string, worldId: string) => {
+  const world = await prisma.world.findUnique({
+    where: { id: worldId },
+    select: { entityPermissionScope: true }
+  });
+
+  if (!world) return false;
+  if (await isWorldArchitect(userId, worldId)) return true;
+
+  if (world.entityPermissionScope === WorldEntityPermissionScope.ARCHITECT_GM) {
+    return isWorldGm(userId, worldId);
+  }
+
+  if (world.entityPermissionScope === WorldEntityPermissionScope.ARCHITECT_GM_PLAYER) {
+    if (await isWorldGm(userId, worldId)) return true;
+    return isWorldPlayer(userId, worldId);
+  }
+
+  return false;
+};
+
 const canManageCampaign = async (userId: string, campaignId: string) => {
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
@@ -182,12 +225,409 @@ const canCreateCharacterInCampaign = async (userId: string, campaignId: string) 
   return Boolean(allowed);
 };
 
+type ViewFieldSeed = {
+  fieldKey: string;
+  label: string;
+  fieldType: SystemFieldType;
+  listOrder: number;
+  formOrder: number;
+  required?: boolean;
+  optionsListKey?: string;
+  referenceEntityKey?: string;
+  referenceScope?: string;
+  allowMultiple?: boolean;
+  readOnly?: boolean;
+  listVisible?: boolean;
+  formVisible?: boolean;
+};
+
+type ViewSeed = {
+  key: string;
+  title: string;
+  entityKey: string;
+  viewType: SystemViewType;
+  endpoint: string;
+  adminOnly: boolean;
+  fields: ViewFieldSeed[];
+};
+
+const entityViewSeeds: Record<string, ViewSeed> = {
+  "entity_types.list": {
+    key: "entity_types.list",
+    title: "Entity Types",
+    entityKey: "entity_types",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/entity-types",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
+      {
+        fieldKey: "worldId",
+        label: "World",
+        fieldType: SystemFieldType.REFERENCE,
+        listOrder: 2,
+        formOrder: 2,
+        referenceEntityKey: "worlds"
+      },
+      { fieldKey: "isTemplate", label: "Template", fieldType: SystemFieldType.BOOLEAN, listOrder: 3, formOrder: 3 }
+    ]
+  },
+  "entity_types.form": {
+    key: "entity_types.form",
+    title: "Entity Type",
+    entityKey: "entity_types",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/entity-types",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
+      {
+        fieldKey: "worldId",
+        label: "World",
+        fieldType: SystemFieldType.REFERENCE,
+        listOrder: 2,
+        formOrder: 2,
+        referenceEntityKey: "worlds"
+      },
+      { fieldKey: "isTemplate", label: "Template", fieldType: SystemFieldType.BOOLEAN, listOrder: 3, formOrder: 3 },
+      {
+        fieldKey: "sourceTypeId",
+        label: "Copy From",
+        fieldType: SystemFieldType.REFERENCE,
+        listOrder: 4,
+        formOrder: 4,
+        referenceEntityKey: "entity_types",
+        referenceScope: "entity_type_source"
+      },
+      { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 5, formOrder: 5 }
+    ]
+  },
+  "entity_fields.list": {
+    key: "entity_fields.list",
+    title: "Entity Fields",
+    entityKey: "entity_fields",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/entity-fields",
+    adminOnly: false,
+    fields: [
+      {
+        fieldKey: "entityTypeId",
+        label: "Entity Type",
+        fieldType: SystemFieldType.REFERENCE,
+        listOrder: 1,
+        formOrder: 1,
+        referenceEntityKey: "entity_types",
+        referenceScope: "entity_type"
+      },
+      { fieldKey: "fieldKey", label: "Field Key", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2 },
+      { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
+      { fieldKey: "fieldType", label: "Type", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 4, optionsListKey: "entity_field_type" },
+      { fieldKey: "required", label: "Required", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 }
+    ]
+  },
+  "entity_fields.form": {
+    key: "entity_fields.form",
+    title: "Entity Field",
+    entityKey: "entity_fields",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/entity-fields",
+    adminOnly: false,
+    fields: [
+      {
+        fieldKey: "entityTypeId",
+        label: "Entity Type",
+        fieldType: SystemFieldType.REFERENCE,
+        listOrder: 1,
+        formOrder: 1,
+        required: true,
+        referenceEntityKey: "entity_types",
+        referenceScope: "entity_type"
+      },
+      { fieldKey: "fieldKey", label: "Field Key", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2, required: true },
+      { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true },
+      {
+        fieldKey: "fieldType",
+        label: "Field Type",
+        fieldType: SystemFieldType.SELECT,
+        listOrder: 4,
+        formOrder: 4,
+        required: true,
+        optionsListKey: "entity_field_type"
+      },
+      { fieldKey: "required", label: "Required", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 },
+      {
+        fieldKey: "referenceEntityTypeId",
+        label: "Reference Entity Type",
+        fieldType: SystemFieldType.REFERENCE,
+        listOrder: 6,
+        formOrder: 6,
+        referenceEntityKey: "entity_types"
+      },
+      {
+        fieldKey: "referenceLocationTypeKey",
+        label: "Reference Location Type",
+        fieldType: SystemFieldType.TEXT,
+        listOrder: 7,
+        formOrder: 7
+      },
+      { fieldKey: "conditions", label: "Visibility Conditions", fieldType: SystemFieldType.TEXTAREA, listOrder: 8, formOrder: 8 }
+    ]
+  },
+  "entity_field_choices.list": {
+    key: "entity_field_choices.list",
+    title: "Entity Field Choices",
+    entityKey: "entity_field_choices",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/entity-field-choices",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "entityFieldId", label: "Field", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "entity_fields" },
+      { fieldKey: "value", label: "Value", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2 },
+      { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
+      { fieldKey: "sortOrder", label: "Sort", fieldType: SystemFieldType.NUMBER, listOrder: 4, formOrder: 4 }
+    ]
+  },
+  "entity_field_choices.form": {
+    key: "entity_field_choices.form",
+    title: "Entity Field Choice",
+    entityKey: "entity_field_choices",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/entity-field-choices",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "entityFieldId", label: "Field", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "entity_fields" },
+      { fieldKey: "value", label: "Value", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2, required: true },
+      { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true },
+      { fieldKey: "sortOrder", label: "Sort", fieldType: SystemFieldType.NUMBER, listOrder: 4, formOrder: 4 }
+    ]
+  },
+  "entities.list": {
+    key: "entities.list",
+    title: "Entities",
+    entityKey: "entities",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/entities",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
+      { fieldKey: "entityTypeId", label: "Type", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "entity_types" },
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, referenceEntityKey: "worlds" }
+    ]
+  },
+  "entities.form": {
+    key: "entities.form",
+    title: "Entity",
+    entityKey: "entities",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/entities",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, required: true, referenceEntityKey: "worlds" },
+      { fieldKey: "entityTypeId", label: "Type", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, required: true, referenceEntityKey: "entity_types", referenceScope: "entity_type" },
+      { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 4, formOrder: 4 }
+    ]
+  }
+};
+
+const ensureSeededView = async (key: string) => {
+  const seed = entityViewSeeds[key];
+  if (!seed) return null;
+
+  const savedView = await prisma.systemView.upsert({
+    where: { key: seed.key },
+    update: {
+      title: seed.title,
+      entityKey: seed.entityKey,
+      viewType: seed.viewType,
+      endpoint: seed.endpoint,
+      adminOnly: seed.adminOnly
+    },
+    create: {
+      key: seed.key,
+      title: seed.title,
+      entityKey: seed.entityKey,
+      viewType: seed.viewType,
+      endpoint: seed.endpoint,
+      adminOnly: seed.adminOnly
+    }
+  });
+
+  for (const field of seed.fields) {
+    await prisma.systemViewField.upsert({
+      where: { viewId_fieldKey: { viewId: savedView.id, fieldKey: field.fieldKey } },
+      update: {
+        label: field.label,
+        fieldType: field.fieldType,
+        listOrder: field.listOrder,
+        formOrder: field.formOrder,
+        required: field.required ?? false,
+        optionsListKey: field.optionsListKey,
+        referenceEntityKey: field.referenceEntityKey ?? null,
+        referenceScope: field.referenceScope ?? null,
+        allowMultiple: field.allowMultiple ?? false,
+        readOnly: field.readOnly ?? false,
+        listVisible: field.listVisible ?? true,
+        formVisible: field.formVisible ?? true
+      },
+      create: {
+        viewId: savedView.id,
+        fieldKey: field.fieldKey,
+        label: field.label,
+        fieldType: field.fieldType,
+        listOrder: field.listOrder,
+        formOrder: field.formOrder,
+        required: field.required ?? false,
+        optionsListKey: field.optionsListKey,
+        referenceEntityKey: field.referenceEntityKey ?? null,
+        referenceScope: field.referenceScope ?? null,
+        allowMultiple: field.allowMultiple ?? false,
+        readOnly: field.readOnly ?? false,
+        listVisible: field.listVisible ?? true,
+        formVisible: field.formVisible ?? true
+      }
+    });
+  }
+
+  return prisma.systemView.findUnique({
+    where: { key: seed.key },
+    include: { fields: true }
+  });
+};
+
+const canAccessEntityType = async (userId: string, entityTypeId: string) => {
+  const entityType = await prisma.entityType.findUnique({
+    where: { id: entityTypeId },
+    select: { worldId: true, isTemplate: true }
+  });
+  if (!entityType) return false;
+  if (entityType.isTemplate) return true;
+  if (!entityType.worldId) return false;
+  return isWorldArchitect(userId, entityType.worldId);
+};
+
+const canManageEntityType = async (userId: string, entityTypeId: string) => {
+  const entityType = await prisma.entityType.findUnique({
+    where: { id: entityTypeId },
+    select: { worldId: true, isTemplate: true }
+  });
+  if (!entityType) return false;
+  if (entityType.isTemplate) return false;
+  if (!entityType.worldId) return false;
+  return isWorldArchitect(userId, entityType.worldId);
+};
+
+const buildEntityAccessFilter = async (
+  user: User,
+  worldId: string,
+  campaignId?: string,
+  characterId?: string
+): Promise<Prisma.EntityWhereInput> => {
+  if (await isWorldArchitect(user.id, worldId)) {
+    return { worldId };
+  }
+
+  const accessFilters: Prisma.EntityWhereInput[] = [
+    { access: { some: { accessType: EntityAccessType.READ, scopeType: EntityAccessScope.GLOBAL } } }
+  ];
+
+  if (campaignId) {
+    accessFilters.push({
+      access: {
+        some: {
+          accessType: EntityAccessType.READ,
+          scopeType: EntityAccessScope.CAMPAIGN,
+          scopeId: campaignId
+        }
+      }
+    });
+  }
+
+  if (characterId) {
+    accessFilters.push({
+      access: {
+        some: {
+          accessType: EntityAccessType.READ,
+          scopeType: EntityAccessScope.CHARACTER,
+          scopeId: characterId
+        }
+      }
+    });
+  }
+
+  return { worldId, OR: accessFilters };
+};
+
+const canWriteEntity = async (
+  user: User,
+  entityId: string,
+  campaignId?: string,
+  characterId?: string
+) => {
+  const entity = await prisma.entity.findUnique({
+    where: { id: entityId },
+    select: { worldId: true }
+  });
+  if (!entity) return false;
+  if (await isWorldArchitect(user.id, entity.worldId)) return true;
+
+  const accessFilters: Prisma.EntityAccessWhereInput[] = [
+    {
+      entityId,
+      accessType: EntityAccessType.WRITE,
+      scopeType: EntityAccessScope.GLOBAL
+    }
+  ];
+
+  if (campaignId) {
+    accessFilters.push({
+      entityId,
+      accessType: EntityAccessType.WRITE,
+      scopeType: EntityAccessScope.CAMPAIGN,
+      scopeId: campaignId
+    });
+  }
+
+  if (characterId) {
+    accessFilters.push({
+      entityId,
+      accessType: EntityAccessType.WRITE,
+      scopeType: EntityAccessScope.CHARACTER,
+      scopeId: characterId
+    });
+  }
+
+  const access = await prisma.entityAccess.findFirst({
+    where: { OR: accessFilters }
+  });
+
+  return Boolean(access);
+};
+
 const getLabelFieldForEntity = async (entityKey: string) => {
+  const defaults: Record<string, string> = {
+    entity_fields: "label",
+    entity_field_choices: "label",
+    entity_types: "name",
+    entities: "name"
+  };
+  const allowed: Record<string, string[]> = {
+    entity_fields: ["label", "fieldKey"],
+    entity_field_choices: ["label", "value"],
+    entity_types: ["name"],
+    entities: ["name"]
+  };
+
   const entry = await prisma.systemDictionary.findFirst({
     where: { entityKey, isLabel: true },
     select: { fieldKey: true }
   });
-  return entry?.fieldKey ?? "name";
+  if (entry?.fieldKey && allowed[entityKey]) {
+    if (allowed[entityKey].includes(entry.fieldKey)) {
+      return entry.fieldKey;
+    }
+  }
+  return defaults[entityKey] ?? entry?.fieldKey ?? "name";
 };
 
 const getReferenceResults = async (entityKey: string, query?: string, ids?: string[]) => {
@@ -297,6 +737,84 @@ const getReferenceResults = async (entityKey: string, query?: string, ids?: stri
     });
   }
 
+  if (entityKey === "entity_types") {
+    const whereClause: Prisma.EntityTypeWhereInput = ids
+      ? { id: { in: ids } }
+      : queryValue
+        ? { name: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
+        : {};
+
+    const select: Record<string, boolean> = { id: true };
+    select[labelField] = true;
+
+    const types = await prisma.entityType.findMany({
+      where: whereClause,
+      select: select as { id: true },
+      orderBy: { name: "asc" },
+      take: 25
+    });
+
+    return types.map((entityType) => {
+      const labelValue = (entityType as Record<string, unknown>)[labelField];
+      return {
+        id: entityType.id,
+        label: labelValue ? String(labelValue) : entityType.id
+      };
+    });
+  }
+
+  if (entityKey === "entities") {
+    const whereClause: Prisma.EntityWhereInput = ids
+      ? { id: { in: ids } }
+      : queryValue
+        ? { name: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
+        : {};
+
+    const select: Record<string, boolean> = { id: true };
+    select[labelField] = true;
+
+    const entities = await prisma.entity.findMany({
+      where: whereClause,
+      select: select as { id: true },
+      orderBy: { name: "asc" },
+      take: 25
+    });
+
+    return entities.map((entity) => {
+      const labelValue = (entity as Record<string, unknown>)[labelField];
+      return {
+        id: entity.id,
+        label: labelValue ? String(labelValue) : entity.id
+      };
+    });
+  }
+
+  if (entityKey === "entity_fields") {
+    const whereClause: Prisma.EntityFieldWhereInput = ids
+      ? { id: { in: ids } }
+      : queryValue
+        ? { label: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
+        : {};
+
+    const select: Record<string, boolean> = { id: true };
+    select[labelField] = true;
+
+    const fields = await prisma.entityField.findMany({
+      where: whereClause,
+      select: select as { id: true },
+      orderBy: { label: "asc" },
+      take: 25
+    });
+
+    return fields.map((field) => {
+      const labelValue = (field as Record<string, unknown>)[labelField];
+      return {
+        id: field.id,
+        label: labelValue ? String(labelValue) : field.id
+      };
+    });
+  }
+
   return [];
 };
 
@@ -384,10 +902,50 @@ app.get("/api/choices", requireAuth, async (req, res) => {
     return;
   }
 
-  const choices = await prisma.systemChoice.findMany({
+  let choices = await prisma.systemChoice.findMany({
     where: { listKey, isActive: true },
     orderBy: { sortOrder: "asc" }
   });
+
+  if (choices.length === 0) {
+    const defaults: Record<
+      string,
+      Array<{ value: string; label: string; sortOrder: number }>
+    > = {
+      entity_field_type: [
+        { value: "TEXT", label: "Single line text", sortOrder: 1 },
+        { value: "TEXTAREA", label: "Multi line text", sortOrder: 2 },
+        { value: "BOOLEAN", label: "Boolean", sortOrder: 3 },
+        { value: "CHOICE", label: "Choice", sortOrder: 4 },
+        { value: "ENTITY_REFERENCE", label: "Reference (Entity)", sortOrder: 5 },
+        { value: "LOCATION_REFERENCE", label: "Reference (Location)", sortOrder: 6 }
+      ],
+      world_entity_permission: [
+        { value: "ARCHITECT", label: "Architects only", sortOrder: 1 },
+        { value: "ARCHITECT_GM", label: "Architects and GMs", sortOrder: 2 },
+        { value: "ARCHITECT_GM_PLAYER", label: "Architects, GMs, and Players", sortOrder: 3 }
+      ]
+    };
+
+    const seed = defaults[listKey];
+    if (seed) {
+      await prisma.systemChoice.createMany({
+        data: seed.map((entry) => ({
+          listKey,
+          value: entry.value,
+          label: entry.label,
+          sortOrder: entry.sortOrder,
+          isActive: true
+        })),
+        skipDuplicates: true
+      });
+      choices = await prisma.systemChoice.findMany({
+        where: { listKey, isActive: true },
+        orderBy: { sortOrder: "asc" }
+      });
+    }
+  }
+
   res.json(choices);
 });
 
@@ -420,7 +978,16 @@ app.get("/api/views/:key", requireAuth, async (req, res) => {
   });
 
   if (!view) {
-    res.status(404).json({ error: "View not found." });
+    const seeded = await ensureSeededView(req.params.key);
+    if (!seeded) {
+      res.status(404).json({ error: "View not found." });
+      return;
+    }
+    if (seeded.adminOnly && !isAdmin(user)) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+    res.json(seeded);
     return;
   }
 
@@ -786,6 +1353,7 @@ app.get("/api/references", requireAuth, async (req, res) => {
   const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
   const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
   const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+  const entityTypeId = typeof req.query.entityTypeId === "string" ? req.query.entityTypeId : undefined;
 
   if (!entityKey) {
     res.status(400).json({ error: "entityKey is required." });
@@ -903,6 +1471,177 @@ app.get("/api/references", requireAuth, async (req, res) => {
         id: character.id,
         label: labelValue ? String(labelValue) : character.id,
         ownerLabel
+      };
+    });
+
+    res.json(results);
+    return;
+  }
+
+  if (entityKey === "entity_fields") {
+    const labelField = await getLabelFieldForEntity(entityKey);
+    const baseClause: Prisma.EntityFieldWhereInput = ids
+      ? { id: { in: ids } }
+      : queryValue
+        ? { label: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
+        : {};
+
+    const filters: Prisma.EntityFieldWhereInput[] = [baseClause];
+    if (worldId) {
+      if (!isAdmin(user) && !(await isWorldArchitect(user.id, worldId))) {
+        res.status(403).json({ error: "Forbidden." });
+        return;
+      }
+      filters.push({ entityType: { worldId } });
+    } else if (!isAdmin(user) && !ids) {
+      res.json([]);
+      return;
+    }
+
+    const whereClause: Prisma.EntityFieldWhereInput =
+      filters.length > 1 ? { AND: filters } : baseClause;
+
+    const select: Record<string, boolean> = { id: true };
+    select[labelField] = true;
+
+    const fields = await prisma.entityField.findMany({
+      where: whereClause,
+      select: select as Record<string, true>,
+      orderBy: { label: "asc" },
+      take: 25
+    });
+
+    const results = fields.map((field) => {
+      const labelValue = (field as Record<string, unknown>)[labelField];
+      return {
+        id: field.id,
+        label: labelValue ? String(labelValue) : field.id
+      };
+    });
+
+    res.json(results);
+    return;
+  }
+
+  if (entityKey === "entity_types") {
+    const labelField = await getLabelFieldForEntity(entityKey);
+    const baseClause: Prisma.EntityTypeWhereInput = ids
+      ? { id: { in: ids } }
+      : queryValue
+        ? { name: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
+        : {};
+
+    const filters: Prisma.EntityTypeWhereInput[] = [baseClause];
+    if (scope === "entity_type") {
+      if (worldId) {
+        filters.push({ worldId });
+      } else if (!isAdmin(user)) {
+        res.json([]);
+        return;
+      }
+    }
+
+    if (scope === "entity_type_source") {
+      if (!isAdmin(user)) {
+        filters.push({ isTemplate: true });
+      }
+    }
+
+    if (!scope && !ids && !isAdmin(user)) {
+      filters.push({
+        OR: [
+          { isTemplate: true },
+          {
+            world: {
+              OR: [
+                { primaryArchitectId: user.id },
+                { architects: { some: { userId: user.id } } }
+              ]
+            }
+          }
+        ]
+      });
+    }
+
+    const whereClause: Prisma.EntityTypeWhereInput =
+      filters.length > 1 ? { AND: filters } : baseClause;
+
+    const select: Record<string, boolean> = { id: true };
+    select[labelField] = true;
+
+    const types = await prisma.entityType.findMany({
+      where: whereClause,
+      select: select as Record<string, true>,
+      orderBy: { name: "asc" },
+      take: 25
+    });
+
+    const results = types.map((entityType) => {
+      const labelValue = (entityType as Record<string, unknown>)[labelField];
+      return {
+        id: entityType.id,
+        label: labelValue ? String(labelValue) : entityType.id
+      };
+    });
+
+    res.json(results);
+    return;
+  }
+
+  if (entityKey === "entities") {
+    const labelField = await getLabelFieldForEntity(entityKey);
+    const baseClause: Prisma.EntityWhereInput = ids
+      ? { id: { in: ids } }
+      : queryValue
+        ? { name: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
+        : {};
+
+    const filters: Prisma.EntityWhereInput[] = [baseClause];
+    if (worldId) filters.push({ worldId });
+    if (entityTypeId) filters.push({ entityTypeId });
+
+    if (!isAdmin(user)) {
+      if (!worldId) {
+        res.json([]);
+        return;
+      }
+
+      const isArchitect = await isWorldArchitect(user.id, worldId);
+      if (!isArchitect) {
+        const accessFilters: Prisma.EntityWhereInput[] = [
+          { access: { some: { accessType: EntityAccessType.READ, scopeType: EntityAccessScope.GLOBAL } } }
+        ];
+        if (campaignId) {
+          accessFilters.push({
+            access: { some: { accessType: EntityAccessType.READ, scopeType: EntityAccessScope.CAMPAIGN, scopeId: campaignId } }
+          });
+        }
+        if (characterId) {
+          accessFilters.push({
+            access: { some: { accessType: EntityAccessType.READ, scopeType: EntityAccessScope.CHARACTER, scopeId: characterId } }
+          });
+        }
+
+        filters.push({ OR: accessFilters });
+      }
+    }
+
+    const whereClause: Prisma.EntityWhereInput = filters.length > 1 ? { AND: filters } : baseClause;
+    const select: Record<string, boolean> = { id: true };
+    select[labelField] = true;
+
+    const entities = await prisma.entity.findMany({
+      where: whereClause,
+      select: select as Record<string, true>,
+      orderBy: { name: "asc" },
+      take: 25
+    });
+
+    const results = entities.map((entity) => {
+      const labelValue = (entity as Record<string, unknown>)[labelField];
+      return {
+        id: entity.id,
+        label: labelValue ? String(labelValue) : entity.id
       };
     });
 
@@ -1838,7 +2577,15 @@ app.post("/api/worlds", requireAuth, async (req, res) => {
     return;
   }
 
-  const { name, description, dmLabelKey, themeKey, primaryArchitectId, characterCreatorIds } =
+  const {
+    name,
+    description,
+    dmLabelKey,
+    themeKey,
+    primaryArchitectId,
+    characterCreatorIds,
+    entityPermissionScope
+  } =
     req.body as {
     name?: string;
     description?: string;
@@ -1846,6 +2593,7 @@ app.post("/api/worlds", requireAuth, async (req, res) => {
     themeKey?: string;
     primaryArchitectId?: string;
     characterCreatorIds?: string[];
+    entityPermissionScope?: WorldEntityPermissionScope;
   };
 
   if (!name) {
@@ -1865,7 +2613,8 @@ app.post("/api/worlds", requireAuth, async (req, res) => {
       description,
       dmLabelKey,
       themeKey,
-      primaryArchitectId: architectId
+      primaryArchitectId: architectId,
+      entityPermissionScope
     }
   });
 
@@ -1924,6 +2673,18 @@ app.get("/api/worlds/:id", requireAuth, async (req, res) => {
   });
 });
 
+app.get("/api/worlds/:id/world-admin", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const allowed = isAdmin(user) || (await isWorldArchitect(user.id, id));
+  res.json({ allowed });
+});
+
 app.put("/api/worlds/:id", requireAuth, async (req, res) => {
   const user = (req as AuthRequest).user;
   if (!user) {
@@ -1939,7 +2700,15 @@ app.put("/api/worlds/:id", requireAuth, async (req, res) => {
     return;
   }
 
-  const { name, description, dmLabelKey, themeKey, primaryArchitectId, characterCreatorIds } =
+  const {
+    name,
+    description,
+    dmLabelKey,
+    themeKey,
+    primaryArchitectId,
+    characterCreatorIds,
+    entityPermissionScope
+  } =
     req.body as {
     name?: string;
     description?: string;
@@ -1947,6 +2716,7 @@ app.put("/api/worlds/:id", requireAuth, async (req, res) => {
     themeKey?: string;
     primaryArchitectId?: string;
     characterCreatorIds?: string[];
+    entityPermissionScope?: WorldEntityPermissionScope;
   };
 
   if (primaryArchitectId && !isAdmin(user)) {
@@ -1956,7 +2726,7 @@ app.put("/api/worlds/:id", requireAuth, async (req, res) => {
 
   const world = await prisma.world.update({
     where: { id },
-    data: { name, description, dmLabelKey, themeKey, primaryArchitectId }
+    data: { name, description, dmLabelKey, themeKey, primaryArchitectId, entityPermissionScope }
   });
 
   if (primaryArchitectId) {
@@ -2675,6 +3445,1444 @@ app.delete("/api/characters/:id", requireAuth, async (req, res) => {
   }
 
   await prisma.character.delete({ where: { id } });
+  res.json({ ok: true });
+});
+
+app.get("/api/entity-types", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+  const includeTemplates = req.query.includeTemplates === "true";
+  const templatesOnly = req.query.templates === "true";
+
+  if (!isAdmin(user) && worldId && !(await isWorldArchitect(user.id, worldId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  if (!isAdmin(user) && !worldId && !templatesOnly) {
+    res.json([]);
+    return;
+  }
+
+  const whereClause: Prisma.EntityTypeWhereInput = templatesOnly
+    ? { isTemplate: true }
+    : worldId
+      ? includeTemplates
+        ? { OR: [{ worldId }, { isTemplate: true }] }
+        : { worldId }
+      : isAdmin(user)
+        ? {}
+        : { isTemplate: true };
+
+  const entityTypes = await prisma.entityType.findMany({
+    where: whereClause,
+    orderBy: { name: "asc" }
+  });
+
+  res.json(entityTypes);
+});
+
+app.post("/api/entity-types", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { worldId, name, description, isTemplate, sourceTypeId } = req.body as {
+    worldId?: string;
+    name?: string;
+    description?: string;
+    isTemplate?: boolean;
+    sourceTypeId?: string;
+  };
+
+  if (!name) {
+    res.status(400).json({ error: "name is required." });
+    return;
+  }
+
+  if (isTemplate && !isAdmin(user)) {
+    res.status(403).json({ error: "Only admins can create templates." });
+    return;
+  }
+
+  if (!isTemplate && (!worldId || !(await isWorldArchitect(user.id, worldId))) && !isAdmin(user)) {
+    res.status(403).json({ error: "Only world architects can create entity types." });
+    return;
+  }
+
+  let sourceType: { id: string; isTemplate: boolean } | null = null;
+  if (sourceTypeId) {
+    sourceType = await prisma.entityType.findUnique({
+      where: { id: sourceTypeId },
+      select: { id: true, isTemplate: true }
+    });
+    if (!sourceType) {
+      res.status(404).json({ error: "Source entity type not found." });
+      return;
+    }
+    if (!isAdmin(user) && !sourceType.isTemplate) {
+      res.status(403).json({ error: "Only templates can be copied by non-admins." });
+      return;
+    }
+  }
+
+  const entityType = await prisma.entityType.create({
+    data: {
+      worldId: isTemplate ? null : worldId ?? null,
+      name,
+      description,
+      isTemplate: Boolean(isTemplate),
+      createdById: user.id
+    }
+  });
+
+  const sourceSections = sourceType
+    ? await prisma.entityFormSection.findMany({
+        where: { entityTypeId: sourceType.id },
+        orderBy: { sortOrder: "asc" }
+      })
+    : [];
+  const sectionMap = new Map<string, string>();
+  let defaultSectionId: string | null = null;
+
+  if (sourceSections.length > 0) {
+    for (const section of sourceSections) {
+      const created = await prisma.entityFormSection.create({
+        data: {
+          entityTypeId: entityType.id,
+          title: section.title,
+          layout: section.layout,
+          sortOrder: section.sortOrder
+        }
+      });
+      sectionMap.set(section.id, created.id);
+    }
+  } else {
+    const created = await prisma.entityFormSection.create({
+      data: {
+        entityTypeId: entityType.id,
+        title: "General",
+        layout: EntityFormSectionLayout.ONE_COLUMN,
+        sortOrder: 1
+      }
+    });
+    defaultSectionId = created.id;
+  }
+
+  if (sourceType) {
+    const sourceFields = await prisma.entityField.findMany({
+      where: { entityTypeId: sourceType.id },
+      include: { choices: true }
+    });
+
+    for (const field of sourceFields) {
+      const mappedSectionId =
+        (field.formSectionId ? sectionMap.get(field.formSectionId) : undefined) ??
+        defaultSectionId ??
+        null;
+      const createdField = await prisma.entityField.create({
+        data: {
+          entityTypeId: entityType.id,
+          fieldKey: field.fieldKey,
+          label: field.label,
+          fieldType: field.fieldType,
+          description: field.description,
+          required: field.required,
+          listOrder: field.listOrder,
+          formOrder: field.formOrder,
+          formSectionId: mappedSectionId,
+          formColumn: field.formColumn ?? 1,
+          referenceEntityTypeId: field.referenceEntityTypeId,
+          referenceLocationTypeKey: field.referenceLocationTypeKey,
+          conditions: field.conditions ?? undefined
+        }
+      });
+
+      if (field.choices.length > 0) {
+        await prisma.entityFieldChoice.createMany({
+          data: field.choices.map((choice) => ({
+            entityFieldId: createdField.id,
+            value: choice.value,
+            label: choice.label,
+            sortOrder: choice.sortOrder ?? undefined
+          }))
+        });
+      }
+    }
+  }
+
+  res.status(201).json(entityType);
+});
+
+app.get("/api/entity-types/:id", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const entityType = await prisma.entityType.findUnique({
+    where: { id }
+  });
+  if (!entityType) {
+    res.status(404).json({ error: "Entity type not found." });
+    return;
+  }
+
+  if (!entityType.isTemplate && !isAdmin(user) && !(await canAccessEntityType(user.id, id))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  res.json(entityType);
+});
+
+app.put("/api/entity-types/:id", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const entityType = await prisma.entityType.findUnique({
+    where: { id },
+    select: { isTemplate: true, worldId: true }
+  });
+  if (!entityType) {
+    res.status(404).json({ error: "Entity type not found." });
+    return;
+  }
+
+  if (entityType.isTemplate && !isAdmin(user)) {
+    res.status(403).json({ error: "Only admins can edit templates." });
+    return;
+  }
+
+  if (!entityType.isTemplate && !isAdmin(user) && !(await isWorldArchitect(user.id, entityType.worldId ?? ""))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const { name, description } = req.body as { name?: string; description?: string };
+
+  const updated = await prisma.entityType.update({
+    where: { id },
+    data: { name, description }
+  });
+
+  res.json(updated);
+});
+
+app.delete("/api/entity-types/:id", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const entityType = await prisma.entityType.findUnique({
+    where: { id },
+    select: { isTemplate: true, worldId: true }
+  });
+  if (!entityType) {
+    res.status(404).json({ error: "Entity type not found." });
+    return;
+  }
+
+  if (entityType.isTemplate && !isAdmin(user)) {
+    res.status(403).json({ error: "Only admins can delete templates." });
+    return;
+  }
+
+  if (!entityType.isTemplate && !isAdmin(user) && !(await isWorldArchitect(user.id, entityType.worldId ?? ""))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  await prisma.entityType.delete({ where: { id } });
+  res.json({ ok: true });
+});
+
+app.get("/api/entity-form-sections", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const entityTypeId =
+    typeof req.query.entityTypeId === "string" ? req.query.entityTypeId : undefined;
+  if (!entityTypeId) {
+    res.status(400).json({ error: "entityTypeId is required." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canAccessEntityType(user.id, entityTypeId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  let sections = await prisma.entityFormSection.findMany({
+    where: { entityTypeId },
+    orderBy: { sortOrder: "asc" }
+  });
+
+  if (sections.length === 0 && (isAdmin(user) || (await canManageEntityType(user.id, entityTypeId)))) {
+    const created = await prisma.entityFormSection.create({
+      data: {
+        entityTypeId,
+        title: "General",
+        layout: EntityFormSectionLayout.ONE_COLUMN,
+        sortOrder: 1
+      }
+    });
+    sections = [created];
+  }
+
+  res.json(sections);
+});
+
+app.post("/api/entity-form-sections", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { entityTypeId, title, layout, sortOrder } = req.body as {
+    entityTypeId?: string;
+    title?: string;
+    layout?: EntityFormSectionLayout;
+    sortOrder?: number;
+  };
+
+  if (!entityTypeId || !title) {
+    res.status(400).json({ error: "entityTypeId and title are required." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canManageEntityType(user.id, entityTypeId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const resolvedLayout = Object.values(EntityFormSectionLayout).includes(
+    layout as EntityFormSectionLayout
+  )
+    ? (layout as EntityFormSectionLayout)
+    : EntityFormSectionLayout.ONE_COLUMN;
+
+  const section = await prisma.entityFormSection.create({
+    data: {
+      entityTypeId,
+      title,
+      layout: resolvedLayout,
+      sortOrder: sortOrder ?? 0
+    }
+  });
+
+  res.status(201).json(section);
+});
+
+app.put("/api/entity-form-sections/:id", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const existing = await prisma.entityFormSection.findUnique({
+    where: { id },
+    select: { entityTypeId: true }
+  });
+  if (!existing) {
+    res.status(404).json({ error: "Section not found." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canManageEntityType(user.id, existing.entityTypeId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const { title, layout, sortOrder } = req.body as {
+    title?: string;
+    layout?: EntityFormSectionLayout;
+    sortOrder?: number;
+  };
+
+  const resolvedLayout =
+    layout && Object.values(EntityFormSectionLayout).includes(layout)
+      ? layout
+      : undefined;
+
+  const section = await prisma.entityFormSection.update({
+    where: { id },
+    data: {
+      title,
+      layout: resolvedLayout,
+      sortOrder
+    }
+  });
+
+  res.json(section);
+});
+
+app.delete("/api/entity-form-sections/:id", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const existing = await prisma.entityFormSection.findUnique({
+    where: { id },
+    select: { entityTypeId: true }
+  });
+  if (!existing) {
+    res.status(404).json({ error: "Section not found." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canManageEntityType(user.id, existing.entityTypeId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  await prisma.$transaction([
+    prisma.entityField.updateMany({
+      where: { formSectionId: id },
+      data: { formSectionId: null, formColumn: 1 }
+    }),
+    prisma.entityFormSection.delete({ where: { id } })
+  ]);
+
+  res.json({ ok: true });
+});
+
+app.get("/api/entity-fields", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const entityTypeId = typeof req.query.entityTypeId === "string" ? req.query.entityTypeId : undefined;
+  const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+  if (!entityTypeId) {
+    if (worldId && !isAdmin(user) && !(await isWorldArchitect(user.id, worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const fields = await prisma.entityField.findMany({
+      where: {
+        ...(worldId ? { entityType: { worldId } } : {}),
+        ...(isAdmin(user) || worldId
+          ? {}
+          : {
+              entityType: {
+                world: {
+                  OR: [
+                    { primaryArchitectId: user.id },
+                    { architects: { some: { userId: user.id } } }
+                  ]
+                }
+              }
+            })
+      },
+      include: { choices: true },
+      orderBy: { formOrder: "asc" }
+    });
+    res.json(fields);
+    return;
+  }
+
+  const entityType = await prisma.entityType.findUnique({
+    where: { id: entityTypeId },
+    select: { worldId: true, isTemplate: true }
+  });
+  if (!entityType) {
+    res.status(404).json({ error: "Entity type not found." });
+    return;
+  }
+
+  if (!entityType.isTemplate && !isAdmin(user) && !(await canAccessEntityType(user.id, entityTypeId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const fields = await prisma.entityField.findMany({
+    where: { entityTypeId },
+    include: { choices: true },
+    orderBy: { formOrder: "asc" }
+  });
+
+  res.json(fields);
+});
+
+app.post("/api/entity-fields", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const {
+    entityTypeId,
+    fieldKey,
+    label,
+    fieldType,
+    description,
+    required,
+    listOrder,
+    formOrder,
+    formSectionId,
+    formColumn,
+    referenceEntityTypeId,
+    referenceLocationTypeKey,
+    conditions
+  } = req.body as {
+    entityTypeId?: string;
+    fieldKey?: string;
+    label?: string;
+    fieldType?: EntityFieldType;
+    description?: string;
+    required?: boolean;
+    listOrder?: number;
+    formOrder?: number;
+    formSectionId?: string;
+    formColumn?: number;
+    referenceEntityTypeId?: string;
+    referenceLocationTypeKey?: string;
+    conditions?: Prisma.InputJsonValue;
+  };
+
+  if (!entityTypeId || !fieldKey || !label || !fieldType) {
+    res.status(400).json({ error: "entityTypeId, fieldKey, label, and fieldType are required." });
+    return;
+  }
+
+  const entityType = await prisma.entityType.findUnique({
+    where: { id: entityTypeId },
+    select: { worldId: true, isTemplate: true }
+  });
+  if (!entityType) {
+    res.status(404).json({ error: "Entity type not found." });
+    return;
+  }
+
+  if (entityType.isTemplate && !isAdmin(user)) {
+    res.status(403).json({ error: "Only admins can edit templates." });
+    return;
+  }
+
+  if (!entityType.isTemplate && !isAdmin(user) && !(await isWorldArchitect(user.id, entityType.worldId ?? ""))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const field = await prisma.entityField.create({
+    data: {
+      entityTypeId,
+      fieldKey,
+      label,
+      fieldType,
+      description,
+      required: Boolean(required),
+      listOrder: listOrder ?? 0,
+      formOrder: formOrder ?? 0,
+      formSectionId: formSectionId ?? null,
+      formColumn: formColumn ?? 1,
+      referenceEntityTypeId,
+      referenceLocationTypeKey,
+      conditions: conditions ?? undefined
+    }
+  });
+
+  res.status(201).json(field);
+});
+
+app.get("/api/entity-fields/:id", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const field = await prisma.entityField.findUnique({
+    where: { id },
+    include: { choices: true }
+  });
+  if (!field) {
+    res.status(404).json({ error: "Field not found." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canAccessEntityType(user.id, field.entityTypeId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  res.json(field);
+});
+
+app.put("/api/entity-fields/:id", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const existing = await prisma.entityField.findUnique({
+    where: { id },
+    select: { entityTypeId: true }
+  });
+  if (!existing) {
+    res.status(404).json({ error: "Field not found." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canManageEntityType(user.id, existing.entityTypeId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const {
+    fieldKey,
+    label,
+    fieldType,
+    description,
+    required,
+    listOrder,
+    formOrder,
+    formSectionId,
+    formColumn,
+    referenceEntityTypeId,
+    referenceLocationTypeKey,
+    conditions
+  } = req.body as {
+    fieldKey?: string;
+    label?: string;
+    fieldType?: EntityFieldType;
+    description?: string;
+    required?: boolean;
+    listOrder?: number;
+    formOrder?: number;
+    formSectionId?: string | null;
+    formColumn?: number;
+    referenceEntityTypeId?: string;
+    referenceLocationTypeKey?: string;
+    conditions?: Prisma.InputJsonValue;
+  };
+
+  const field = await prisma.entityField.update({
+    where: { id },
+    data: {
+      fieldKey,
+      label,
+      fieldType,
+      description,
+      required,
+      listOrder,
+      formOrder,
+      formSectionId,
+      formColumn,
+      referenceEntityTypeId,
+      referenceLocationTypeKey,
+      conditions: conditions ?? undefined
+    }
+  });
+
+  res.json(field);
+});
+
+app.delete("/api/entity-fields/:id", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const existing = await prisma.entityField.findUnique({
+    where: { id },
+    select: { entityTypeId: true }
+  });
+  if (!existing) {
+    res.status(404).json({ error: "Field not found." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canManageEntityType(user.id, existing.entityTypeId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  await prisma.entityField.delete({ where: { id } });
+  res.json({ ok: true });
+});
+
+app.get("/api/entity-field-choices", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const entityFieldId = typeof req.query.entityFieldId === "string" ? req.query.entityFieldId : undefined;
+  const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+  if (!entityFieldId) {
+    if (worldId && !isAdmin(user) && !(await isWorldArchitect(user.id, worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const choices = await prisma.entityFieldChoice.findMany({
+      where: {
+        ...(worldId ? { entityField: { entityType: { worldId } } } : {}),
+        ...(isAdmin(user) || worldId
+          ? {}
+          : {
+              entityField: {
+                entityType: {
+                  world: {
+                    OR: [
+                      { primaryArchitectId: user.id },
+                      { architects: { some: { userId: user.id } } }
+                    ]
+                  }
+                }
+              }
+            })
+      },
+      orderBy: { sortOrder: "asc" }
+    });
+    res.json(choices);
+    return;
+  }
+
+  const field = await prisma.entityField.findUnique({
+    where: { id: entityFieldId },
+    select: { entityTypeId: true }
+  });
+  if (!field) {
+    res.status(404).json({ error: "Field not found." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canAccessEntityType(user.id, field.entityTypeId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const choices = await prisma.entityFieldChoice.findMany({
+    where: { entityFieldId },
+    orderBy: { sortOrder: "asc" }
+  });
+  res.json(choices);
+});
+
+app.post("/api/entity-field-choices", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { entityFieldId, value, label, sortOrder } = req.body as {
+    entityFieldId?: string;
+    value?: string;
+    label?: string;
+    sortOrder?: number;
+  };
+
+  if (!entityFieldId || !value || !label) {
+    res.status(400).json({ error: "entityFieldId, value, and label are required." });
+    return;
+  }
+
+  const field = await prisma.entityField.findUnique({
+    where: { id: entityFieldId },
+    select: { entityTypeId: true }
+  });
+  if (!field) {
+    res.status(404).json({ error: "Field not found." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canManageEntityType(user.id, field.entityTypeId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const choice = await prisma.entityFieldChoice.create({
+    data: {
+      entityFieldId,
+      value,
+      label,
+      sortOrder
+    }
+  });
+
+  res.status(201).json(choice);
+});
+
+app.put("/api/entity-field-choices/:id", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const existing = await prisma.entityFieldChoice.findUnique({
+    where: { id },
+    select: { entityField: { select: { entityTypeId: true } } }
+  });
+  if (!existing) {
+    res.status(404).json({ error: "Choice not found." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canManageEntityType(user.id, existing.entityField.entityTypeId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const { value, label, sortOrder } = req.body as {
+    value?: string;
+    label?: string;
+    sortOrder?: number;
+  };
+
+  const choice = await prisma.entityFieldChoice.update({
+    where: { id },
+    data: { value, label, sortOrder }
+  });
+
+  res.json(choice);
+});
+
+app.delete("/api/entity-field-choices/:id", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const existing = await prisma.entityFieldChoice.findUnique({
+    where: { id },
+    select: { entityField: { select: { entityTypeId: true } } }
+  });
+  if (!existing) {
+    res.status(404).json({ error: "Choice not found." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canManageEntityType(user.id, existing.entityField.entityTypeId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  await prisma.entityFieldChoice.delete({ where: { id } });
+  res.json({ ok: true });
+});
+
+app.get("/api/entities", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+  const entityTypeId = typeof req.query.entityTypeId === "string" ? req.query.entityTypeId : undefined;
+  const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+  const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+
+  if (!worldId && !isAdmin(user)) {
+    res.json([]);
+    return;
+  }
+
+  let whereClause: Prisma.EntityWhereInput = {};
+  if (worldId) {
+    if (isAdmin(user)) {
+      whereClause = { worldId };
+    } else {
+      whereClause = await buildEntityAccessFilter(user, worldId, campaignId, characterId);
+    }
+  }
+
+  if (entityTypeId) {
+    whereClause = { AND: [whereClause, { entityTypeId }] };
+  }
+
+  const entities = await prisma.entity.findMany({
+    where: whereClause,
+    orderBy: { name: "asc" }
+  });
+
+  res.json(entities);
+});
+
+app.post("/api/entities", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const {
+    worldId,
+    entityTypeId,
+    name,
+    description,
+    fieldValues,
+    contextCampaignId,
+    contextCharacterId,
+    access
+  } = req.body as {
+    worldId?: string;
+    entityTypeId?: string;
+    name?: string;
+    description?: string;
+    fieldValues?: Record<string, unknown>;
+    contextCampaignId?: string;
+    contextCharacterId?: string;
+    access?: {
+      read?: { global?: boolean; campaigns?: string[]; characters?: string[] };
+      write?: { global?: boolean; campaigns?: string[]; characters?: string[] };
+    };
+  };
+
+  if (!worldId || !entityTypeId || !name) {
+    res.status(400).json({ error: "worldId, entityTypeId, and name are required." });
+    return;
+  }
+
+  const entityType = await prisma.entityType.findUnique({
+    where: { id: entityTypeId },
+    select: { worldId: true, isTemplate: true }
+  });
+  if (!entityType || entityType.isTemplate || entityType.worldId !== worldId) {
+    res.status(400).json({ error: "Entity type must belong to the selected world." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canCreateEntityInWorld(user.id, worldId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const fields = await prisma.entityField.findMany({
+    where: { entityTypeId },
+    include: { choices: true }
+  });
+  const fieldMap = new Map(fields.map((field) => [field.fieldKey, field]));
+
+  const created = await prisma.$transaction(async (tx) => {
+    const entity = await tx.entity.create({
+      data: {
+        worldId,
+        entityTypeId,
+        name,
+        description,
+        createdById: user.id
+      }
+    });
+
+    if (fieldValues) {
+      for (const [fieldKey, rawValue] of Object.entries(fieldValues)) {
+        const field = fieldMap.get(fieldKey);
+        if (!field) continue;
+        const valuePayload: Prisma.EntityFieldValueCreateInput = {
+          entity: { connect: { id: entity.id } },
+          field: { connect: { id: field.id } }
+        };
+
+        if (field.fieldType === EntityFieldType.TEXT || field.fieldType === EntityFieldType.CHOICE) {
+          valuePayload.valueString = rawValue ? String(rawValue) : null;
+        } else if (field.fieldType === EntityFieldType.TEXTAREA) {
+          valuePayload.valueText = rawValue ? String(rawValue) : null;
+        } else if (field.fieldType === EntityFieldType.BOOLEAN) {
+          valuePayload.valueBoolean = Boolean(rawValue);
+        } else if (
+          field.fieldType === EntityFieldType.ENTITY_REFERENCE ||
+          field.fieldType === EntityFieldType.LOCATION_REFERENCE
+        ) {
+          valuePayload.valueString = rawValue ? String(rawValue) : null;
+        }
+
+        await tx.entityFieldValue.create({ data: valuePayload });
+      }
+    }
+
+    const accessEntries: Prisma.EntityAccessCreateManyInput[] = [];
+
+    if (access?.read) {
+      if (access.read.global) {
+        accessEntries.push({
+          entityId: entity.id,
+          accessType: EntityAccessType.READ,
+          scopeType: EntityAccessScope.GLOBAL
+        });
+      }
+      access.read.campaigns?.forEach((id) =>
+        accessEntries.push({
+          entityId: entity.id,
+          accessType: EntityAccessType.READ,
+          scopeType: EntityAccessScope.CAMPAIGN,
+          scopeId: id
+        })
+      );
+      access.read.characters?.forEach((id) =>
+        accessEntries.push({
+          entityId: entity.id,
+          accessType: EntityAccessType.READ,
+          scopeType: EntityAccessScope.CHARACTER,
+          scopeId: id
+        })
+      );
+    }
+
+    if (access?.write) {
+      if (access.write.global) {
+        accessEntries.push({
+          entityId: entity.id,
+          accessType: EntityAccessType.WRITE,
+          scopeType: EntityAccessScope.GLOBAL
+        });
+      }
+      access.write.campaigns?.forEach((id) =>
+        accessEntries.push({
+          entityId: entity.id,
+          accessType: EntityAccessType.WRITE,
+          scopeType: EntityAccessScope.CAMPAIGN,
+          scopeId: id
+        })
+      );
+      access.write.characters?.forEach((id) =>
+        accessEntries.push({
+          entityId: entity.id,
+          accessType: EntityAccessType.WRITE,
+          scopeType: EntityAccessScope.CHARACTER,
+          scopeId: id
+        })
+      );
+    }
+
+    if (accessEntries.length === 0) {
+      if (contextCampaignId) {
+        accessEntries.push(
+          {
+            entityId: entity.id,
+            accessType: EntityAccessType.READ,
+            scopeType: EntityAccessScope.CAMPAIGN,
+            scopeId: contextCampaignId
+          },
+          {
+            entityId: entity.id,
+            accessType: EntityAccessType.WRITE,
+            scopeType: EntityAccessScope.CAMPAIGN,
+            scopeId: contextCampaignId
+          }
+        );
+      } else {
+        accessEntries.push(
+          {
+            entityId: entity.id,
+            accessType: EntityAccessType.READ,
+            scopeType: EntityAccessScope.GLOBAL
+          },
+          {
+            entityId: entity.id,
+            accessType: EntityAccessType.WRITE,
+            scopeType: EntityAccessScope.GLOBAL
+          }
+        );
+      }
+    }
+
+    await tx.entityAccess.createMany({
+      data: accessEntries
+    });
+
+    return entity;
+  });
+
+  res.status(201).json(created);
+});
+
+app.get("/api/entities/:id", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+  const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+
+  const entity = await prisma.entity.findUnique({
+    where: { id },
+    include: {
+      values: { include: { field: true } },
+      access: true
+    }
+  });
+
+  if (!entity) {
+    res.status(404).json({ error: "Entity not found." });
+    return;
+  }
+
+  if (!isAdmin(user)) {
+    const accessFilters: Prisma.EntityAccessWhereInput[] = [
+      { scopeType: EntityAccessScope.GLOBAL }
+    ];
+    if (campaignId) {
+      accessFilters.push({ scopeType: EntityAccessScope.CAMPAIGN, scopeId: campaignId });
+    }
+    if (characterId) {
+      accessFilters.push({ scopeType: EntityAccessScope.CHARACTER, scopeId: characterId });
+    }
+
+    const canRead =
+      (await isWorldArchitect(user.id, entity.worldId)) ||
+      (await prisma.entityAccess.findFirst({
+        where: {
+          entityId: entity.id,
+          accessType: EntityAccessType.READ,
+          OR: accessFilters
+        }
+      }));
+
+    if (!canRead) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+  }
+
+  const fieldValues: Record<string, unknown> = {};
+  entity.values.forEach((value) => {
+    const fieldKey = value.field.fieldKey;
+    if (value.valueString !== null && value.valueString !== undefined) {
+      fieldValues[fieldKey] = value.valueString;
+    } else if (value.valueText !== null && value.valueText !== undefined) {
+      fieldValues[fieldKey] = value.valueText;
+    } else if (value.valueBoolean !== null && value.valueBoolean !== undefined) {
+      fieldValues[fieldKey] = value.valueBoolean;
+    } else if (value.valueNumber !== null && value.valueNumber !== undefined) {
+      fieldValues[fieldKey] = value.valueNumber;
+    } else if (value.valueJson !== null && value.valueJson !== undefined) {
+      fieldValues[fieldKey] = value.valueJson;
+    }
+  });
+
+  res.json({
+    id: entity.id,
+    worldId: entity.worldId,
+    entityTypeId: entity.entityTypeId,
+    name: entity.name,
+    description: entity.description,
+    createdById: entity.createdById,
+    createdAt: entity.createdAt,
+    updatedAt: entity.updatedAt,
+    fieldValues
+  });
+});
+
+app.put("/api/entities/:id", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+  const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+
+  const entity = await prisma.entity.findUnique({
+    where: { id },
+    select: { worldId: true, entityTypeId: true }
+  });
+  if (!entity) {
+    res.status(404).json({ error: "Entity not found." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canWriteEntity(user, id, campaignId, characterId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const { name, description, fieldValues } = req.body as {
+    name?: string;
+    description?: string;
+    fieldValues?: Record<string, unknown>;
+  };
+
+  const fields = await prisma.entityField.findMany({
+    where: { entityTypeId: entity.entityTypeId },
+    include: { choices: true }
+  });
+  const fieldMap = new Map(fields.map((field) => [field.fieldKey, field]));
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const entityRecord = await tx.entity.update({
+      where: { id },
+      data: { name, description }
+    });
+
+    if (fieldValues) {
+      for (const [fieldKey, rawValue] of Object.entries(fieldValues)) {
+        const field = fieldMap.get(fieldKey);
+        if (!field) continue;
+
+        const valueData: Prisma.EntityFieldValueUncheckedCreateInput = {
+          entityId: id,
+          fieldId: field.id
+        };
+
+        if (field.fieldType === EntityFieldType.TEXT || field.fieldType === EntityFieldType.CHOICE) {
+          valueData.valueString = rawValue ? String(rawValue) : null;
+        } else if (field.fieldType === EntityFieldType.TEXTAREA) {
+          valueData.valueText = rawValue ? String(rawValue) : null;
+        } else if (field.fieldType === EntityFieldType.BOOLEAN) {
+          valueData.valueBoolean = Boolean(rawValue);
+        } else if (
+          field.fieldType === EntityFieldType.ENTITY_REFERENCE ||
+          field.fieldType === EntityFieldType.LOCATION_REFERENCE
+        ) {
+          valueData.valueString = rawValue ? String(rawValue) : null;
+        }
+
+        if (
+          valueData.valueString === null &&
+          valueData.valueText === null &&
+          valueData.valueBoolean === null &&
+          valueData.valueNumber === null &&
+          valueData.valueJson === null
+        ) {
+          await tx.entityFieldValue.deleteMany({
+            where: { entityId: id, fieldId: field.id }
+          });
+        } else {
+          await tx.entityFieldValue.upsert({
+            where: { entityId_fieldId: { entityId: id, fieldId: field.id } },
+            update: valueData,
+            create: valueData
+          });
+        }
+      }
+    }
+
+    return entityRecord;
+  });
+
+  res.json(updated);
+});
+
+app.delete("/api/entities/:id", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const entity = await prisma.entity.findUnique({
+    where: { id },
+    select: { worldId: true }
+  });
+  if (!entity) {
+    res.status(404).json({ error: "Entity not found." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await isWorldArchitect(user.id, entity.worldId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  await prisma.entity.delete({ where: { id } });
+  res.json({ ok: true });
+});
+
+app.get("/api/entities/:id/access", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const entity = await prisma.entity.findUnique({
+    where: { id },
+    select: { worldId: true }
+  });
+  if (!entity) {
+    res.status(404).json({ error: "Entity not found." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await isWorldArchitect(user.id, entity.worldId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const access = await prisma.entityAccess.findMany({ where: { entityId: id } });
+  const read = {
+    global: access.some(
+      (entry) =>
+        entry.accessType === EntityAccessType.READ &&
+        entry.scopeType === EntityAccessScope.GLOBAL
+    ),
+    campaigns: access
+      .filter(
+        (entry) =>
+          entry.accessType === EntityAccessType.READ &&
+          entry.scopeType === EntityAccessScope.CAMPAIGN
+      )
+      .map((entry) => entry.scopeId)
+      .filter(Boolean) as string[],
+    characters: access
+      .filter(
+        (entry) =>
+          entry.accessType === EntityAccessType.READ &&
+          entry.scopeType === EntityAccessScope.CHARACTER
+      )
+      .map((entry) => entry.scopeId)
+      .filter(Boolean) as string[]
+  };
+
+  const write = {
+    global: access.some(
+      (entry) =>
+        entry.accessType === EntityAccessType.WRITE &&
+        entry.scopeType === EntityAccessScope.GLOBAL
+    ),
+    campaigns: access
+      .filter(
+        (entry) =>
+          entry.accessType === EntityAccessType.WRITE &&
+          entry.scopeType === EntityAccessScope.CAMPAIGN
+      )
+      .map((entry) => entry.scopeId)
+      .filter(Boolean) as string[],
+    characters: access
+      .filter(
+        (entry) =>
+          entry.accessType === EntityAccessType.WRITE &&
+          entry.scopeType === EntityAccessScope.CHARACTER
+      )
+      .map((entry) => entry.scopeId)
+      .filter(Boolean) as string[]
+  };
+
+  res.json({ read, write });
+});
+
+app.put("/api/entities/:id/access", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const entity = await prisma.entity.findUnique({
+    where: { id },
+    select: { worldId: true }
+  });
+  if (!entity) {
+    res.status(404).json({ error: "Entity not found." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await isWorldArchitect(user.id, entity.worldId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const { read, write } = req.body as {
+    read?: { global?: boolean; campaigns?: string[]; characters?: string[] };
+    write?: { global?: boolean; campaigns?: string[]; characters?: string[] };
+  };
+
+  const accessEntries: Prisma.EntityAccessCreateManyInput[] = [];
+  if (read?.global) {
+    accessEntries.push({
+      entityId: id,
+      accessType: EntityAccessType.READ,
+      scopeType: EntityAccessScope.GLOBAL
+    });
+  }
+  read?.campaigns?.forEach((campaignId) =>
+    accessEntries.push({
+      entityId: id,
+      accessType: EntityAccessType.READ,
+      scopeType: EntityAccessScope.CAMPAIGN,
+      scopeId: campaignId
+    })
+  );
+  read?.characters?.forEach((characterId) =>
+    accessEntries.push({
+      entityId: id,
+      accessType: EntityAccessType.READ,
+      scopeType: EntityAccessScope.CHARACTER,
+      scopeId: characterId
+    })
+  );
+
+  if (write?.global) {
+    accessEntries.push({
+      entityId: id,
+      accessType: EntityAccessType.WRITE,
+      scopeType: EntityAccessScope.GLOBAL
+    });
+  }
+  write?.campaigns?.forEach((campaignId) =>
+    accessEntries.push({
+      entityId: id,
+      accessType: EntityAccessType.WRITE,
+      scopeType: EntityAccessScope.CAMPAIGN,
+      scopeId: campaignId
+    })
+  );
+  write?.characters?.forEach((characterId) =>
+    accessEntries.push({
+      entityId: id,
+      accessType: EntityAccessType.WRITE,
+      scopeType: EntityAccessScope.CHARACTER,
+      scopeId: characterId
+    })
+  );
+
+  await prisma.$transaction([
+    prisma.entityAccess.deleteMany({ where: { entityId: id } }),
+    prisma.entityAccess.createMany({ data: accessEntries })
+  ]);
+
   res.json({ ok: true });
 });
 

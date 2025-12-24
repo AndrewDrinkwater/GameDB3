@@ -47,6 +47,37 @@ enum SystemFieldType {
   REFERENCE
 }
 
+enum WorldEntityPermissionScope {
+  ARCHITECT
+  ARCHITECT_GM
+  ARCHITECT_GM_PLAYER
+}
+
+enum EntityFieldType {
+  TEXT
+  TEXTAREA
+  BOOLEAN
+  CHOICE
+  ENTITY_REFERENCE
+  LOCATION_REFERENCE
+}
+
+enum EntityAccessType {
+  READ
+  WRITE
+}
+
+enum EntityAccessScope {
+  GLOBAL
+  CAMPAIGN
+  CHARACTER
+}
+
+enum EntityFormSectionLayout {
+  ONE_COLUMN
+  TWO_COLUMN
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -61,6 +92,8 @@ model User {
   worldDelegations   WorldDelegate[]
   campaignDelegation CampaignDelegate[]
   characters         Character[]
+  createdEntityTypes EntityType[]        @relation("EntityTypeCreator")
+  createdEntities    Entity[]            @relation("EntityCreator")
   systemRoles        SystemUserRole[]
   systemPreferences  SystemUserPreference[]
   architectWorlds    WorldArchitect[]
@@ -78,6 +111,7 @@ model World {
   primaryArchitectId String
   dmLabelKey  String?
   themeKey    String?
+  entityPermissionScope WorldEntityPermissionScope @default(ARCHITECT_GM_PLAYER)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -88,6 +122,8 @@ model World {
   campaignCreators  WorldCampaignCreator[]
   characterCreators WorldCharacterCreator[]
   characters        Character[]
+  entityTypes       EntityType[]
+  entities          Entity[]
 
   @@index([primaryArchitectId])
 }
@@ -115,6 +151,141 @@ model Campaign {
   @@index([ownerId])
   @@index([gmUserId])
   @@index([createdById])
+}
+
+model EntityType {
+  id          String   @id @default(uuid())
+  worldId     String?
+  name        String
+  description String?
+  isTemplate  Boolean  @default(false)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  world     World?       @relation(fields: [worldId], references: [id])
+  createdBy User         @relation("EntityTypeCreator", fields: [createdById], references: [id])
+  fields    EntityField[]
+  formSections EntityFormSection[]
+  referencedByFields EntityField[] @relation("EntityFieldReferenceType")
+  entities  Entity[]
+
+  @@index([worldId])
+  @@index([createdById])
+}
+
+model EntityField {
+  id          String         @id @default(uuid())
+  entityTypeId String
+  fieldKey    String
+  label       String
+  fieldType   EntityFieldType
+  description String?
+  required    Boolean        @default(false)
+  listOrder   Int            @default(0)
+  formOrder   Int            @default(0)
+  formSectionId String?
+  formColumn  Int            @default(1)
+  referenceEntityTypeId String?
+  referenceLocationTypeKey String?
+  conditions  Json?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  entityType           EntityType       @relation(fields: [entityTypeId], references: [id])
+  formSection          EntityFormSection? @relation(fields: [formSectionId], references: [id])
+  referenceEntityType  EntityType?      @relation("EntityFieldReferenceType", fields: [referenceEntityTypeId], references: [id])
+  choices              EntityFieldChoice[]
+  values               EntityFieldValue[]
+
+  @@unique([entityTypeId, fieldKey])
+  @@index([entityTypeId])
+}
+
+model EntityFormSection {
+  id          String   @id @default(uuid())
+  entityTypeId String
+  title       String
+  layout      EntityFormSectionLayout @default(ONE_COLUMN)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entityType EntityType @relation(fields: [entityTypeId], references: [id])
+  fields     EntityField[]
+
+  @@index([entityTypeId])
+}
+
+model EntityFieldChoice {
+  id            String   @id @default(uuid())
+  entityFieldId String
+  value         String
+  label         String
+  sortOrder     Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  entityField EntityField @relation(fields: [entityFieldId], references: [id])
+
+  @@unique([entityFieldId, value])
+  @@index([entityFieldId])
+}
+
+model Entity {
+  id           String   @id @default(uuid())
+  worldId      String
+  entityTypeId String
+  name         String
+  description  String?
+  createdById  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  world      World             @relation(fields: [worldId], references: [id])
+  entityType EntityType        @relation(fields: [entityTypeId], references: [id])
+  createdBy  User              @relation("EntityCreator", fields: [createdById], references: [id])
+  values     EntityFieldValue[]
+  access     EntityAccess[]
+
+  @@index([worldId])
+  @@index([entityTypeId])
+  @@index([createdById])
+}
+
+model EntityFieldValue {
+  id          String   @id @default(uuid())
+  entityId    String
+  fieldId     String
+  valueString String?
+  valueText   String?
+  valueBoolean Boolean?
+  valueNumber Float?
+  valueJson   Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entity Entity    @relation(fields: [entityId], references: [id])
+  field  EntityField @relation(fields: [fieldId], references: [id])
+
+  @@unique([entityId, fieldId])
+  @@index([entityId])
+  @@index([fieldId])
+}
+
+model EntityAccess {
+  id         String           @id @default(uuid())
+  entityId   String
+  accessType EntityAccessType
+  scopeType  EntityAccessScope
+  scopeId    String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  entity Entity @relation(fields: [entityId], references: [id])
+
+  @@index([entityId])
+  @@index([scopeType, scopeId])
 }
 
 model Character {

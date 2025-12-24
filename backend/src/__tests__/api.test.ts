@@ -9,6 +9,12 @@ type TestContext = {
   worldId: string;
   campaignId: string;
   characterId: string;
+  architectId: string;
+  architectToken: string;
+  viewerId: string;
+  viewerToken: string;
+  entityTypeId: string;
+  entityFieldId: string;
 };
 
 const prisma = new PrismaClient();
@@ -27,6 +33,20 @@ const ensureAdminUser = async () => {
       email: adminEmail,
       name: "Admin User",
       role: Role.ADMIN,
+      passwordHash
+    }
+  });
+};
+
+const ensureUser = async (email: string, name: string, password: string) => {
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) return existing;
+  const passwordHash = await bcrypt.hash(password, 10);
+  return prisma.user.create({
+    data: {
+      email,
+      name,
+      role: Role.USER,
       passwordHash
     }
   });
@@ -87,9 +107,60 @@ beforeAll(async () => {
       status: "ACTIVE"
     }
   });
+
+  const architectUser = await ensureUser("architect@example.com", "World Architect", "Architect123!");
+  context.architectId = architectUser.id;
+  await prisma.worldArchitect.upsert({
+    where: { worldId_userId: { worldId: world.id, userId: architectUser.id } },
+    update: {},
+    create: { worldId: world.id, userId: architectUser.id }
+  });
+
+  const architectLogin = await request(app)
+    .post("/api/auth/login")
+    .send({ email: "architect@example.com", password: "Architect123!" });
+  context.architectToken = architectLogin.body.token;
+
+  const viewerUser = await ensureUser("viewer@example.com", "World Viewer", "Viewer123!");
+  context.viewerId = viewerUser.id;
+  const viewerLogin = await request(app)
+    .post("/api/auth/login")
+    .send({ email: "viewer@example.com", password: "Viewer123!" });
+  context.viewerToken = viewerLogin.body.token;
+
+  const entityType = await prisma.entityType.create({
+    data: {
+      worldId: world.id,
+      name: "Test Entity Type",
+      description: "Test type",
+      createdById: admin.id
+    }
+  });
+  context.entityTypeId = entityType.id;
+
+  const entityField = await prisma.entityField.create({
+    data: {
+      entityTypeId: entityType.id,
+      fieldKey: "test_field",
+      label: "Test Field",
+      fieldType: "TEXT",
+      formOrder: 1,
+      listOrder: 1
+    }
+  });
+  context.entityFieldId = entityField.id;
 });
 
 afterAll(async () => {
+  if (context.entityFieldId) {
+    await prisma.entityFieldChoice.deleteMany({
+      where: { entityFieldId: context.entityFieldId }
+    });
+    await prisma.entityField.delete({ where: { id: context.entityFieldId } }).catch(() => undefined);
+  }
+  if (context.entityTypeId) {
+    await prisma.entityType.delete({ where: { id: context.entityTypeId } }).catch(() => undefined);
+  }
   if (context.campaignId && context.characterId) {
     await prisma.characterCampaign.deleteMany({
       where: { campaignId: context.campaignId, characterId: context.characterId }
@@ -241,5 +312,73 @@ describe("Context filters", () => {
     expect(response.body.worldRole).toBe("Architect");
     expect(response.body.campaignRole).toBe("GM");
     expect(response.body.characterOwnerLabel).toBeTruthy();
+  });
+});
+
+describe("World admin access", () => {
+  it("grants admin and architect access to world admin", async () => {
+    const adminResponse = await request(app)
+      .get(`/api/worlds/${context.worldId}/world-admin`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(adminResponse.status).toBe(200);
+    expect(adminResponse.body.allowed).toBe(true);
+
+    const architectResponse = await request(app)
+      .get(`/api/worlds/${context.worldId}/world-admin`)
+      .set("Authorization", `Bearer ${context.architectToken}`);
+
+    expect(architectResponse.status).toBe(200);
+    expect(architectResponse.body.allowed).toBe(true);
+  });
+
+  it("denies non-architect access to world admin", async () => {
+    const response = await request(app)
+      .get(`/api/worlds/${context.worldId}/world-admin`)
+      .set("Authorization", `Bearer ${context.viewerToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.allowed).toBe(false);
+  });
+
+  it("allows architects to list entity types and fields by world", async () => {
+    const typesResponse = await request(app)
+      .get(`/api/entity-types?worldId=${context.worldId}`)
+      .set("Authorization", `Bearer ${context.architectToken}`);
+
+    expect(typesResponse.status).toBe(200);
+    const typeIds = typesResponse.body.map((item: { id: string }) => item.id);
+    expect(typeIds).toContain(context.entityTypeId);
+
+    const fieldsResponse = await request(app)
+      .get(`/api/entity-fields?worldId=${context.worldId}`)
+      .set("Authorization", `Bearer ${context.architectToken}`);
+
+    expect(fieldsResponse.status).toBe(200);
+    const fieldIds = fieldsResponse.body.map((item: { id: string }) => item.id);
+    expect(fieldIds).toContain(context.entityFieldId);
+  });
+
+  it("denies non-architect access to entity types and fields by world", async () => {
+    const typesResponse = await request(app)
+      .get(`/api/entity-types?worldId=${context.worldId}`)
+      .set("Authorization", `Bearer ${context.viewerToken}`);
+
+    expect(typesResponse.status).toBe(403);
+
+    const fieldsResponse = await request(app)
+      .get(`/api/entity-fields?worldId=${context.worldId}`)
+      .set("Authorization", `Bearer ${context.viewerToken}`);
+
+    expect(fieldsResponse.status).toBe(403);
+  });
+
+  it("hydrates entity views on demand", async () => {
+    const response = await request(app)
+      .get("/api/views/entity_types.list")
+      .set("Authorization", `Bearer ${context.architectToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.key).toBe("entity_types.list");
   });
 });

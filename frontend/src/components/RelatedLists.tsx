@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { dispatchUnauthorized } from "../utils/auth";
 
 type RelatedListField = {
   id: string;
@@ -63,6 +64,10 @@ export default function RelatedLists({ token, parentEntityKey, parentId, disable
         const response = await fetch(`/api/related-lists?entityKey=${parentEntityKey}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
+        if (response.status === 401) {
+          dispatchUnauthorized();
+          return;
+        }
         if (!response.ok) {
           throw new Error("Unable to load related lists.");
         }
@@ -97,6 +102,10 @@ export default function RelatedLists({ token, parentEntityKey, parentId, disable
       const response = await fetch(`/api/related-lists/${listKey}?parentId=${parentId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      if (response.status === 401) {
+        dispatchUnauthorized();
+        return;
+      }
       if (!response.ok) {
         const data = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error ?? "Unable to load related list.");
@@ -129,6 +138,15 @@ export default function RelatedLists({ token, parentEntityKey, parentId, disable
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
+    if (response.status === 401) {
+      dispatchUnauthorized();
+      setAddStateByList((current) => ({
+        ...current,
+        [list.key]: { ...(current[list.key] ?? emptyAddState), loading: false, options: [] }
+      }));
+      return;
+    }
+
     if (!response.ok) {
       setAddStateByList((current) => ({
         ...current,
@@ -152,7 +170,7 @@ export default function RelatedLists({ token, parentEntityKey, parentId, disable
   };
 
   const handleAdd = async (list: RelatedListConfig, option: Choice) => {
-    await fetch(`/api/related-lists/${list.key}`,
+    const response = await fetch(`/api/related-lists/${list.key}`,
       {
         method: "POST",
         headers: {
@@ -163,6 +181,11 @@ export default function RelatedLists({ token, parentEntityKey, parentId, disable
       }
     );
 
+    if (response.status === 401) {
+      dispatchUnauthorized();
+      return;
+    }
+
     setAddStateByList((current) => ({
       ...current,
       [list.key]: { ...emptyAddState }
@@ -172,7 +195,7 @@ export default function RelatedLists({ token, parentEntityKey, parentId, disable
   };
 
   const handleRemove = async (list: RelatedListConfig, relatedId: string) => {
-    await fetch(`/api/related-lists/${list.key}`,
+    const response = await fetch(`/api/related-lists/${list.key}`,
       {
         method: "DELETE",
         headers: {
@@ -182,6 +205,11 @@ export default function RelatedLists({ token, parentEntityKey, parentId, disable
         body: JSON.stringify({ parentId, relatedId })
       }
     );
+
+    if (response.status === 401) {
+      dispatchUnauthorized();
+      return;
+    }
 
     await loadItems(list.key);
   };

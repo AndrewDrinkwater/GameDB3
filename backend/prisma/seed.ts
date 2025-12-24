@@ -155,7 +155,16 @@ async function main() {
     { listKey: "character_status", value: "alive", label: "Alive", sortOrder: 1 },
     { listKey: "character_status", value: "dead", label: "Dead", sortOrder: 2 },
     { listKey: "user_role", value: "ADMIN", label: "Admin", sortOrder: 1 },
-    { listKey: "user_role", value: "USER", label: "User", sortOrder: 2 }
+    { listKey: "user_role", value: "USER", label: "User", sortOrder: 2 },
+    { listKey: "world_entity_permission", value: "ARCHITECT", label: "Architects only", sortOrder: 1 },
+    { listKey: "world_entity_permission", value: "ARCHITECT_GM", label: "Architects and GMs", sortOrder: 2 },
+    { listKey: "world_entity_permission", value: "ARCHITECT_GM_PLAYER", label: "Architects, GMs, and Players", sortOrder: 3 },
+    { listKey: "entity_field_type", value: "TEXT", label: "Single line text", sortOrder: 1 },
+    { listKey: "entity_field_type", value: "TEXTAREA", label: "Multi line text", sortOrder: 2 },
+    { listKey: "entity_field_type", value: "BOOLEAN", label: "Boolean", sortOrder: 3 },
+    { listKey: "entity_field_type", value: "CHOICE", label: "Choice", sortOrder: 4 },
+    { listKey: "entity_field_type", value: "ENTITY_REFERENCE", label: "Reference (Entity)", sortOrder: 5 },
+    { listKey: "entity_field_type", value: "LOCATION_REFERENCE", label: "Reference (Location)", sortOrder: 6 }
   ];
 
   for (const choice of choiceData) {
@@ -206,6 +215,9 @@ async function main() {
     { entityKey: "worlds", fieldKey: "name", label: "World Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "campaigns", fieldKey: "name", label: "Campaign Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "characters", fieldKey: "name", label: "Character Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "entities", fieldKey: "name", label: "Entity Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "entity_types", fieldKey: "name", label: "Entity Type Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "entity_fields", fieldKey: "label", label: "Field Label", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "users", fieldKey: "name", label: "User Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "users", fieldKey: "email", label: "Email", fieldType: SystemFieldType.EMAIL, referenceEntityKey: null, isLabel: false }
   ];
@@ -235,12 +247,13 @@ async function main() {
       { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
       { fieldKey: "dmLabelKey", label: "DM Label", fieldType: SystemFieldType.SELECT, listOrder: 2, formOrder: 3, optionsListKey: "dm_label" },
       { fieldKey: "themeKey", label: "Theme", fieldType: SystemFieldType.SELECT, listOrder: 3, formOrder: 4, optionsListKey: "world_theme" },
+      { fieldKey: "entityPermissionScope", label: "Entity Permissions", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 5, optionsListKey: "world_entity_permission" },
       {
         fieldKey: "characterCreatorIds",
         label: "Character Creators",
         fieldType: SystemFieldType.REFERENCE,
-        listOrder: 5,
-        formOrder: 5,
+        listOrder: 6,
+        formOrder: 6,
         referenceEntityKey: "users",
         allowMultiple: true,
         listVisible: false,
@@ -260,12 +273,13 @@ async function main() {
       { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 4, formOrder: 2 },
       { fieldKey: "dmLabelKey", label: "DM Label", fieldType: SystemFieldType.SELECT, listOrder: 2, formOrder: 3, optionsListKey: "dm_label" },
       { fieldKey: "themeKey", label: "Theme", fieldType: SystemFieldType.SELECT, listOrder: 3, formOrder: 4, optionsListKey: "world_theme" },
+      { fieldKey: "entityPermissionScope", label: "Entity Permissions", fieldType: SystemFieldType.SELECT, listOrder: 5, formOrder: 5, optionsListKey: "world_entity_permission" },
       {
         fieldKey: "characterCreatorIds",
         label: "Character Creators",
         fieldType: SystemFieldType.REFERENCE,
-        listOrder: 5,
-        formOrder: 5,
+        listOrder: 6,
+        formOrder: 6,
         referenceEntityKey: "users",
         allowMultiple: true,
         listVisible: false,
@@ -338,6 +352,124 @@ async function main() {
       { fieldKey: "playerId", label: "Owner", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, referenceEntityKey: "users" },
       { fieldKey: "statusKey", label: "Status", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 4, optionsListKey: "character_status" },
       { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 5, formOrder: 5 }
+    ]
+  },
+  {
+    key: "entity_types.list",
+    title: "Entity Types",
+    entityKey: "entity_types",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/entity-types",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "worlds" },
+      { fieldKey: "isTemplate", label: "Template", fieldType: SystemFieldType.BOOLEAN, listOrder: 3, formOrder: 3 }
+    ]
+  },
+  {
+    key: "entity_types.form",
+    title: "Entity Type",
+    entityKey: "entity_types",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/entity-types",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "worlds" },
+      { fieldKey: "isTemplate", label: "Template", fieldType: SystemFieldType.BOOLEAN, listOrder: 3, formOrder: 3 },
+      { fieldKey: "sourceTypeId", label: "Copy From", fieldType: SystemFieldType.REFERENCE, listOrder: 4, formOrder: 4, referenceEntityKey: "entity_types", referenceScope: "entity_type_source" },
+      { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 5, formOrder: 5 }
+    ]
+  },
+  {
+    key: "entity_fields.list",
+    title: "Entity Fields",
+    entityKey: "entity_fields",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/entity-fields",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "entityTypeId", label: "Entity Type", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "entity_types", referenceScope: "entity_type" },
+      { fieldKey: "fieldKey", label: "Field Key", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2 },
+      { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
+      { fieldKey: "fieldType", label: "Type", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 4, optionsListKey: "entity_field_type" },
+      { fieldKey: "required", label: "Required", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 }
+    ]
+  },
+  {
+    key: "entity_fields.form",
+    title: "Entity Field",
+    entityKey: "entity_fields",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/entity-fields",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "entityTypeId", label: "Entity Type", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "entity_types", referenceScope: "entity_type" },
+      { fieldKey: "fieldKey", label: "Field Key", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2, required: true },
+      { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true },
+      { fieldKey: "fieldType", label: "Field Type", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 4, required: true, optionsListKey: "entity_field_type" },
+      { fieldKey: "required", label: "Required", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 },
+      { fieldKey: "listOrder", label: "List Order", fieldType: SystemFieldType.NUMBER, listOrder: 6, formOrder: 6 },
+      { fieldKey: "formOrder", label: "Form Order", fieldType: SystemFieldType.NUMBER, listOrder: 7, formOrder: 7 },
+      { fieldKey: "referenceEntityTypeId", label: "Reference Entity Type", fieldType: SystemFieldType.REFERENCE, listOrder: 8, formOrder: 8, referenceEntityKey: "entity_types" },
+      { fieldKey: "referenceLocationTypeKey", label: "Reference Location Type", fieldType: SystemFieldType.TEXT, listOrder: 9, formOrder: 9 },
+      { fieldKey: "conditions", label: "Visibility Conditions", fieldType: SystemFieldType.TEXTAREA, listOrder: 10, formOrder: 10 }
+    ]
+  },
+  {
+    key: "entity_field_choices.list",
+    title: "Entity Field Choices",
+    entityKey: "entity_field_choices",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/entity-field-choices",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "entityFieldId", label: "Field", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "entity_fields" },
+      { fieldKey: "value", label: "Value", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2 },
+      { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
+      { fieldKey: "sortOrder", label: "Sort", fieldType: SystemFieldType.NUMBER, listOrder: 4, formOrder: 4 }
+    ]
+  },
+  {
+    key: "entity_field_choices.form",
+    title: "Entity Field Choice",
+    entityKey: "entity_field_choices",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/entity-field-choices",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "entityFieldId", label: "Field", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "entity_fields" },
+      { fieldKey: "value", label: "Value", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2, required: true },
+      { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true },
+      { fieldKey: "sortOrder", label: "Sort", fieldType: SystemFieldType.NUMBER, listOrder: 4, formOrder: 4 }
+    ]
+  },
+  {
+    key: "entities.list",
+    title: "Entities",
+    entityKey: "entities",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/entities",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
+      { fieldKey: "entityTypeId", label: "Type", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "entity_types" },
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, referenceEntityKey: "worlds" }
+    ]
+  },
+  {
+    key: "entities.form",
+    title: "Entity",
+    entityKey: "entities",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/entities",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, required: true, referenceEntityKey: "worlds" },
+      { fieldKey: "entityTypeId", label: "Type", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, required: true, referenceEntityKey: "entity_types", referenceScope: "entity_type" },
+      { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 4, formOrder: 4 }
     ]
   },
   {

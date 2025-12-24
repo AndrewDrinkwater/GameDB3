@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { dispatchUnauthorized } from "../utils/auth";
 
 type ViewField = {
   id: string;
@@ -100,6 +101,11 @@ export default function ListView({
           headers: { Authorization: `Bearer ${token}` }
         });
 
+        if (viewResponse.status === 401) {
+          dispatchUnauthorized();
+          return;
+        }
+
         if (!viewResponse.ok) {
           throw new Error("Unable to load view.");
         }
@@ -121,6 +127,10 @@ export default function ListView({
             const choiceResponse = await fetch(`/api/choices?listKey=${listKey}`, {
               headers: { Authorization: `Bearer ${token}` }
             });
+            if (choiceResponse.status === 401) {
+              dispatchUnauthorized();
+              return [listKey, []] as const;
+            }
             if (!choiceResponse.ok) return [listKey, []] as const;
             const data = (await choiceResponse.json()) as Choice[];
             return [listKey, data] as const;
@@ -142,12 +152,26 @@ export default function ListView({
         if (viewData.entityKey === "worlds" && contextWorldId) {
           params.set("worldId", contextWorldId);
         }
+        if (viewData.entityKey === "entity_types" && contextWorldId) {
+          params.set("worldId", contextWorldId);
+        }
+        if (viewData.entityKey === "entity_fields" && contextWorldId) {
+          params.set("worldId", contextWorldId);
+        }
+        if (viewData.entityKey === "entity_field_choices" && contextWorldId) {
+          params.set("worldId", contextWorldId);
+        }
         if (viewData.entityKey === "campaigns") {
           if (contextWorldId) params.set("worldId", contextWorldId);
           if (contextCampaignId) params.set("campaignId", contextCampaignId);
           if (contextCharacterId) params.set("characterId", contextCharacterId);
         }
         if (viewData.entityKey === "characters") {
+          if (contextWorldId) params.set("worldId", contextWorldId);
+          if (contextCampaignId) params.set("campaignId", contextCampaignId);
+          if (contextCharacterId) params.set("characterId", contextCharacterId);
+        }
+        if (viewData.entityKey === "entities") {
           if (contextWorldId) params.set("worldId", contextWorldId);
           if (contextCampaignId) params.set("campaignId", contextCampaignId);
           if (contextCharacterId) params.set("characterId", contextCharacterId);
@@ -160,6 +184,11 @@ export default function ListView({
         const dataResponse = await fetch(dataUrl, {
           headers: { Authorization: `Bearer ${token}` }
         });
+
+        if (dataResponse.status === 401) {
+          dispatchUnauthorized();
+          return;
+        }
 
         if (!dataResponse.ok) {
           throw new Error("Unable to load data.");
@@ -218,6 +247,10 @@ export default function ListView({
             `/api/references?entityKey=${entityKey}&ids=${ids.join(",")}`,
             { headers: { Authorization: `Bearer ${token}` } }
           );
+          if (response.status === 401) {
+            dispatchUnauthorized();
+            return [entityKey, {}] as const;
+          }
           if (!response.ok) return [entityKey, {}] as const;
           const data = (await response.json()) as Array<{ id: string; label: string }>;
           const map = data.reduce<Record<string, string>>((acc, item) => {
