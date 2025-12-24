@@ -165,6 +165,30 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
     setSections((current) => [...current, created].sort(sortByOrder));
   };
 
+  const moveSection = (sectionId: string, direction: -1 | 1) => {
+    setSections((current) => {
+      const sorted = [...current].sort(sortByOrder);
+      const index = sorted.findIndex((section) => section.id === sectionId);
+      const targetIndex = index + direction;
+      if (index < 0 || targetIndex < 0 || targetIndex >= sorted.length) return current;
+      const reordered = [...sorted];
+      const [moved] = reordered.splice(index, 1);
+      reordered.splice(targetIndex, 0, moved);
+      const updated = reordered.map((section, orderIndex) => ({
+        ...section,
+        sortOrder: orderIndex + 1
+      }));
+      const changed = updated.filter((section) => {
+        const previous = current.find((item) => item.id === section.id);
+        return previous?.sortOrder !== section.sortOrder;
+      });
+      void Promise.all(
+        changed.map((section) => persistSectionUpdate(section.id, { sortOrder: section.sortOrder }))
+      );
+      return updated;
+    });
+  };
+
   const handleDeleteSection = async (sectionId: string) => {
     if (!window.confirm("Delete this section? Fields will be unassigned.")) return;
     const response = await fetch(`/api/entity-form-sections/${sectionId}`, {
@@ -284,6 +308,28 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                 onBlur={() => persistSectionUpdate(section.id, { title: section.title })}
               />
               <div className="form-designer__section-actions">
+                <div className="form-designer__section-order">
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => moveSection(section.id, -1)}
+                    disabled={sections.findIndex((item) => item.id === section.id) === 0}
+                    aria-label="Move section up"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => moveSection(section.id, 1)}
+                    disabled={
+                      sections.findIndex((item) => item.id === section.id) === sections.length - 1
+                    }
+                    aria-label="Move section down"
+                  >
+                    ↓
+                  </button>
+                </div>
                 <select
                   value={layout}
                   onChange={(event) => {
@@ -344,9 +390,14 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                         }}
                       >
                         <div className="form-designer__field-header">
-                          <div>
+                          <div className="form-designer__field-title-group">
+                            <span className="form-designer__drag-handle" aria-hidden="true">
+                              ⋮⋮
+                            </span>
                             <div className="form-designer__field-title">{field.label}</div>
-                            <div className="form-designer__field-meta">{field.fieldType}</div>
+                            <div className="form-designer__field-meta">
+                              {field.fieldType} · {field.fieldKey}
+                            </div>
                           </div>
                           <label className="form-designer__required">
                             <input

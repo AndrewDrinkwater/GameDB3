@@ -258,6 +258,38 @@ body {
   gap: 0.6rem;
 }
 
+.sidebar__entity-list {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.sidebar__entity-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  background: none;
+  border: none;
+  padding: 0.2rem 0;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.sidebar__entity-item:hover,
+.sidebar__entity-item:focus-visible {
+  color: var(--accent);
+}
+
+.sidebar__entity-count {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  color: var(--text-muted);
+}
+
 .sidebar__chevron {
   transition: transform 0.2s ease;
   color: var(--text-muted);
@@ -1055,6 +1087,16 @@ body {
   gap: 0.6rem;
 }
 
+.form-designer__section-order {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.form-designer__section-order .ghost-button {
+  padding: 0.2rem 0.5rem;
+  min-width: 2rem;
+}
+
 .form-designer__section-actions select {
   padding: 0.35rem 0.6rem;
   border-radius: 0.6rem;
@@ -1102,6 +1144,18 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+}
+
+.form-designer__field-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.form-designer__drag-handle {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  letter-spacing: -0.1em;
 }
 
 .form-designer__field-title {

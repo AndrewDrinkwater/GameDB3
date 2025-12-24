@@ -180,6 +180,7 @@ export default function FormView({
   const [entityAccess, setEntityAccess] = useState<EntityAccessState | null>(null);
   const [conditionFieldOptions, setConditionFieldOptions] = useState<Choice[]>([]);
   const [entityTab, setEntityTab] = useState<"info" | "access">("info");
+  const [entityTypeTab, setEntityTypeTab] = useState<"details" | "designer">("details");
 
   const isNew = recordId === "new";
 
@@ -300,6 +301,7 @@ export default function FormView({
 
   useEffect(() => {
     setEntityTab("info");
+    setEntityTypeTab("details");
   }, [viewKey, recordId]);
 
   useEffect(() => {
@@ -1014,6 +1016,16 @@ export default function FormView({
 
   const isEntityView = view.entityKey === "entities";
   const isEntityTypeView = view.entityKey === "entity_types";
+  const templateFieldKeys = new Set(["isTemplate", "sourceTypeId"]);
+  const entityTypeFields =
+    view.entityKey === "entity_types"
+      ? formFields.filter((field) => {
+          if (entityTypeTab === "details") {
+            return !templateFieldKeys.has(field.fieldKey);
+          }
+          return false;
+        })
+      : formFields;
 
   return (
     <div className="form-view">
@@ -1057,9 +1069,31 @@ export default function FormView({
             </button>
           </div>
         ) : null}
+        {isEntityTypeView ? (
+          <div className="form-view__tabs" role="tablist">
+            <button
+              type="button"
+              className={`form-view__tab ${entityTypeTab === "details" ? "is-active" : ""}`}
+              onClick={() => setEntityTypeTab("details")}
+              role="tab"
+              aria-selected={entityTypeTab === "details"}
+            >
+              Details
+            </button>
+            <button
+              type="button"
+              className={`form-view__tab ${entityTypeTab === "designer" ? "is-active" : ""}`}
+              onClick={() => setEntityTypeTab("designer")}
+              role="tab"
+              aria-selected={entityTypeTab === "designer"}
+            >
+              Form Designer
+            </button>
+          </div>
+        ) : null}
         {!isEntityView || entityTab === "info" ? (
           <>
-            {formFields.map((field) => {
+            {entityTypeTab === "designer" && isEntityTypeView ? null : entityTypeFields.map((field) => {
               const value = formData[field.fieldKey];
               const coerced = coerceValue(field.fieldType, value);
               const listKey = field.optionsListKey ?? "";
@@ -1322,7 +1356,7 @@ export default function FormView({
                 )}
               </div>
             ) : null}
-            {isEntityTypeView ? (
+            {isEntityTypeView && entityTypeTab === "designer" ? (
               <div className="form-view__section">
                 <h2>Form Designer</h2>
                 {isNew ? (

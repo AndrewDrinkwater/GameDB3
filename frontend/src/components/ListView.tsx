@@ -39,6 +39,7 @@ type ListViewProps = {
   contextWorldId?: string;
   contextCampaignId?: string;
   contextCharacterId?: string;
+  extraParams?: Record<string, string | undefined>;
 };
 
 const fieldSorter = (a: ViewField, b: ViewField) => a.listOrder - b.listOrder;
@@ -80,7 +81,8 @@ export default function ListView({
   onOpenForm,
   contextWorldId,
   contextCampaignId,
-  contextCharacterId
+  contextCharacterId,
+  extraParams
 }: ListViewProps) {
   const [view, setView] = useState<SystemView | null>(null);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -89,6 +91,7 @@ export default function ListView({
   const [query, setQuery] = useState("");
   const [choiceMaps, setChoiceMaps] = useState<Record<string, Record<string, string>>>({});
   const [referenceMaps, setReferenceMaps] = useState<Record<string, Record<string, string>>>({});
+  const extraParamsKey = JSON.stringify(extraParams ?? {});
 
   useEffect(() => {
     let ignore = false;
@@ -149,6 +152,11 @@ export default function ListView({
         setChoiceMaps(newChoiceMaps);
 
         const params = new URLSearchParams();
+        if (extraParams) {
+          Object.entries(extraParams).forEach(([key, value]) => {
+            if (value) params.set(key, value);
+          });
+        }
         if (viewData.entityKey === "worlds" && contextWorldId) {
           params.set("worldId", contextWorldId);
         }
@@ -211,7 +219,7 @@ export default function ListView({
     return () => {
       ignore = true;
     };
-  }, [token, viewKey, contextWorldId, contextCampaignId, contextCharacterId]);
+  }, [token, viewKey, contextWorldId, contextCampaignId, contextCharacterId, extraParamsKey]);
 
   useEffect(() => {
     let ignore = false;

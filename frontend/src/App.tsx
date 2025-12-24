@@ -105,6 +105,9 @@ function App() {
   const [contextOpen, setContextOpen] = useState(false);
   const [worldAdminExpanded, setWorldAdminExpanded] = useState(true);
   const [worldAdminAllowed, setWorldAdminAllowed] = useState(false);
+  const [entityTypeStats, setEntityTypeStats] = useState<
+    Array<{ id: string; name: string; count: number }>
+  >([]);
 
   const contextStorageKey = "ttrpg.context";
   const contextPanelRef = useRef<HTMLDivElement | null>(null);
@@ -278,6 +281,37 @@ function App() {
       ignore = true;
     };
   }, [user, token, context.worldId]);
+
+  useEffect(() => {
+    let ignore = false;
+    if (!token || !context.worldId) {
+      setEntityTypeStats([]);
+      return;
+    }
+
+    const loadEntityTypeStats = async () => {
+      const params = new URLSearchParams({ worldId: context.worldId as string });
+      if (context.campaignId) params.set("campaignId", context.campaignId);
+      if (context.characterId) params.set("characterId", context.characterId);
+
+      const response = await fetch(`/api/entity-type-stats?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (handleUnauthorized(response)) return;
+      if (!response.ok) {
+        if (!ignore) setEntityTypeStats([]);
+        return;
+      }
+      const data = (await response.json()) as Array<{ id: string; name: string; count: number }>;
+      if (!ignore) setEntityTypeStats(data);
+    };
+
+    void loadEntityTypeStats();
+
+    return () => {
+      ignore = true;
+    };
+  }, [token, context.worldId, context.campaignId, context.characterId]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -609,7 +643,10 @@ function App() {
     return "Navigation";
   }, [sidebarMode]);
 
-  const routeParts = route.replace(/^#/, "").split("/").filter(Boolean);
+  const [routePath, routeSearch = ""] = route.replace(/^#/, "").split("?");
+  const routeParts = routePath.split("/").filter(Boolean);
+  const routeParams = new URLSearchParams(routeSearch);
+  const entityTypeIdParam = routeParams.get("entityTypeId") ?? undefined;
 
   const renderContent = () => {
     if (!user || !token) return null;
@@ -748,6 +785,10 @@ function App() {
     if (routeParts[0] === "list" && routeParts[1]) {
       const config = viewRegistry[routeParts[1]];
       if (!config) return null;
+      const extraParams =
+        routeParts[1] === "entities" && entityTypeIdParam
+          ? { entityTypeId: entityTypeIdParam }
+          : undefined;
       return (
         <section className="app__panel app__panel--wide">
           <ListView
@@ -757,6 +798,7 @@ function App() {
             contextWorldId={context.worldId}
             contextCampaignId={context.campaignId}
             contextCharacterId={context.characterId}
+            extraParams={extraParams}
             onOpenForm={(id) => {
               window.location.hash = `/form/${routeParts[1]}/${id}`;
               handleSidebarSelect();
@@ -796,7 +838,11 @@ function App() {
               viewKey={config.formKey}
               recordId={routeParts[2]}
               onBack={() => {
-                window.location.hash = `/list/${routeParts[1]}`;
+                const listPath =
+                  routeParts[1] === "entities" && entityTypeIdParam
+                    ? `/list/entities?entityTypeId=${entityTypeIdParam}`
+                    : `/list/${routeParts[1]}`;
+                window.location.hash = listPath;
               }}
               currentUserId={user.id}
               currentUserLabel={user.name ?? user.email}
@@ -1034,15 +1080,27 @@ function App() {
                     >
                       Characters
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        window.location.hash = "/list/entities";
-                        handleSidebarSelect();
-                      }}
-                    >
-                      Entities
-                    </button>
+                    {entityTypeStats.length > 0 ? (
+                      <div className="sidebar__section">
+                        <span className="sidebar__section-title">Entities</span>
+                        <div className="sidebar__section-body sidebar__entity-list">
+                          {entityTypeStats.map((type) => (
+                            <button
+                              key={type.id}
+                              type="button"
+                              className="sidebar__entity-item"
+                              onClick={() => {
+                                window.location.hash = `/list/entities?entityTypeId=${type.id}`;
+                                handleSidebarSelect();
+                              }}
+                            >
+                              <span>{type.name}</span>
+                              <span className="sidebar__entity-count">{type.count}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     {worldAdminAllowed ? (
                       <div className="sidebar__section">
                         <button

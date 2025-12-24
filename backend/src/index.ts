@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
-import { randomUUID } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 import {
   Prisma,
   PrismaClient,
@@ -24,7 +24,46 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT ? Number(process.env.PORT) : 4000;
 const prisma = new PrismaClient();
-const tokens = new Map<string, string>();
+const tokenSecret = process.env.AUTH_SECRET ?? "ttrpg-dev-secret";
+
+const toBase64Url = (value: string) =>
+  Buffer.from(value)
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+
+const fromBase64Url = (value: string) => {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padLength = padded.length % 4 === 0 ? 0 : 4 - (padded.length % 4);
+  const normalized = `${padded}${"=".repeat(padLength)}`;
+  return Buffer.from(normalized, "base64").toString("utf8");
+};
+
+const signToken = (payload: { userId: string; iat: number }) => {
+  const encoded = toBase64Url(JSON.stringify(payload));
+  const signature = createHmac("sha256", tokenSecret).update(encoded).digest("base64");
+  const signatureUrl = signature.replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  return `${encoded}.${signatureUrl}`;
+};
+
+const verifyToken = (token: string) => {
+  const [encoded, signature] = token.split(".");
+  if (!encoded || !signature) return null;
+  const expected = createHmac("sha256", tokenSecret).update(encoded).digest("base64");
+  const expectedUrl = expected.replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  const sigBuffer = Buffer.from(signature);
+  const expBuffer = Buffer.from(expectedUrl);
+  if (sigBuffer.length !== expBuffer.length) return null;
+  if (!timingSafeEqual(sigBuffer, expBuffer)) return null;
+  try {
+    const payload = JSON.parse(fromBase64Url(encoded)) as { userId: string; iat: number };
+    if (!payload?.userId) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+};
 
 app.use(cors());
 app.use(express.json());
@@ -46,9 +85,9 @@ const getBearerToken = (req: express.Request) => {
 const getAuthUser = async (req: express.Request) => {
   const token = getBearerToken(req);
   if (!token) return null;
-  const userId = tokens.get(token);
-  if (!userId) return null;
-  return prisma.user.findUnique({ where: { id: userId } });
+  const payload = verifyToken(token);
+  if (!payload?.userId) return null;
+  return prisma.user.findUnique({ where: { id: payload.userId } });
 };
 
 const requireAuth: express.RequestHandler = async (req, res, next) => {
@@ -200,12 +239,17 @@ const canAccessWorld = async (userId: string, worldId: string) => {
   });
 
   if (!world) return false;
-  return (
+  if (
     world.primaryArchitectId === userId ||
     world.architects.length > 0 ||
     world.campaignCreators.length > 0 ||
     world.characterCreators.length > 0
-  );
+  ) {
+    return true;
+  }
+
+  if (await isWorldGm(userId, worldId)) return true;
+  return isWorldPlayer(userId, worldId);
 };
 
 const canCreateCharacterInCampaign = async (userId: string, campaignId: string) => {
@@ -223,6 +267,25 @@ const canCreateCharacterInCampaign = async (userId: string, campaignId: string) 
   });
 
   return Boolean(allowed);
+};
+
+type EntityFieldRecord = Prisma.EntityFieldGetPayload<{ include: { choices: true } }>;
+
+type EntityFieldValueWrite = {
+  entityId: string;
+  fieldId: string;
+  valueString?: string | null;
+  valueText?: string | null;
+  valueBoolean?: boolean | null;
+  valueNumber?: number | null;
+  valueJson?: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput;
+};
+
+type EntityAccessEntry = {
+  entityId: string;
+  accessType: EntityAccessType;
+  scopeType: EntityAccessScope;
+  scopeId?: string | null;
 };
 
 type ViewFieldSeed = {
@@ -842,8 +905,7 @@ app.post("/api/auth/login", async (req, res) => {
       return;
     }
 
-    const token = randomUUID();
-    tokens.set(token, user.id);
+    const token = signToken({ userId: user.id, iat: Date.now() });
 
     res.json({
       token,
@@ -867,13 +929,13 @@ app.get("/api/auth/me", async (req, res) => {
     return;
   }
 
-  const userId = tokens.get(token);
-  if (!userId) {
+  const payload = verifyToken(token);
+  if (!payload?.userId) {
     res.status(401).json({ error: "Invalid token." });
     return;
   }
 
-  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const user = await prisma.user.findUnique({ where: { id: payload.userId } });
   if (!user) {
     res.status(401).json({ error: "Invalid token." });
     return;
@@ -888,10 +950,6 @@ app.get("/api/auth/me", async (req, res) => {
 });
 
 app.post("/api/auth/logout", (req, res) => {
-  const token = getBearerToken(req);
-  if (token) {
-    tokens.delete(token);
-  }
   res.json({ ok: true });
 });
 
@@ -3713,6 +3771,59 @@ app.delete("/api/entity-types/:id", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+app.get("/api/entity-type-stats", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+  const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+  const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+
+  if (!worldId) {
+    res.json([]);
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canAccessWorld(user.id, worldId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const types = await prisma.entityType.findMany({
+    where: { worldId },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true }
+  });
+
+  if (types.length === 0) {
+    res.json([]);
+    return;
+  }
+
+  const accessFilter = isAdmin(user)
+    ? { worldId }
+    : await buildEntityAccessFilter(user, worldId, campaignId, characterId);
+
+  const grouped = await prisma.entity.groupBy({
+    by: ["entityTypeId"],
+    where: accessFilter,
+    _count: { _all: true }
+  });
+
+  const countMap = new Map(grouped.map((entry) => [entry.entityTypeId, entry._count._all]));
+
+  res.json(
+    types.map((type) => ({
+      id: type.id,
+      name: type.name,
+      count: countMap.get(type.id) ?? 0
+    }))
+  );
+});
+
 app.get("/api/entity-form-sections", requireAuth, async (req, res) => {
   const user = (req as AuthRequest).user;
   if (!user) {
@@ -4391,13 +4502,13 @@ app.post("/api/entities", requireAuth, async (req, res) => {
     return;
   }
 
-  const fields = await prisma.entityField.findMany({
+  const fields: EntityFieldRecord[] = await prisma.entityField.findMany({
     where: { entityTypeId },
     include: { choices: true }
   });
   const fieldMap = new Map(fields.map((field) => [field.fieldKey, field]));
 
-  const created = await prisma.$transaction(async (tx) => {
+  const created = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     const entity = await tx.entity.create({
       data: {
         worldId,
@@ -4412,9 +4523,9 @@ app.post("/api/entities", requireAuth, async (req, res) => {
       for (const [fieldKey, rawValue] of Object.entries(fieldValues)) {
         const field = fieldMap.get(fieldKey);
         if (!field) continue;
-        const valuePayload: Prisma.EntityFieldValueCreateInput = {
-          entity: { connect: { id: entity.id } },
-          field: { connect: { id: field.id } }
+        const valuePayload: EntityFieldValueWrite = {
+          entityId: entity.id,
+          fieldId: field.id
         };
 
         if (field.fieldType === EntityFieldType.TEXT || field.fieldType === EntityFieldType.CHOICE) {
@@ -4434,7 +4545,7 @@ app.post("/api/entities", requireAuth, async (req, res) => {
       }
     }
 
-    const accessEntries: Prisma.EntityAccessCreateManyInput[] = [];
+    const accessEntries: EntityAccessEntry[] = [];
 
     if (access?.read) {
       if (access.read.global) {
@@ -4641,13 +4752,13 @@ app.put("/api/entities/:id", requireAuth, async (req, res) => {
     fieldValues?: Record<string, unknown>;
   };
 
-  const fields = await prisma.entityField.findMany({
+  const fields: EntityFieldRecord[] = await prisma.entityField.findMany({
     where: { entityTypeId: entity.entityTypeId },
     include: { choices: true }
   });
   const fieldMap = new Map(fields.map((field) => [field.fieldKey, field]));
 
-  const updated = await prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     const entityRecord = await tx.entity.update({
       where: { id },
       data: { name, description }
@@ -4658,7 +4769,7 @@ app.put("/api/entities/:id", requireAuth, async (req, res) => {
         const field = fieldMap.get(fieldKey);
         if (!field) continue;
 
-        const valueData: Prisma.EntityFieldValueUncheckedCreateInput = {
+        const valueData: EntityFieldValueWrite = {
           entityId: id,
           fieldId: field.id
         };
@@ -4681,7 +4792,7 @@ app.put("/api/entities/:id", requireAuth, async (req, res) => {
           valueData.valueText === null &&
           valueData.valueBoolean === null &&
           valueData.valueNumber === null &&
-          valueData.valueJson === null
+          valueData.valueJson === undefined
         ) {
           await tx.entityFieldValue.deleteMany({
             where: { entityId: id, fieldId: field.id }
@@ -4829,7 +4940,7 @@ app.put("/api/entities/:id/access", requireAuth, async (req, res) => {
     write?: { global?: boolean; campaigns?: string[]; characters?: string[] };
   };
 
-  const accessEntries: Prisma.EntityAccessCreateManyInput[] = [];
+  const accessEntries: EntityAccessEntry[] = [];
   if (read?.global) {
     accessEntries.push({
       entityId: id,
