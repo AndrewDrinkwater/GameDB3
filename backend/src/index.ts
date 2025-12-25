@@ -148,8 +148,17 @@ const isWorldArchitect = async (userId: string, worldId: string) => {
   return world.primaryArchitectId === userId || world.architects.length > 0;
 };
 
+const isWorldGameMaster = async (userId: string, worldId: string) => {
+  const entry = await prisma.worldGameMaster.findFirst({
+    where: { worldId, userId },
+    select: { userId: true }
+  });
+  return Boolean(entry);
+};
+
 const canCreateCampaign = async (userId: string, worldId: string) => {
   if (await isWorldArchitect(userId, worldId)) return true;
+  if (await isWorldGameMaster(userId, worldId)) return true;
 
   const allowed = await prisma.worldCampaignCreator.findFirst({
     where: { worldId, userId }
@@ -233,6 +242,7 @@ const canAccessWorld = async (userId: string, worldId: string) => {
     select: {
       primaryArchitectId: true,
       architects: { where: { userId }, select: { userId: true } },
+      gameMasters: { where: { userId }, select: { userId: true } },
       campaignCreators: { where: { userId }, select: { userId: true } },
       characterCreators: { where: { userId }, select: { userId: true } }
     }
@@ -242,6 +252,7 @@ const canAccessWorld = async (userId: string, worldId: string) => {
   if (
     world.primaryArchitectId === userId ||
     world.architects.length > 0 ||
+    world.gameMasters.length > 0 ||
     world.campaignCreators.length > 0 ||
     world.characterCreators.length > 0
   ) {
@@ -312,6 +323,45 @@ type ViewSeed = {
   endpoint: string;
   adminOnly: boolean;
   fields: ViewFieldSeed[];
+};
+
+type RelatedListFieldSeed = {
+  fieldKey: string;
+  label: string;
+  source: RelatedListFieldSource;
+  listOrder: number;
+  width?: string;
+};
+
+type RelatedListSeed = {
+  key: string;
+  title: string;
+  parentEntityKey: string;
+  relatedEntityKey: string;
+  joinEntityKey: string;
+  parentFieldKey: string;
+  relatedFieldKey: string;
+  listOrder: number;
+  adminOnly: boolean;
+  fields: RelatedListFieldSeed[];
+};
+
+const relatedListSeeds: Record<string, RelatedListSeed> = {
+  "world.game_masters": {
+    key: "world.game_masters",
+    title: "Game Masters",
+    parentEntityKey: "worlds",
+    relatedEntityKey: "users",
+    joinEntityKey: "worldGameMaster",
+    parentFieldKey: "worldId",
+    relatedFieldKey: "userId",
+    listOrder: 4,
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", source: RelatedListFieldSource.RELATED, listOrder: 1 },
+      { fieldKey: "email", label: "Email", source: RelatedListFieldSource.RELATED, listOrder: 2 }
+    ]
+  }
 };
 
 const entityViewSeeds: Record<string, ViewSeed> = {
@@ -553,6 +603,66 @@ const ensureSeededView = async (key: string) => {
   }
 
   return prisma.systemView.findUnique({
+    where: { key: seed.key },
+    include: { fields: true }
+  });
+};
+
+const ensureSeededRelatedList = async (key: string) => {
+  const seed = relatedListSeeds[key];
+  if (!seed) return null;
+
+  const saved = await prisma.systemRelatedList.upsert({
+    where: { key: seed.key },
+    update: {
+      title: seed.title,
+      parentEntityKey: seed.parentEntityKey,
+      relatedEntityKey: seed.relatedEntityKey,
+      joinEntityKey: seed.joinEntityKey,
+      parentFieldKey: seed.parentFieldKey,
+      relatedFieldKey: seed.relatedFieldKey,
+      listOrder: seed.listOrder,
+      adminOnly: seed.adminOnly
+    },
+    create: {
+      key: seed.key,
+      title: seed.title,
+      parentEntityKey: seed.parentEntityKey,
+      relatedEntityKey: seed.relatedEntityKey,
+      joinEntityKey: seed.joinEntityKey,
+      parentFieldKey: seed.parentFieldKey,
+      relatedFieldKey: seed.relatedFieldKey,
+      listOrder: seed.listOrder,
+      adminOnly: seed.adminOnly
+    }
+  });
+
+  for (const field of seed.fields) {
+    await prisma.systemRelatedListField.upsert({
+      where: {
+        relatedListId_fieldKey_source: {
+          relatedListId: saved.id,
+          fieldKey: field.fieldKey,
+          source: field.source
+        }
+      },
+      update: {
+        label: field.label,
+        listOrder: field.listOrder,
+        width: field.width ?? null
+      },
+      create: {
+        relatedListId: saved.id,
+        fieldKey: field.fieldKey,
+        label: field.label,
+        source: field.source,
+        listOrder: field.listOrder,
+        width: field.width ?? null
+      }
+    });
+  }
+
+  return prisma.systemRelatedList.findUnique({
     where: { key: seed.key },
     include: { fields: true }
   });
@@ -1054,6 +1164,17 @@ app.get("/api/views/:key", requireAuth, async (req, res) => {
     return;
   }
 
+  if (view.entityKey === "campaigns") {
+    const fields = view.fields.map((field) => {
+      if (field.fieldKey === "gmUserId" && !field.referenceScope) {
+        return { ...field, referenceScope: "world_gm" };
+      }
+      return field;
+    });
+    res.json({ ...view, fields });
+    return;
+  }
+
   res.json(view);
 });
 
@@ -1068,6 +1189,10 @@ app.get("/api/related-lists", requireAuth, async (req, res) => {
   if (!entityKey) {
     res.status(400).json({ error: "entityKey is required." });
     return;
+  }
+
+  if (entityKey === "worlds") {
+    await ensureSeededRelatedList("world.game_masters");
   }
 
   const relatedLists = await prisma.systemRelatedList.findMany({
@@ -1193,6 +1318,19 @@ app.get("/api/related-lists/:key", requireAuth, async (req, res) => {
     }));
   }
 
+  if (relatedList.joinEntityKey === "worldGameMaster") {
+    const rows = await prisma.worldGameMaster.findMany({
+      where: { worldId: parentId },
+      include: { user: { select: relatedSelect as Record<string, true> } }
+    });
+
+    items = rows.map((row) => ({
+      relatedId: row.userId,
+      relatedData: row.user as Record<string, unknown>,
+      joinData: {}
+    }));
+  }
+
   if (relatedList.joinEntityKey === "campaignCharacterCreator") {
     const rows = await prisma.campaignCharacterCreator.findMany({
       where: { campaignId: parentId },
@@ -1305,6 +1443,21 @@ app.post("/api/related-lists/:key", requireAuth, async (req, res) => {
     return;
   }
 
+  if (relatedList.joinEntityKey === "worldGameMaster") {
+    const canManage = isAdmin(user) || (await isWorldArchitect(user.id, parentId));
+    if (!canManage) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+    const entry = await prisma.worldGameMaster.upsert({
+      where: { worldId_userId: { worldId: parentId, userId: relatedId } },
+      update: {},
+      create: { worldId: parentId, userId: relatedId }
+    });
+    res.status(201).json(entry);
+    return;
+  }
+
   if (relatedList.joinEntityKey === "campaignCharacterCreator") {
     const entry = await prisma.campaignCharacterCreator.upsert({
       where: { campaignId_userId: { campaignId: parentId, userId: relatedId } },
@@ -1386,6 +1539,19 @@ app.delete("/api/related-lists/:key", requireAuth, async (req, res) => {
 
   if (relatedList.joinEntityKey === "worldArchitect") {
     await prisma.worldArchitect.delete({
+      where: { worldId_userId: { worldId: parentId, userId: relatedId } }
+    });
+    res.json({ ok: true });
+    return;
+  }
+
+  if (relatedList.joinEntityKey === "worldGameMaster") {
+    const canManage = isAdmin(user) || (await isWorldArchitect(user.id, parentId));
+    if (!canManage) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+    await prisma.worldGameMaster.delete({
       where: { worldId_userId: { worldId: parentId, userId: relatedId } }
     });
     res.json({ ok: true });
@@ -1709,12 +1875,29 @@ app.get("/api/references", requireAuth, async (req, res) => {
 
   let results = await getReferenceResults(entityKey, query, ids);
 
+  if (entityKey === "users" && scope === "world_gm" && !ids) {
+    if (!worldId) {
+      res.json([]);
+      return;
+    }
+    const canSeeAll = isAdmin(user) || (await isWorldArchitect(user.id, worldId));
+    if (!canSeeAll) {
+      const gmUsers = await prisma.worldGameMaster.findMany({
+        where: { worldId },
+        select: { userId: true }
+      });
+      const allowedIds = new Set(gmUsers.map((entry) => entry.userId));
+      results = results.filter((item) => allowedIds.has(item.id));
+    }
+  }
+
   if (entityKey === "worlds") {
     if (user && !isAdmin(user) && !ids) {
       let whereClause = {
         OR: [
           { primaryArchitectId: user.id },
           { architects: { some: { userId: user.id } } },
+          { gameMasters: { some: { userId: user.id } } },
           { campaignCreators: { some: { userId: user.id } } },
           { characterCreators: { some: { userId: user.id } } }
         ]
@@ -1735,6 +1918,7 @@ app.get("/api/references", requireAuth, async (req, res) => {
           OR: [
             { primaryArchitectId: user.id },
             { architects: { some: { userId: user.id } } },
+            { gameMasters: { some: { userId: user.id } } },
             { campaignCreators: { some: { userId: user.id } } }
           ]
         };
@@ -2611,6 +2795,7 @@ app.get("/api/worlds", requireAuth, async (req, res) => {
         OR: [
           { primaryArchitectId: user.id },
           { architects: { some: { userId: user.id } } },
+          { gameMasters: { some: { userId: user.id } } },
           { campaignCreators: { some: { userId: user.id } } },
           { characterCreators: { some: { userId: user.id } } }
         ]
@@ -2704,6 +2889,9 @@ app.get("/api/worlds/:id", requireAuth, async (req, res) => {
   const canRead =
     isAdmin(user) ||
     isArchitect ||
+    (await prisma.worldGameMaster.findFirst({
+      where: { worldId: id, userId: user.id }
+    })) ||
     (await prisma.worldCampaignCreator.findFirst({
       where: { worldId: id, userId: user.id }
     })) ||
@@ -2822,7 +3010,62 @@ app.delete("/api/worlds/:id", requireAuth, async (req, res) => {
     return;
   }
 
-  await prisma.world.delete({ where: { id } });
+  await prisma.$transaction(async (tx) => {
+    const campaignIds = (
+      await tx.campaign.findMany({ where: { worldId: id }, select: { id: true } })
+    ).map((campaign) => campaign.id);
+    const characterIds = (
+      await tx.character.findMany({ where: { worldId: id }, select: { id: true } })
+    ).map((character) => character.id);
+    const entityIds = (
+      await tx.entity.findMany({ where: { worldId: id }, select: { id: true } })
+    ).map((entity) => entity.id);
+    const entityTypeIds = (
+      await tx.entityType.findMany({ where: { worldId: id }, select: { id: true } })
+    ).map((entityType) => entityType.id);
+
+    if (campaignIds.length > 0) {
+      await tx.characterCampaign.deleteMany({ where: { campaignId: { in: campaignIds } } });
+      await tx.campaignDelegate.deleteMany({ where: { campaignId: { in: campaignIds } } });
+      await tx.campaignCharacterCreator.deleteMany({
+        where: { campaignId: { in: campaignIds } }
+      });
+    }
+
+    if (characterIds.length > 0) {
+      await tx.characterCampaign.deleteMany({ where: { characterId: { in: characterIds } } });
+    }
+
+    if (entityIds.length > 0) {
+      await tx.entityAccess.deleteMany({ where: { entityId: { in: entityIds } } });
+      await tx.entityFieldValue.deleteMany({ where: { entityId: { in: entityIds } } });
+      await tx.entity.deleteMany({ where: { id: { in: entityIds } } });
+    }
+
+    if (entityTypeIds.length > 0) {
+      await tx.entityFieldChoice.deleteMany({
+        where: { entityField: { entityTypeId: { in: entityTypeIds } } }
+      });
+      await tx.entityField.deleteMany({ where: { entityTypeId: { in: entityTypeIds } } });
+      await tx.entityFormSection.deleteMany({ where: { entityTypeId: { in: entityTypeIds } } });
+      await tx.entityType.deleteMany({ where: { id: { in: entityTypeIds } } });
+    }
+
+    if (characterIds.length > 0) {
+      await tx.character.deleteMany({ where: { id: { in: characterIds } } });
+    }
+
+    if (campaignIds.length > 0) {
+      await tx.campaign.deleteMany({ where: { id: { in: campaignIds } } });
+    }
+
+    await tx.worldDelegate.deleteMany({ where: { worldId: id } });
+    await tx.worldArchitect.deleteMany({ where: { worldId: id } });
+    await tx.worldGameMaster.deleteMany({ where: { worldId: id } });
+    await tx.worldCampaignCreator.deleteMany({ where: { worldId: id } });
+    await tx.worldCharacterCreator.deleteMany({ where: { worldId: id } });
+    await tx.world.delete({ where: { id } });
+  });
   res.json({ ok: true });
 });
 
@@ -3055,10 +3298,38 @@ app.post("/api/campaigns", requireAuth, async (req, res) => {
     }
   }
 
-  const allowCustomGm = isAdmin(user) || (await isWorldArchitect(user.id, worldId));
+  const isArchitect = await isWorldArchitect(user.id, worldId);
+  const isWorldGm = await isWorldGameMaster(user.id, worldId);
+  const allowCustomGm = isAdmin(user) || isArchitect || isWorldGm;
   if (gmUserId && !allowCustomGm) {
-    res.status(403).json({ error: "Only admins or world architects can set the GM." });
+    res.status(403).json({ error: "Only admins, architects, or world GMs can set the GM." });
     return;
+  }
+
+  const finalGmId = gmUserId ?? user.id;
+
+  if (gmUserId) {
+    if (!isAdmin(user) && !isArchitect) {
+      const gmEntry = await prisma.worldGameMaster.findFirst({
+        where: { worldId, userId: finalGmId }
+      });
+      if (!gmEntry) {
+        res.status(403).json({ error: "GM must be assigned to this world." });
+        return;
+      }
+    } else {
+      await prisma.worldGameMaster.upsert({
+        where: { worldId_userId: { worldId, userId: finalGmId } },
+        update: {},
+        create: { worldId, userId: finalGmId }
+      });
+    }
+  } else if (isAdmin(user) || isArchitect) {
+    await prisma.worldGameMaster.upsert({
+      where: { worldId_userId: { worldId, userId: finalGmId } },
+      update: {},
+      create: { worldId, userId: finalGmId }
+    });
   }
 
   const campaign = await prisma.campaign.create({
@@ -3068,7 +3339,7 @@ app.post("/api/campaigns", requireAuth, async (req, res) => {
       worldId,
       ownerId: user.id,
       createdById: user.id,
-      gmUserId: gmUserId ?? user.id
+      gmUserId: finalGmId
     }
   });
 
@@ -3168,10 +3439,29 @@ app.put("/api/campaigns/:id", requireAuth, async (req, res) => {
   }
 
   if (gmUserId && gmUserId !== campaign.gmUserId) {
-    const allowGmChange = isAdmin(user) || (await isWorldArchitect(user.id, campaign.worldId));
-    if (!allowGmChange && campaign.gmUserId !== user.id) {
-      res.status(403).json({ error: "Only admins, architects, or the current GM can change GM." });
+    const isArchitect = await isWorldArchitect(user.id, campaign.worldId);
+    const isWorldGm = await isWorldGameMaster(user.id, campaign.worldId);
+    const allowGmChange =
+      isAdmin(user) || isArchitect || isWorldGm || campaign.gmUserId === user.id;
+    if (!allowGmChange) {
+      res.status(403).json({ error: "Only admins, architects, GMs, or the current GM can change GM." });
       return;
+    }
+
+    if (!isAdmin(user) && !isArchitect) {
+      const gmEntry = await prisma.worldGameMaster.findFirst({
+        where: { worldId: campaign.worldId, userId: gmUserId }
+      });
+      if (!gmEntry) {
+        res.status(403).json({ error: "GM must be assigned to this world." });
+        return;
+      }
+    } else {
+      await prisma.worldGameMaster.upsert({
+        where: { worldId_userId: { worldId: campaign.worldId, userId: gmUserId } },
+        update: {},
+        create: { worldId: campaign.worldId, userId: gmUserId }
+      });
     }
   }
 

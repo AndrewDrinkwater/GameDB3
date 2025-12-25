@@ -3,6 +3,7 @@ import ConditionBuilder from "./ConditionBuilder";
 import EntityFormDesigner from "./EntityFormDesigner";
 import EntityAccessEditor from "./EntityAccessEditor";
 import RelatedLists from "./RelatedLists";
+import { usePopout } from "./PopoutProvider";
 import { dispatchUnauthorized } from "../utils/auth";
 
 type ViewField = {
@@ -88,8 +89,10 @@ type FormViewProps = {
   initialValues?: Record<string, unknown>;
   initialLabels?: Record<string, string>;
   contextWorldId?: string;
+  contextWorldLabel?: string;
   contextCampaignId?: string;
   contextCharacterId?: string;
+  onContextSwitch?: (next: { worldId: string; worldLabel?: string }) => void;
 };
 
 const fieldSorter = (a: ViewField, b: ViewField) => a.formOrder - b.formOrder;
@@ -158,8 +161,10 @@ export default function FormView({
   initialValues,
   initialLabels,
   contextWorldId,
+  contextWorldLabel,
   contextCampaignId,
-  contextCharacterId
+  contextCharacterId,
+  onContextSwitch
 }: FormViewProps) {
   const [view, setView] = useState<SystemView | null>(null);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
@@ -181,6 +186,7 @@ export default function FormView({
   const [conditionFieldOptions, setConditionFieldOptions] = useState<Choice[]>([]);
   const [entityTab, setEntityTab] = useState<"info" | "access">("info");
   const [entityTypeTab, setEntityTypeTab] = useState<"details" | "designer">("details");
+  const { showPopout } = usePopout();
 
   const isNew = recordId === "new";
 
@@ -705,19 +711,15 @@ export default function FormView({
                   <button
                     type="button"
                     key={option.value}
-                    onClick={() => {
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      closeEntityReferenceDropdown(field.fieldKey);
                       handleEntityValueChange(field.fieldKey, option.value);
                       setEntityReferenceLabels((current) => ({
                         ...current,
                         [field.fieldKey]: option.label
-                      }));
-                      setEntityReferenceOptions((current) => ({
-                        ...current,
-                        [field.fieldKey]: []
-                      }));
-                      setEntityReferenceOpen((current) => ({
-                        ...current,
-                        [field.fieldKey]: false
                       }));
                     }}
                   >
@@ -772,6 +774,11 @@ export default function FormView({
   const handleReferenceSearch = async (field: ViewField, query: string) => {
     if (!field.referenceEntityKey) return;
     const scopeParam = field.referenceScope ? `&scope=${field.referenceScope}` : "";
+    const gmWorldId =
+      field.referenceScope === "world_gm"
+        ? ((formData.worldId as string | undefined) ?? contextWorldId)
+        : undefined;
+    const gmWorldParam = gmWorldId ? `&worldId=${gmWorldId}` : "";
     const contextParams =
       field.referenceScope === "entity_type"
         ? formData.worldId
@@ -783,7 +790,7 @@ export default function FormView({
           ? `&worldId=${contextWorldId}`
           : "";
     const response = await fetch(
-      `/api/references?entityKey=${field.referenceEntityKey}&query=${encodeURIComponent(query)}${scopeParam}${contextParams}`,
+      `/api/references?entityKey=${field.referenceEntityKey}&query=${encodeURIComponent(query)}${scopeParam}${contextParams}${gmWorldParam}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     if (handleUnauthorized(response)) return;
@@ -832,7 +839,18 @@ export default function FormView({
     }
   };
 
+  function closeReferenceDropdown(fieldKey: string) {
+    setReferenceOptions((current) => ({ ...current, [fieldKey]: [] }));
+    setReferenceOpen((current) => ({ ...current, [fieldKey]: false }));
+  }
+
+  function closeEntityReferenceDropdown(fieldKey: string) {
+    setEntityReferenceOptions((current) => ({ ...current, [fieldKey]: [] }));
+    setEntityReferenceOpen((current) => ({ ...current, [fieldKey]: false }));
+  }
+
   const handleReferenceSelect = (field: ViewField, option: Choice) => {
+    closeReferenceDropdown(field.fieldKey);
     if (field.allowMultiple) {
       setReferenceSelections((current) => {
         const existing = current[field.fieldKey] ?? [];
@@ -851,8 +869,6 @@ export default function FormView({
       handleChange(field.fieldKey, option.value);
       setReferenceLabels((current) => ({ ...current, [field.fieldKey]: option.label }));
     }
-    setReferenceOptions((current) => ({ ...current, [field.fieldKey]: [] }));
-    setReferenceOpen((current) => ({ ...current, [field.fieldKey]: false }));
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -972,6 +988,28 @@ export default function FormView({
         if (handleUnauthorized(accessResponse)) {
           return;
         }
+      }
+
+      if (
+        isNew &&
+        view.entityKey === "worlds" &&
+        contextWorldId &&
+        contextWorldId !== savedId
+      ) {
+        const createdName = String(payload.name ?? formData.name ?? "the new world");
+        const currentLabel = contextWorldLabel ?? "your current world";
+        showPopout({
+          title: "World created",
+          message: `You have successfully created ${createdName}, but you are still in ${currentLabel} context. Would you like to switch context to your new world?`,
+          actions: [
+            {
+              label: "Switch context",
+              tone: "primary",
+              onClick: () => onContextSwitch?.({ worldId: savedId, worldLabel: createdName })
+            },
+            { label: "Stay here", tone: "ghost" }
+          ]
+        });
       }
 
       onBack();
@@ -1225,7 +1263,12 @@ export default function FormView({
                             <button
                               type="button"
                               key={option.value}
-                              onClick={() => handleReferenceSelect(field, option)}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleReferenceSelect(field, option);
+                              }}
                             >
                               {option.label}
                             </button>

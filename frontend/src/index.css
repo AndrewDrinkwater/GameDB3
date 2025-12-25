@@ -291,13 +291,27 @@ body {
 }
 
 .sidebar__chevron {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  position: relative;
   transition: transform 0.2s ease;
   color: var(--text-muted);
+}
+
+.sidebar__chevron::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
 }
 
 .sidebar__chevron.is-open {
   transform: rotate(180deg);
 }
+
 
 .context-pill {
   display: inline-flex;
@@ -410,6 +424,13 @@ body {
   z-index: 5;
 }
 
+.profile-menu__overlay {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  z-index: 4;
+}
+
 .profile-menu__header {
   padding: 0.4rem 0.6rem 0.6rem;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
@@ -448,6 +469,47 @@ body {
 
 .profile-menu__item--danger {
   color: #d9463e;
+}
+
+.popout-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 20;
+}
+
+.popout {
+  width: min(100%, 480px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  box-shadow: 0 22px 50px var(--shadow);
+  display: grid;
+  gap: 0.9rem;
+}
+
+.popout__title {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--text);
+}
+
+.popout__message {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.popout__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .app__body {
@@ -1383,6 +1445,7 @@ body {
   background: none;
   border: none;
   cursor: pointer;
+  color: var(--text);
 }
 
 .related-lists__options button:hover {

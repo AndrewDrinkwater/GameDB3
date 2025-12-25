@@ -97,6 +97,7 @@ model User {
   systemRoles        SystemUserRole[]
   systemPreferences  SystemUserPreference[]
   architectWorlds    WorldArchitect[]
+  worldGameMasters   WorldGameMaster[]
   worldCampaignAccess WorldCampaignCreator[]
   worldCharacterAccess WorldCharacterCreator[]
   campaignCharacterAccess CampaignCharacterCreator[]
@@ -119,6 +120,7 @@ model World {
   campaigns         Campaign[]
   delegates         WorldDelegate[]
   architects        WorldArchitect[]
+  gameMasters       WorldGameMaster[]
   campaignCreators  WorldCampaignCreator[]
   characterCreators WorldCharacterCreator[]
   characters        Character[]
@@ -344,6 +346,18 @@ model CampaignDelegate {
 }
 
 model WorldArchitect {
+  worldId   String
+  userId    String
+  grantedAt DateTime @default(now())
+
+  world World @relation(fields: [worldId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@id([worldId, userId])
+  @@index([userId])
+}
+
+model WorldGameMaster {
   worldId   String
   userId    String
   grantedAt DateTime @default(now())

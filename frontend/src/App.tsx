@@ -3,6 +3,7 @@ import { dispatchUnauthorized } from "./utils/auth";
 import ListView from "./components/ListView";
 import FormView from "./components/FormView";
 import ContextBar, { ContextSelection } from "./components/ContextBar";
+import PopoutProvider from "./components/PopoutProvider";
 
 type User = {
   id: string;
@@ -517,6 +518,17 @@ function App() {
     }
   };
 
+  const handleContextSwitch = (next: { worldId: string; worldLabel?: string }) => {
+    setContext({
+      worldId: next.worldId,
+      worldLabel: next.worldLabel,
+      campaignId: undefined,
+      campaignLabel: undefined,
+      characterId: undefined,
+      characterLabel: undefined
+    });
+  };
+
   const toggleSidebarPin = () => {
     void setSidebarPinnedPreference(!isSidebarPinned);
   };
@@ -850,8 +862,10 @@ function App() {
               initialValues={initialValues}
               initialLabels={initialLabels}
               contextWorldId={context.worldId}
+              contextWorldLabel={context.worldLabel}
               contextCampaignId={context.campaignId}
               contextCharacterId={context.characterId}
+              onContextSwitch={handleContextSwitch}
             />
         </section>
       );
@@ -883,6 +897,8 @@ function App() {
               currentUserId={user.id}
               currentUserLabel={user.name ?? user.email}
               currentUserRole={user.role}
+              contextWorldLabel={context.worldLabel}
+              onContextSwitch={handleContextSwitch}
             />
           </section>
         );
@@ -927,9 +943,10 @@ function App() {
   };
 
   return (
-    <div className="app">
-      {user ? (
-        <>
+    <PopoutProvider>
+      <div className="app">
+        {user ? (
+          <>
           <header className="app__header">
             <a className="app__brand" href={`#${homepage}`}>
               <span className="app__logo">TTRPG</span>
@@ -1007,7 +1024,9 @@ function App() {
                   {(user.name ?? user.email).charAt(0).toUpperCase()}
                 </button>
                 {profileOpen ? (
-                  <div className="profile-menu" role="menu">
+                  <>
+                    <div className="profile-menu__overlay" onClick={() => setProfileOpen(false)} />
+                    <div className="profile-menu" role="menu">
                     <div className="profile-menu__header">
                       <div className="profile-menu__name">{user.name ?? user.email}</div>
                       <div className="profile-menu__meta">{user.role}</div>
@@ -1023,7 +1042,8 @@ function App() {
                     >
                       Log out
                     </button>
-                  </div>
+                    </div>
+                  </>
                 ) : null}
               </div>
             </div>
@@ -1109,9 +1129,10 @@ function App() {
                           onClick={() => setWorldAdminExpanded((current) => !current)}
                         >
                           <span className="sidebar__section-title">World Admin</span>
-                          <span className={`sidebar__chevron ${worldAdminExpanded ? "is-open" : ""}`}>
-                            ƒ-_
-                          </span>
+                          <span
+                            className={`sidebar__chevron ${worldAdminExpanded ? "is-open" : ""}`}
+                            aria-hidden="true"
+                          />
                         </button>
                         {worldAdminExpanded ? (
                           <div className="sidebar__section-body">
@@ -1154,9 +1175,10 @@ function App() {
                           onClick={() => setAdminExpanded((current) => !current)}
                         >
                           <span className="sidebar__section-title">Admin</span>
-                          <span className={`sidebar__chevron ${adminExpanded ? "is-open" : ""}`}>
-                            ▾
-                          </span>
+                          <span
+                            className={`sidebar__chevron ${adminExpanded ? "is-open" : ""}`}
+                            aria-hidden="true"
+                          />
                         </button>
                         {adminExpanded ? (
                         <div className="sidebar__section-body">
@@ -1293,6 +1315,7 @@ function App() {
         </main>
       )}
     </div>
+    </PopoutProvider>
   );
 }
 

@@ -297,7 +297,7 @@ async function main() {
     fields: [
       { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
       { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "worlds", referenceScope: "campaign_create" },
-      { fieldKey: "gmUserId", label: "GM", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, referenceEntityKey: "users" }
+      { fieldKey: "gmUserId", label: "GM", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, referenceEntityKey: "users", referenceScope: "world_gm" }
     ]
   },
   {
@@ -310,7 +310,7 @@ async function main() {
     fields: [
       { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
       { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, required: true, referenceEntityKey: "worlds", referenceScope: "campaign_create" },
-      { fieldKey: "gmUserId", label: "GM", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, referenceEntityKey: "users" },
+      { fieldKey: "gmUserId", label: "GM", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, referenceEntityKey: "users", referenceScope: "world_gm" },
       {
         fieldKey: "characterIds",
         label: "Characters",
@@ -774,6 +774,22 @@ for (const view of viewData) {
       parentFieldKey: "worldId",
       relatedFieldKey: "userId",
       listOrder: 1,
+      adminOnly: false,
+      fields: [
+        { fieldKey: "name", label: "Name", source: RelatedListFieldSource.RELATED, listOrder: 1 },
+        { fieldKey: "email", label: "Email", source: RelatedListFieldSource.RELATED, listOrder: 2 }
+      ]
+    }
+    ,
+    {
+      key: "world.game_masters",
+      title: "Game Masters",
+      parentEntityKey: "worlds",
+      relatedEntityKey: "users",
+      joinEntityKey: "worldGameMaster",
+      parentFieldKey: "worldId",
+      relatedFieldKey: "userId",
+      listOrder: 2,
       adminOnly: false,
       fields: [
         { fieldKey: "name", label: "Name", source: RelatedListFieldSource.RELATED, listOrder: 1 },
