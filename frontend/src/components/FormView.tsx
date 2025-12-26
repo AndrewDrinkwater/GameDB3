@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ConditionBuilder from "./ConditionBuilder";
 import EntityFormDesigner from "./EntityFormDesigner";
 import EntityAccessEditor from "./EntityAccessEditor";
+import EntitySidePanel from "./EntitySidePanel";
 import RelatedLists from "./RelatedLists";
 import { usePopout } from "./PopoutProvider";
 import { useUnsavedChangesPrompt } from "../utils/unsavedChanges";
@@ -239,6 +240,8 @@ export default function FormView({
   const [entityAuditLoading, setEntityAuditLoading] = useState(false);
   const [entityAuditError, setEntityAuditError] = useState<string | null>(null);
   const [openAuditEntryId, setOpenAuditEntryId] = useState<string | null>(null);
+  const [entityTypeWorldId, setEntityTypeWorldId] = useState<string | null>(null);
+  const [entityPanelId, setEntityPanelId] = useState<string | null>(null);
   const [conditionFieldOptions, setConditionFieldOptions] = useState<ConditionFieldOption[]>([]);
   const [entityTab, setEntityTab] = useState<"info" | "config" | "access" | "audit">(
     "info"
@@ -321,6 +324,8 @@ export default function FormView({
         setEntityAuditLoading(false);
         setEntityAuditError(null);
         setOpenAuditEntryId(null);
+        setEntityTypeWorldId(null);
+        setEntityPanelId(null);
         setConditionFieldOptions([]);
         setEntitySections([]);
       try {
@@ -370,10 +375,19 @@ export default function FormView({
         });
         setChoiceMaps(newChoiceMaps);
 
-        if (!isNew) {
-          const recordResponse = await fetch(`${viewData.endpoint}/${recordId}`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
+          if (!isNew) {
+            const recordParams = new URLSearchParams();
+            if (viewData.entityKey === "entities") {
+              if (contextCampaignId) recordParams.set("campaignId", contextCampaignId);
+              if (contextCharacterId) recordParams.set("characterId", contextCharacterId);
+            }
+            const recordUrl =
+              recordParams.toString().length > 0
+                ? `${viewData.endpoint}/${recordId}?${recordParams.toString()}`
+                : `${viewData.endpoint}/${recordId}`;
+            const recordResponse = await fetch(recordUrl, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
 
           if (handleUnauthorized(recordResponse)) {
             return;
@@ -410,7 +424,7 @@ export default function FormView({
     return () => {
       ignore = true;
     };
-  }, [token, viewKey, recordId, isNew]);
+    }, [token, viewKey, recordId, isNew, contextCampaignId, contextCharacterId]);
 
   useEffect(() => {
     setEntityTab("info");
@@ -531,21 +545,29 @@ export default function FormView({
     const refFields = entityFields.filter((field) => field.fieldType === "ENTITY_REFERENCE");
     if (refFields.length === 0) return;
 
-    const loadLabels = async () => {
-      const nextLabels: Record<string, string> = {};
-      await Promise.all(
-        refFields.map(async (field) => {
-          const value = entityValues[field.fieldKey];
-          if (!value || entityReferenceLabels[field.fieldKey]) return;
-          const response = await fetch(`/api/references?entityKey=entities&ids=${String(value)}`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          if (handleUnauthorized(response)) return;
-          if (!response.ok) return;
-          const data = (await response.json()) as Array<{ id: string; label: string }>;
-          if (data[0]) {
-            nextLabels[field.fieldKey] = data[0].label;
-          }
+      const loadLabels = async () => {
+        const nextLabels: Record<string, string> = {};
+        await Promise.all(
+          refFields.map(async (field) => {
+            const value = entityValues[field.fieldKey];
+            if (!value || entityReferenceLabels[field.fieldKey]) return;
+            const params = new URLSearchParams({
+              entityKey: "entities",
+              ids: String(value)
+            });
+            const worldId = (formData.worldId as string | undefined) ?? contextWorldId;
+            if (worldId) params.set("worldId", worldId);
+            if (contextCampaignId) params.set("campaignId", contextCampaignId);
+            if (contextCharacterId) params.set("characterId", contextCharacterId);
+            const response = await fetch(`/api/references?${params.toString()}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            if (handleUnauthorized(response)) return;
+            if (!response.ok) return;
+            const data = (await response.json()) as Array<{ id: string; label: string }>;
+            if (data[0]) {
+              nextLabels[field.fieldKey] = data[0].label;
+            }
         })
       );
 
@@ -559,7 +581,17 @@ export default function FormView({
     return () => {
       ignore = true;
     };
-  }, [view, entityFields, entityValues, entityReferenceLabels, token]);
+    }, [
+      view,
+      entityFields,
+      entityValues,
+      entityReferenceLabels,
+      token,
+      formData.worldId,
+      contextWorldId,
+      contextCampaignId,
+      contextCharacterId
+    ]);
 
   useEffect(() => {
     let ignore = false;
@@ -757,7 +789,38 @@ export default function FormView({
     return () => {
       ignore = true;
     };
-  }, [view, recordId, token, contextCampaignId]);
+    }, [view, recordId, token, contextCampaignId]);
+
+  useEffect(() => {
+    let ignore = false;
+    if (!view || view.entityKey !== "entity_fields") {
+      setEntityTypeWorldId(null);
+      return;
+    }
+    const entityTypeId = formData.entityTypeId as string | undefined;
+    if (!entityTypeId) {
+      setEntityTypeWorldId(null);
+      return;
+    }
+
+    const loadEntityTypeWorld = async () => {
+      const response = await fetch(`/api/entity-types/${entityTypeId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (handleUnauthorized(response)) return;
+      if (!response.ok) return;
+      const data = (await response.json()) as { worldId?: string | null };
+      if (!ignore) {
+        setEntityTypeWorldId(data.worldId ?? null);
+      }
+    };
+
+    void loadEntityTypeWorld();
+
+    return () => {
+      ignore = true;
+    };
+  }, [view, formData.entityTypeId, token]);
 
   useEffect(() => {
     let ignore = false;
@@ -911,49 +974,53 @@ export default function FormView({
       );
     }
 
-    if (field.fieldType === "ENTITY_REFERENCE") {
-      const options = entityReferenceOptions[field.fieldKey] ?? [];
-      const labelValue = entityReferenceLabels[field.fieldKey] ?? "";
-      const isOpen = entityReferenceOpen[field.fieldKey];
+      if (field.fieldType === "ENTITY_REFERENCE") {
+        const options = entityReferenceOptions[field.fieldKey] ?? [];
+        const labelValue = entityReferenceLabels[field.fieldKey] ?? "";
+        const isOpen = entityReferenceOpen[field.fieldKey];
+        const entityRefId = getEntityReferenceId(value);
 
-      return (
-        <label key={field.fieldKey} className="form-view__field">
-          <span className="form-view__label">
-            {field.label}
-            {field.required ? <span className="form-view__required">*</span> : null}
-          </span>
-          <div
-            className="reference-field"
-            onBlur={(event) => {
-              const nextTarget = event.relatedTarget as Node | null;
-              if (nextTarget && event.currentTarget.contains(nextTarget)) return;
-              setEntityReferenceOpen((current) => ({ ...current, [field.fieldKey]: false }));
-            }}
-          >
-            <input
-              type="text"
-              value={labelValue}
-              placeholder="Search entities..."
-              onClick={() => {
-                setEntityReferenceOpen((current) => ({ ...current, [field.fieldKey]: true }));
-                void handleEntityReferenceSearch(field, labelValue);
+        return (
+          <label key={field.fieldKey} className="form-view__field">
+            <span className="form-view__label">
+              {field.label}
+              {field.required ? <span className="form-view__required">*</span> : null}
+            </span>
+            <div
+              className="reference-field"
+              onBlur={(event) => {
+                const nextTarget = event.relatedTarget as Node | null;
+                if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                setEntityReferenceOpen((current) => ({ ...current, [field.fieldKey]: false }));
               }}
-              onChange={(event) => {
-                const next = event.target.value;
-                setEntityReferenceLabels((current) => ({ ...current, [field.fieldKey]: next }));
-                handleEntityValueChange(field.fieldKey, "");
-                void handleEntityReferenceSearch(field, next);
-              }}
-              onFocus={() => {
-                setEntityReferenceOpen((current) => ({ ...current, [field.fieldKey]: true }));
-                void handleEntityReferenceSearch(field, labelValue);
-              }}
-            />
-            {isOpen && options.length > 0 ? (
-              <div className="reference-field__options">
-                {options.map((option) => (
-                  <button
-                    type="button"
+            >
+              <div className="reference-field__input-row">
+                <input
+                  type="text"
+                  value={labelValue}
+                  placeholder="Search entities..."
+                  onClick={() => {
+                    setEntityReferenceOpen((current) => ({ ...current, [field.fieldKey]: true }));
+                    void handleEntityReferenceSearch(field, labelValue);
+                  }}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setEntityReferenceLabels((current) => ({ ...current, [field.fieldKey]: next }));
+                    handleEntityValueChange(field.fieldKey, "");
+                    void handleEntityReferenceSearch(field, next);
+                  }}
+                  onFocus={() => {
+                    setEntityReferenceOpen((current) => ({ ...current, [field.fieldKey]: true }));
+                    void handleEntityReferenceSearch(field, labelValue);
+                  }}
+                />
+                {renderEntityInfoButton(entityRefId)}
+              </div>
+              {isOpen && options.length > 0 ? (
+                <div className="reference-field__options">
+                  {options.map((option) => (
+                    <button
+                      type="button"
                     key={option.value}
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={(event) => {
@@ -1016,23 +1083,27 @@ export default function FormView({
   };
 
   const handleReferenceSearch = async (field: ViewField, query: string) => {
-    if (!field.referenceEntityKey) return;
-    const scopeParam = field.referenceScope ? `&scope=${field.referenceScope}` : "";
-    const gmWorldId =
-      field.referenceScope === "world_gm"
-        ? ((formData.worldId as string | undefined) ?? contextWorldId)
-        : undefined;
-    const gmWorldParam = gmWorldId ? `&worldId=${gmWorldId}` : "";
-    const contextParams =
-      field.referenceScope === "entity_type"
-        ? formData.worldId
-          ? `&worldId=${formData.worldId}`
-          : contextWorldId
+      if (!field.referenceEntityKey) return;
+      const effectiveScope =
+        field.referenceScope ?? (field.fieldKey === "referenceEntityTypeId" ? "entity_type" : null);
+      const scopeParam = effectiveScope ? `&scope=${effectiveScope}` : "";
+      const gmWorldId =
+        effectiveScope === "world_gm"
+          ? ((formData.worldId as string | undefined) ?? contextWorldId)
+          : undefined;
+      const gmWorldParam = gmWorldId ? `&worldId=${gmWorldId}` : "";
+      const contextParams =
+        effectiveScope === "entity_type"
+          ? formData.worldId
+            ? `&worldId=${formData.worldId}`
+            : entityTypeWorldId
+              ? `&worldId=${entityTypeWorldId}`
+              : contextWorldId
+                ? `&worldId=${contextWorldId}`
+                : ""
+          : field.referenceEntityKey === "entity_fields" && contextWorldId
             ? `&worldId=${contextWorldId}`
-            : ""
-        : field.referenceEntityKey === "entity_fields" && contextWorldId
-          ? `&worldId=${contextWorldId}`
-          : "";
+            : "";
     const response = await fetch(
       `/api/references?entityKey=${field.referenceEntityKey}&query=${encodeURIComponent(query)}${scopeParam}${contextParams}${gmWorldParam}`,
       { headers: { Authorization: `Bearer ${token}` } }
@@ -1135,18 +1206,20 @@ export default function FormView({
     }
   };
 
-  const handleEntityReferenceSearch = async (field: EntityFieldDefinition, query: string) => {
-    const params = new URLSearchParams({
-      entityKey: "entities",
-      query
-    });
-    const worldId = formData.worldId as string | undefined;
-    if (worldId) params.set("worldId", worldId);
-    if (field.referenceEntityTypeId) params.set("entityTypeId", field.referenceEntityTypeId);
+    const handleEntityReferenceSearch = async (field: EntityFieldDefinition, query: string) => {
+      const params = new URLSearchParams({
+        entityKey: "entities",
+        query
+      });
+      const worldId = (formData.worldId as string | undefined) ?? contextWorldId;
+      if (worldId) params.set("worldId", worldId);
+      if (contextCampaignId) params.set("campaignId", contextCampaignId);
+      if (contextCharacterId) params.set("characterId", contextCharacterId);
+      if (field.referenceEntityTypeId) params.set("entityTypeId", field.referenceEntityTypeId);
 
-    const response = await fetch(`/api/references?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+      const response = await fetch(`/api/references?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
     if (handleUnauthorized(response)) return;
     if (!response.ok) return;
     const data = (await response.json()) as Array<{ id: string; label: string }>;
@@ -1384,14 +1457,18 @@ export default function FormView({
     }
   };
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    void saveRecord().then((ok) => {
-      if (ok) {
-        onBack();
-      }
-    });
-  };
+    const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      void saveRecord();
+    };
+
+    const handleUpdateAndBack = () => {
+      void saveRecord().then((ok) => {
+        if (ok) {
+          onBack();
+        }
+      });
+    };
 
   const confirmUnsavedChanges = useUnsavedChangesPrompt({
     isDirtyRef,
@@ -1399,9 +1476,16 @@ export default function FormView({
     onDiscard: clearDirty
   });
 
-  const handleNavigateAway = (proceed: () => void) => {
-    confirmUnsavedChanges(proceed);
-  };
+    const handleNavigateAway = (proceed: () => void) => {
+      confirmUnsavedChanges(proceed);
+    };
+
+    const openEntityRecord = (id: string) => {
+      handleNavigateAway(() => {
+        setEntityPanelId(null);
+        window.location.hash = `/form/entities/${id}`;
+      });
+    };
 
   const handleDelete = async () => {
     if (!view || isNew) return;
@@ -1487,9 +1571,263 @@ export default function FormView({
         (field) => !configFieldKeys.has(field.fieldKey) || !canViewConfigTab
       )
     : entityTypeFields;
-  const configFields = canViewConfigTab
-    ? entityTypeFields.filter((field) => configFieldKeys.has(field.fieldKey))
-    : [];
+    const configFields = canViewConfigTab
+      ? entityTypeFields.filter((field) => configFieldKeys.has(field.fieldKey))
+      : [];
+    const sideBySideInfoFields =
+      isEntityView && entityTab === "info"
+        ? infoFields.filter(
+            (field) => field.fieldKey === "worldId" || field.fieldKey === "entityTypeId"
+          )
+        : [];
+    const remainingInfoFields =
+      sideBySideInfoFields.length > 0
+        ? infoFields.filter(
+            (field) => field.fieldKey !== "worldId" && field.fieldKey !== "entityTypeId"
+          )
+        : infoFields;
+    const shouldLockEntityField = (field: ViewField) =>
+      isEntityView &&
+      !isNew &&
+      (field.fieldKey === "worldId" || field.fieldKey === "entityTypeId");
+    const getEntityReferenceId = (value: unknown) => {
+      if (Array.isArray(value)) {
+        return value.length > 0 ? String(value[0]) : null;
+      }
+      if (value === null || value === undefined || value === "") return null;
+      return String(value);
+    };
+    const renderEntityInfoButton = (entityId: string | null) =>
+      entityId ? (
+        <button
+          type="button"
+          className="reference-field__info"
+          onClick={() => setEntityPanelId(entityId)}
+          aria-label="Open entity info"
+          title="Open entity info"
+        >
+          i
+        </button>
+      ) : null;
+    const renderField = (field: ViewField) => {
+      const value = formData[field.fieldKey];
+      const coerced = coerceValue(field.fieldType, value);
+      const listKey = field.optionsListKey ?? "";
+      const choices = listKey ? choiceMaps[listKey] ?? [] : [];
+      const isLocked = shouldLockEntityField(field);
+
+      if (view?.entityKey === "entity_fields" && field.fieldKey === "conditions") {
+        let parsedValue: ConditionGroup | null = null;
+        const rawValue = formData[field.fieldKey];
+        if (typeof rawValue === "string" && rawValue.trim() !== "") {
+          try {
+            parsedValue = JSON.parse(rawValue) as ConditionGroup;
+          } catch {
+            parsedValue = null;
+          }
+        } else if (typeof rawValue === "object" && rawValue) {
+          parsedValue = rawValue as ConditionGroup;
+        }
+
+        return (
+          <label key={field.fieldKey} className="form-view__field">
+            <span className="form-view__label">{field.label}</span>
+            <ConditionBuilder
+              value={parsedValue ?? undefined}
+              fieldOptions={conditionFieldOptions}
+              token={token}
+              context={{
+                worldId: contextWorldId,
+                campaignId: contextCampaignId,
+                characterId: contextCharacterId
+              }}
+              onChange={(next) => handleChange(field.fieldKey, next)}
+            />
+          </label>
+        );
+      }
+
+      if (field.fieldType === "BOOLEAN") {
+        return (
+          <label
+            key={field.fieldKey}
+            className="form-view__field form-view__field--boolean"
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(value)}
+              onChange={(event) => handleChange(field.fieldKey, event.target.checked)}
+              disabled={field.readOnly || isLocked}
+            />
+            <span>{field.label}</span>
+          </label>
+        );
+      }
+
+      if (field.fieldType === "REFERENCE") {
+        const options = referenceOptions[field.fieldKey] ?? [];
+        const labelValue = referenceLabels[field.fieldKey] ?? "";
+        const isOpen = referenceOpen[field.fieldKey];
+        const selections = referenceSelections[field.fieldKey] ?? [];
+        const disabled =
+          field.readOnly ||
+          isLocked ||
+          (field.fieldKey === "playerId" && currentUserRole !== "ADMIN");
+
+        return (
+          <label key={field.fieldKey} className="form-view__field">
+            <span className="form-view__label">
+              {field.label}
+              {field.required ? <span className="form-view__required">*</span> : null}
+            </span>
+            <div
+              className="reference-field"
+              onBlur={(event) => {
+                const nextTarget = event.relatedTarget as Node | null;
+                if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                resolveReferenceSelection(field);
+                setReferenceOpen((current) => ({ ...current, [field.fieldKey]: false }));
+              }}
+            >
+              {field.allowMultiple && selections.length > 0 ? (
+                <div className="reference-field__chips">
+                  {selections.map((item) => (
+                    <button
+                      type="button"
+                      key={item.value}
+                      className="reference-field__chip"
+                      onClick={() => {
+                        const next = selections.filter((entry) => entry.value !== item.value);
+                        setReferenceSelections((current) => ({
+                          ...current,
+                          [field.fieldKey]: next
+                        }));
+                        handleChange(
+                          field.fieldKey,
+                          next.map((entry) => entry.value)
+                        );
+                      }}
+                      disabled={disabled}
+                    >
+                      {item.label} {disabled ? "" : "x"}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <div className="reference-field__input-row">
+                <input
+                  type="text"
+                  value={labelValue}
+                  placeholder={field.placeholder ?? "Search..."}
+                  onClick={() => {
+                    if (disabled) return;
+                    setReferenceOpen((current) => ({ ...current, [field.fieldKey]: true }));
+                    void handleReferenceSearch(field, labelValue);
+                  }}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setReferenceLabels((current) => ({ ...current, [field.fieldKey]: next }));
+                    if (!field.allowMultiple) {
+                      handleChange(field.fieldKey, "");
+                    }
+                    void handleReferenceSearch(field, next);
+                  }}
+                  onFocus={() => {
+                    if (disabled) return;
+                    setReferenceOpen((current) => ({ ...current, [field.fieldKey]: true }));
+                    void handleReferenceSearch(field, labelValue);
+                  }}
+                  disabled={disabled}
+                />
+                {field.referenceEntityKey === "entities"
+                  ? renderEntityInfoButton(
+                      getEntityReferenceId(formData[field.fieldKey])
+                    )
+                  : null}
+              </div>
+              {field.required &&
+              (!formData[field.fieldKey] ||
+                (field.allowMultiple &&
+                  Array.isArray(formData[field.fieldKey]) &&
+                  formData[field.fieldKey].length === 0)) ? (
+                <div className="form-view__hint">Select a value.</div>
+              ) : null}
+              {isOpen && options.length > 0 ? (
+                <div className="reference-field__options">
+                  {options.map((option) => (
+                    <button
+                      type="button"
+                      key={option.value}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        handleReferenceSelect(field, option);
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              ) : isOpen ? (
+                <div className="reference-field__options reference-field__options--empty">
+                  <div className="reference-field__empty">No available options.</div>
+                </div>
+              ) : null}
+            </div>
+          </label>
+        );
+      }
+
+      return (
+        <label key={field.fieldKey} className="form-view__field">
+          <span className="form-view__label">
+            {field.label}
+            {field.required ? <span className="form-view__required">*</span> : null}
+          </span>
+          {field.fieldType === "TEXTAREA" ? (
+            <textarea
+              value={String(coerced)}
+              placeholder={field.placeholder ?? ""}
+              onChange={(event) => handleChange(field.fieldKey, event.target.value)}
+              required={field.required}
+              readOnly={field.readOnly || isLocked}
+            />
+          ) : field.fieldType === "SELECT" ? (
+            <select
+              value={String(coerced)}
+              onChange={(event) => handleChange(field.fieldKey, event.target.value)}
+              required={field.required}
+              disabled={field.readOnly || isLocked}
+            >
+              <option value="">Select...</option>
+              {choices.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type={
+                field.fieldType === "NUMBER"
+                  ? "number"
+                  : field.fieldType === "EMAIL"
+                    ? "email"
+                    : field.fieldType === "PASSWORD"
+                      ? "password"
+                      : "text"
+              }
+              value={String(coerced)}
+              placeholder={field.placeholder ?? ""}
+              onChange={(event) => handleChange(field.fieldKey, event.target.value)}
+              required={field.required}
+              disabled={field.readOnly || isLocked}
+            />
+          )}
+        </label>
+      );
+    };
 
   return (
     <div className="form-view">
@@ -1578,216 +1916,21 @@ export default function FormView({
             </button>
           </div>
         ) : null}
-        {!isEntityView || entityTab === "info" ? (
-          <>
-            {entityTypeTab === "designer" && isEntityTypeView ? null : infoFields.map((field) => {
-              const value = formData[field.fieldKey];
-              const coerced = coerceValue(field.fieldType, value);
-              const listKey = field.optionsListKey ?? "";
-              const choices = listKey ? choiceMaps[listKey] ?? [] : [];
-
-              if (view.entityKey === "entity_fields" && field.fieldKey === "conditions") {
-                let parsedValue: ConditionGroup | null = null;
-                const rawValue = formData[field.fieldKey];
-                if (typeof rawValue === "string" && rawValue.trim() !== "") {
-                  try {
-                    parsedValue = JSON.parse(rawValue) as ConditionGroup;
-                  } catch {
-                    parsedValue = null;
-                  }
-                } else if (typeof rawValue === "object" && rawValue) {
-                  parsedValue = rawValue as ConditionGroup;
-                }
-
-                return (
-                  <label key={field.fieldKey} className="form-view__field">
-                    <span className="form-view__label">{field.label}</span>
-                    <ConditionBuilder
-                      value={parsedValue ?? undefined}
-                      fieldOptions={conditionFieldOptions}
-                      token={token}
-                      context={{
-                        worldId: contextWorldId,
-                        campaignId: contextCampaignId,
-                        characterId: contextCharacterId
-                      }}
-                      onChange={(next) => handleChange(field.fieldKey, next)}
-                    />
-                  </label>
-                );
-              }
-
-              if (field.fieldType === "BOOLEAN") {
-                return (
-                  <label
-                    key={field.fieldKey}
-                    className="form-view__field form-view__field--boolean"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={Boolean(value)}
-                      onChange={(event) => handleChange(field.fieldKey, event.target.checked)}
-                    />
-                    <span>{field.label}</span>
-                  </label>
-                );
-              }
-
-              if (field.fieldType === "REFERENCE") {
-                const options = referenceOptions[field.fieldKey] ?? [];
-                const labelValue = referenceLabels[field.fieldKey] ?? "";
-                const isOpen = referenceOpen[field.fieldKey];
-                const selections = referenceSelections[field.fieldKey] ?? [];
-                const disabled =
-                  field.readOnly || (field.fieldKey === "playerId" && currentUserRole !== "ADMIN");
-
-                return (
-                  <label key={field.fieldKey} className="form-view__field">
-                    <span className="form-view__label">
-                      {field.label}
-                      {field.required ? <span className="form-view__required">*</span> : null}
-                    </span>
-                    <div
-                      className="reference-field"
-                      onBlur={(event) => {
-                        const nextTarget = event.relatedTarget as Node | null;
-                        if (nextTarget && event.currentTarget.contains(nextTarget)) return;
-                        resolveReferenceSelection(field);
-                        setReferenceOpen((current) => ({ ...current, [field.fieldKey]: false }));
-                      }}
-                    >
-                      {field.allowMultiple && selections.length > 0 ? (
-                        <div className="reference-field__chips">
-                          {selections.map((item) => (
-                            <button
-                              type="button"
-                              key={item.value}
-                              className="reference-field__chip"
-                              onClick={() => {
-                                const next = selections.filter((entry) => entry.value !== item.value);
-                                setReferenceSelections((current) => ({
-                                  ...current,
-                                  [field.fieldKey]: next
-                                }));
-                                handleChange(
-                                  field.fieldKey,
-                                  next.map((entry) => entry.value)
-                                );
-                              }}
-                              disabled={disabled}
-                            >
-                              {item.label} {disabled ? "" : "x"}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                      <input
-                        type="text"
-                        value={labelValue}
-                        placeholder={field.placeholder ?? "Search..."}
-                        onClick={() => {
-                          if (disabled) return;
-                          setReferenceOpen((current) => ({ ...current, [field.fieldKey]: true }));
-                          void handleReferenceSearch(field, labelValue);
-                        }}
-                        onChange={(event) => {
-                          const next = event.target.value;
-                          setReferenceLabels((current) => ({ ...current, [field.fieldKey]: next }));
-                          if (!field.allowMultiple) {
-                            handleChange(field.fieldKey, "");
-                          }
-                          void handleReferenceSearch(field, next);
-                        }}
-                        onFocus={() => {
-                          if (disabled) return;
-                          setReferenceOpen((current) => ({ ...current, [field.fieldKey]: true }));
-                          void handleReferenceSearch(field, labelValue);
-                        }}
-                        disabled={disabled}
-                      />
-                      {field.required &&
-                      (!formData[field.fieldKey] ||
-                        (field.allowMultiple &&
-                          Array.isArray(formData[field.fieldKey]) &&
-                          formData[field.fieldKey].length === 0)) ? (
-                        <div className="form-view__hint">Select a value.</div>
-                      ) : null}
-                      {isOpen && options.length > 0 ? (
-                        <div className="reference-field__options">
-                          {options.map((option) => (
-                            <button
-                              type="button"
-                              key={option.value}
-                              onMouseDown={(event) => event.preventDefault()}
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                handleReferenceSelect(field, option);
-                              }}
-                            >
-                              {option.label}
-                            </button>
-                          ))}
-                        </div>
-                      ) : isOpen ? (
-                        <div className="reference-field__options reference-field__options--empty">
-                          <div className="reference-field__empty">No available options.</div>
-                        </div>
-                      ) : null}
+          {!isEntityView || entityTab === "info" ? (
+            <>
+              {entityTypeTab === "designer" && isEntityTypeView ? null : (
+                <>
+                  {sideBySideInfoFields.length > 0 ? (
+                    <div className="form-view__field-row">
+                      {sideBySideInfoFields.map(renderField)}
                     </div>
-                  </label>
-                );
-              }
-              return (
-                <label key={field.fieldKey} className="form-view__field">
-                  <span className="form-view__label">
-                    {field.label}
-                    {field.required ? <span className="form-view__required">*</span> : null}
-                  </span>
-                  {field.fieldType === "TEXTAREA" ? (
-                    <textarea
-                      value={String(coerced)}
-                      placeholder={field.placeholder ?? ""}
-                      onChange={(event) => handleChange(field.fieldKey, event.target.value)}
-                      required={field.required}
-                    />
-                  ) : field.fieldType === "SELECT" ? (
-                    <select
-                      value={String(coerced)}
-                      onChange={(event) => handleChange(field.fieldKey, event.target.value)}
-                      required={field.required}
-                    >
-                      <option value="">Select...</option>
-                      {choices.map((choice) => (
-                        <option key={choice.value} value={choice.value}>
-                          {choice.label}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type={
-                        field.fieldType === "NUMBER"
-                          ? "number"
-                          : field.fieldType === "EMAIL"
-                            ? "email"
-                            : field.fieldType === "PASSWORD"
-                              ? "password"
-                              : "text"
-                      }
-                      value={String(coerced)}
-                      placeholder={field.placeholder ?? ""}
-                      onChange={(event) => handleChange(field.fieldKey, event.target.value)}
-                      required={field.required}
-                      disabled={field.readOnly}
-                    />
-                  )}
-                </label>
-              );
-            })}
-            {isChoiceField && !isNew ? (
-              <div className="form-view__section">
-                <h2>Field choices</h2>
+                  ) : null}
+                  {remainingInfoFields.map(renderField)}
+                </>
+              )}
+              {isChoiceField && !isNew ? (
+                <div className="form-view__section">
+                  <h2>Field choices</h2>
                 {fieldChoicesError ? (
                   <div className="form-view__hint">{fieldChoicesError}</div>
                 ) : null}
@@ -2289,17 +2432,33 @@ export default function FormView({
           </div>
         ) : null}
         <div className="form-view__actions">
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={handleUpdateAndBack}
+            disabled={saving}
+          >
+            {saving ? "Saving..." : "Update"}
+          </button>
           <button type="submit" className="primary-button" disabled={saving}>
             {saving ? "Saving..." : "Save"}
           </button>
         </div>
       </form>
-      <RelatedLists
-        token={token}
-        parentEntityKey={view.entityKey}
-        parentId={recordId}
-        disabled={isNew}
-      />
-    </div>
-  );
-}
+        <RelatedLists
+          token={token}
+          parentEntityKey={view.entityKey}
+          parentId={recordId}
+          disabled={isNew}
+        />
+        <EntitySidePanel
+          token={token}
+          entityId={entityPanelId}
+          contextCampaignId={contextCampaignId}
+          contextCharacterId={contextCharacterId}
+          onClose={() => setEntityPanelId(null)}
+          onOpenRecord={openEntityRecord}
+        />
+      </div>
+    );
+  }

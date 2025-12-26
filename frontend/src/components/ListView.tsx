@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { dispatchUnauthorized } from "../utils/auth";
 import { usePopout } from "./PopoutProvider";
+import EntitySidePanel from "./EntitySidePanel";
 
 type ViewField = {
   id: string;
@@ -144,6 +145,7 @@ export default function ListView({
   const [query, setQuery] = useState("");
   const [choiceMaps, setChoiceMaps] = useState<Record<string, Record<string, string>>>({});
   const [referenceMaps, setReferenceMaps] = useState<Record<string, Record<string, string>>>({});
+  const [entityPanelId, setEntityPanelId] = useState<string | null>(null);
   const extraParamsKey = JSON.stringify(extraParams ?? {});
   const filtersKey = JSON.stringify({ logic: filterLogic, rules: filters });
   const listColumnsKey = JSON.stringify(listColumns);
@@ -547,21 +549,26 @@ export default function ListView({
       });
 
       const keys = Object.keys(idsByKey);
-      const results = await Promise.all(
-        keys.map(async (key) => {
-          const [entityKey, entityTypePart] = key.split(":");
-          const ids = Array.from(idsByKey[key]);
-          if (ids.length === 0) return [key, {}] as const;
-          const params = new URLSearchParams({
-            entityKey,
-            ids: ids.join(",")
-          });
-          if (entityTypePart && entityTypePart !== "any") {
-            params.set("entityTypeId", entityTypePart);
-          }
-          const response = await fetch(`/api/references?${params.toString()}`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
+        const results = await Promise.all(
+          keys.map(async (key) => {
+            const [entityKey, entityTypePart] = key.split(":");
+            const ids = Array.from(idsByKey[key]);
+            if (ids.length === 0) return [key, {}] as const;
+            const params = new URLSearchParams({
+              entityKey,
+              ids: ids.join(",")
+            });
+            if (entityKey === "entities") {
+              if (contextWorldId) params.set("worldId", contextWorldId);
+              if (contextCampaignId) params.set("campaignId", contextCampaignId);
+              if (contextCharacterId) params.set("characterId", contextCharacterId);
+            }
+            if (entityTypePart && entityTypePart !== "any") {
+              params.set("entityTypeId", entityTypePart);
+            }
+            const response = await fetch(`/api/references?${params.toString()}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
           if (response.status === 401) {
             dispatchUnauthorized();
             return [key, {}] as const;
@@ -589,7 +596,7 @@ export default function ListView({
     return () => {
       ignore = true;
     };
-  }, [view, rows, token, listFields]);
+    }, [view, rows, token, listFields, contextWorldId, contextCampaignId, contextCharacterId]);
 
   useEffect(() => {
     if (!token) return;
@@ -960,15 +967,39 @@ export default function ListView({
     return mapped ?? choiceMapped ?? referenceLabel ?? rawValue;
   };
 
-  const renderCellValue = (field: ListField, row: Record<string, unknown>) => {
-    const display = getDisplayValue(field, row);
-    const text = String(display ?? "");
-    if (field.fieldType === "SELECT" && isStatusField(field) && text) {
-      const tone = getStatusTone(text);
-      return <span className={`status-badge status-badge--${tone}`}>{text}</span>;
-    }
-    return text;
-  };
+    const renderCellValue = (field: ListField, row: Record<string, unknown>) => {
+      const display = getDisplayValue(field, row);
+      const text = String(display ?? "");
+      if (field.fieldType === "SELECT" && isStatusField(field) && text) {
+        const tone = getStatusTone(text);
+        return <span className={`status-badge status-badge--${tone}`}>{text}</span>;
+      }
+      return text;
+    };
+
+    const renderEntityNameCell = (row: Record<string, unknown>) => {
+      const name = primaryField ? renderCellValue(primaryField, row) : "";
+      return (
+        <span className="list-view__entity-name">
+          <span>{name}</span>
+          <button
+            type="button"
+            className="list-view__info"
+            onClick={(event) => {
+              event.stopPropagation();
+              setEntityPanelId(String(row.id));
+            }}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+            }}
+            aria-label="Open entity info"
+            title="Open entity info"
+          >
+            i
+          </button>
+        </span>
+      );
+    };
 
   if (viewLoading || dataLoading) {
     return <div className="view-state">Loading view...</div>;
@@ -1178,21 +1209,23 @@ export default function ListView({
                 }
               }}
             >
-              {listFields.map((field) => {
-                const value = renderCellValue(field, row);
-                const typeClass =
-                  field.fieldType === "NUMBER"
-                    ? "list-view__cell--numeric"
-                    : field.fieldType === "BOOLEAN"
-                      ? "list-view__cell--boolean"
-                      : "";
-
-                return (
-                  <div key={field.fieldKey} className={`list-view__cell ${typeClass}`}>
-                    {value}
-                  </div>
-                );
-              })}
+                {listFields.map((field) => {
+                  const value = renderCellValue(field, row);
+                  const typeClass =
+                    field.fieldType === "NUMBER"
+                      ? "list-view__cell--numeric"
+                      : field.fieldType === "BOOLEAN"
+                        ? "list-view__cell--boolean"
+                        : "";
+  
+                  return (
+                    <div key={field.fieldKey} className={`list-view__cell ${typeClass}`}>
+                      {view.entityKey === "entities" && field.fieldKey === "name"
+                        ? renderEntityNameCell(row)
+                        : value}
+                    </div>
+                  );
+                })}
               <div className="list-view__cell list-view__cell--actions">
                 <button
                   type="button"
@@ -1214,14 +1247,16 @@ export default function ListView({
         {filteredRows.length === 0 ? (
           <div className="list-view__empty">No records yet.</div>
         ) : (
-          filteredRows.map((row) => {
-            const titleValue = primaryField ? renderCellValue(primaryField, row) : "Record";
+            filteredRows.map((row) => {
+              const titleValue = primaryField ? renderCellValue(primaryField, row) : "Record";
             const statusValue = statusField ? renderCellValue(statusField, row) : null;
 
             return (
               <div key={String(row.id)} className="list-card">
                 <div className="list-card__header">
-                  <div className="list-card__title">{titleValue}</div>
+                <div className="list-card__title">
+                  {view.entityKey === "entities" ? renderEntityNameCell(row) : titleValue}
+                </div>
                   {statusValue ? <div className="list-card__badge">{statusValue}</div> : null}
                 </div>
                 <div className="list-card__body">
@@ -1246,6 +1281,17 @@ export default function ListView({
           })
         )}
       </div>
+      <EntitySidePanel
+        token={token}
+        entityId={entityPanelId}
+        contextCampaignId={contextCampaignId}
+        contextCharacterId={contextCharacterId}
+        onClose={() => setEntityPanelId(null)}
+        onOpenRecord={(id) => {
+          setEntityPanelId(null);
+          onOpenForm(id);
+        }}
+      />
     </div>
   );
 }

@@ -785,6 +785,36 @@ body {
   opacity: 0.7;
 }
 
+.list-view__entity-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.list-view__info {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 75%, transparent);
+  color: var(--text);
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.list-view__info:hover {
+  background: color-mix(in srgb, var(--surface) 88%, var(--surface-2));
+}
+
+.list-view__info:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .list-view__config {
   margin-top: 0.75rem;
   padding: 0.75rem;
@@ -1146,6 +1176,13 @@ body {
   gap: 0.5rem;
 }
 
+.form-view__field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.25rem;
+  align-items: start;
+}
+
 .form-view__label {
   display: inline-flex;
   align-items: center;
@@ -1186,6 +1223,39 @@ body {
 
 .reference-field {
   position: relative;
+}
+
+.reference-field__input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.reference-field__input-row input {
+  flex: 1;
+}
+
+.reference-field__info {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 75%, transparent);
+  color: var(--text);
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.reference-field__info:hover {
+  background: color-mix(in srgb, var(--surface) 88%, var(--surface-2));
+}
+
+.reference-field__info:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .reference-field input {
@@ -1829,6 +1899,93 @@ body {
 
 .audit-log__detail-values {
   font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.entity-panel__overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 10, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 50;
+}
+
+.entity-panel__overlay.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.entity-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: min(420px, 90vw);
+  background: color-mix(in srgb, var(--surface) 92%, var(--surface-2));
+  border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  box-shadow: -16px 0 30px color-mix(in srgb, var(--shadow) 35%, transparent);
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
+  z-index: 60;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.entity-panel.is-open {
+  transform: translateX(0);
+}
+
+.entity-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.5rem 1.5rem 1rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.entity-panel__actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.entity-panel__open {
+  font-size: 0.85rem;
+  padding: 0.35rem 0.75rem;
+}
+
+.entity-panel__eyebrow {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.entity-panel__title {
+  margin: 0.35rem 0 0.2rem;
+  font-size: 1.35rem;
+}
+
+.entity-panel__meta {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.entity-panel__body {
+  padding: 1.25rem 1.5rem 1.5rem;
+  display: grid;
+  gap: 1.25rem;
+}
+
+.entity-panel__section h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+}
+
+.entity-panel__state {
   color: var(--text-muted);
 }
 

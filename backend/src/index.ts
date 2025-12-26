@@ -601,14 +601,15 @@ const entityViewSeeds: Record<string, ViewSeed> = {
         optionsListKey: "entity_field_type"
       },
       { fieldKey: "required", label: "Required", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 },
-      {
-        fieldKey: "referenceEntityTypeId",
-        label: "Reference Entity Type",
-        fieldType: SystemFieldType.REFERENCE,
-        listOrder: 6,
-        formOrder: 6,
-        referenceEntityKey: "entity_types"
-      },
+        {
+          fieldKey: "referenceEntityTypeId",
+          label: "Reference Entity Type",
+          fieldType: SystemFieldType.REFERENCE,
+          listOrder: 6,
+          formOrder: 6,
+          referenceEntityKey: "entity_types",
+          referenceScope: "entity_type"
+        },
       {
         fieldKey: "referenceLocationTypeKey",
         label: "Reference Location Type",
@@ -897,7 +898,13 @@ const normalizeEntityValue = (
   return rawValue ? String(rawValue) : null;
 };
 
-const getStoredEntityValue = (value: Prisma.EntityFieldValue): string | boolean | null => {
+const getStoredEntityValue = (value: {
+  valueString: string | null;
+  valueText: string | null;
+  valueBoolean: boolean | null;
+  valueNumber: number | null;
+  valueJson: Prisma.JsonValue;
+}): string | boolean | null => {
   if (value.valueString !== null && value.valueString !== undefined) {
     return value.valueString;
   }
@@ -6167,7 +6174,18 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
     const [globalUsers, scopedUsers] = await Promise.all([
       needsGlobal
         ? prisma.user.findMany({
-            where: { role: Role.USER },
+            where: {
+              role: Role.USER,
+              OR: [
+                { ownedWorlds: { some: { id: entity.worldId } } },
+                { architectWorlds: { some: { worldId: entity.worldId } } },
+                { worldGameMasters: { some: { worldId: entity.worldId } } },
+                { worldCampaignAccess: { some: { worldId: entity.worldId } } },
+                { worldCharacterAccess: { some: { worldId: entity.worldId } } },
+                { gmCampaigns: { some: { worldId: entity.worldId } } },
+                { characters: { some: { worldId: entity.worldId } } }
+              ]
+            },
             select: { id: true, name: true, email: true }
           })
         : Promise.resolve([]),
