@@ -88,6 +88,27 @@ type EntityAccessState = {
   writeCharacters: AccessEntry[];
 };
 
+type EntityAuditUser = {
+  id: string;
+  name: string | null;
+  email: string;
+  readContexts: string[];
+  writeContexts: string[];
+};
+
+type EntityAuditChange = {
+  id: string;
+  action: string;
+  createdAt: string;
+  actor: { id: string; name: string | null; email: string } | null;
+  details?: unknown;
+};
+
+type EntityAuditPayload = {
+  access: EntityAuditUser[];
+  changes: EntityAuditChange[];
+};
+
 type FormViewProps = {
   token: string;
   viewKey: string;
@@ -213,8 +234,15 @@ export default function FormView({
   const [entityReferenceLabels, setEntityReferenceLabels] = useState<Record<string, string>>({});
   const [entityReferenceOpen, setEntityReferenceOpen] = useState<Record<string, boolean>>({});
   const [entityAccess, setEntityAccess] = useState<EntityAccessState | null>(null);
+  const [entityAudit, setEntityAudit] = useState<EntityAuditPayload | null>(null);
+  const [entityAuditAllowed, setEntityAuditAllowed] = useState(false);
+  const [entityAuditLoading, setEntityAuditLoading] = useState(false);
+  const [entityAuditError, setEntityAuditError] = useState<string | null>(null);
+  const [openAuditEntryId, setOpenAuditEntryId] = useState<string | null>(null);
   const [conditionFieldOptions, setConditionFieldOptions] = useState<ConditionFieldOption[]>([]);
-  const [entityTab, setEntityTab] = useState<"info" | "config" | "access">("info");
+  const [entityTab, setEntityTab] = useState<"info" | "config" | "access" | "audit">(
+    "info"
+  );
   const [entityTypeTab, setEntityTypeTab] = useState<"details" | "designer">("details");
   const [fieldChoices, setFieldChoices] = useState<EntityFieldChoice[]>([]);
   const [fieldChoicesLoading, setFieldChoicesLoading] = useState(false);
@@ -228,6 +256,35 @@ export default function FormView({
   const isDirtyRef = useRef(false);
 
   const isNew = recordId === "new";
+  const formatAuditAction = (action: string) =>
+    action
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  const formatAuditTimestamp = (value: string) => new Date(value).toLocaleString();
+  const formatAuditValue = (value: unknown) => {
+    if (value === null || value === undefined) return "Empty";
+    if (typeof value === "boolean") return value ? "True" : "False";
+    if (typeof value === "string" && value.trim() === "") return "Empty";
+    if (typeof value === "object") {
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return "Value";
+      }
+    }
+    return String(value);
+  };
+  const getUpdateChanges = (details: unknown) => {
+    if (!details || typeof details !== "object") return [];
+    const changes = (details as { changes?: unknown }).changes;
+    if (!Array.isArray(changes)) return [];
+    return changes.filter((entry): entry is {
+      fieldKey?: string;
+      label?: string;
+      from?: unknown;
+      to?: unknown;
+    } => Boolean(entry) && typeof entry === "object");
+  };
   const buildSnapshot = () => stableStringify({ formData, entityValues, entityAccess });
   const clearDirty = () => {
     isDirtyRef.current = false;
@@ -255,12 +312,17 @@ export default function FormView({
       setReferenceOpen({});
       setEntityFields([]);
       setEntityValues({});
-      setEntityReferenceOptions({});
-      setEntityReferenceLabels({});
-      setEntityReferenceOpen({});
-      setEntityAccess(null);
-      setConditionFieldOptions([]);
-      setEntitySections([]);
+        setEntityReferenceOptions({});
+        setEntityReferenceLabels({});
+        setEntityReferenceOpen({});
+        setEntityAccess(null);
+        setEntityAudit(null);
+        setEntityAuditAllowed(false);
+        setEntityAuditLoading(false);
+        setEntityAuditError(null);
+        setOpenAuditEntryId(null);
+        setConditionFieldOptions([]);
+        setEntitySections([]);
       try {
         const viewResponse = await fetch(`/api/views/${viewKey}`, {
           headers: { Authorization: `Bearer ${token}` }
@@ -696,6 +758,57 @@ export default function FormView({
       ignore = true;
     };
   }, [view, recordId, token, contextCampaignId]);
+
+  useEffect(() => {
+    let ignore = false;
+    if (!view || view.entityKey !== "entities" || recordId === "new") {
+      setEntityAudit(null);
+      setEntityAuditAllowed(false);
+      setEntityAuditLoading(false);
+      setEntityAuditError(null);
+      return;
+    }
+
+    const loadAudit = async () => {
+      setEntityAuditLoading(true);
+      setEntityAuditError(null);
+      setOpenAuditEntryId(null);
+      try {
+        const response = await fetch(`/api/entities/${recordId}/audit`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (handleUnauthorized(response)) return;
+        if (response.status === 403) {
+          if (!ignore) {
+            setEntityAuditAllowed(false);
+            setEntityAudit(null);
+          }
+          return;
+        }
+        if (!response.ok) {
+          throw new Error("Unable to load audit data.");
+        }
+        const data = (await response.json()) as EntityAuditPayload;
+        if (!ignore) {
+          setEntityAudit(data);
+          setEntityAuditAllowed(true);
+        }
+      } catch (err) {
+        if (!ignore) {
+          setEntityAuditAllowed(false);
+          setEntityAuditError(err instanceof Error ? err.message : "Unable to load audit data.");
+        }
+      } finally {
+        if (!ignore) setEntityAuditLoading(false);
+      }
+    };
+
+    void loadAudit();
+
+    return () => {
+      ignore = true;
+    };
+  }, [view, recordId, token]);
 
   useEffect(() => {
     let ignore = false;
@@ -1421,17 +1534,28 @@ export default function FormView({
                   Config
                 </button>
               ) : null}
-              <button
-                type="button"
-                className={`form-view__tab ${entityTab === "access" ? "is-active" : ""}`}
-                onClick={() => setEntityTab("access")}
-                role="tab"
-                aria-selected={entityTab === "access"}
-              >
-              Access
-            </button>
-          </div>
-        ) : null}
+                <button
+                  type="button"
+                  className={`form-view__tab ${entityTab === "access" ? "is-active" : ""}`}
+                  onClick={() => setEntityTab("access")}
+                  role="tab"
+                  aria-selected={entityTab === "access"}
+                >
+                  Access
+                </button>
+                {entityAuditAllowed ? (
+                  <button
+                    type="button"
+                    className={`form-view__tab ${entityTab === "audit" ? "is-active" : ""}`}
+                    onClick={() => setEntityTab("audit")}
+                    role="tab"
+                    aria-selected={entityTab === "audit"}
+                  >
+                    Audit
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
         {isEntityTypeView ? (
           <div className="form-view__tabs" role="tablist">
             <button
@@ -2035,6 +2159,133 @@ export default function FormView({
             ) : (
               <div className="form-view__hint">Access controls are unavailable.</div>
             )}
+          </div>
+        ) : null}
+        {isEntityView && entityTab === "audit" ? (
+          <div className="form-view__section">
+            <h2>Audit</h2>
+            {entityAuditLoading ? (
+              <div className="form-view__hint">Loading audit data...</div>
+            ) : null}
+            {entityAuditError ? (
+              <div className="form-view__hint">{entityAuditError}</div>
+            ) : null}
+            {entityAudit ? (
+              <div className="audit-panel">
+                <div className="audit-section">
+                  <h3>Access Summary</h3>
+                  {entityAudit.access.length > 0 ? (
+                    <div className="audit-grid">
+                      <div className="audit-grid__header">User</div>
+                      <div className="audit-grid__header">Read Context</div>
+                      <div className="audit-grid__header">Write Context</div>
+                      {entityAudit.access.map((entry) => (
+                        <div className="audit-grid__row" key={entry.id}>
+                          <div className="audit-grid__cell">
+                            <div className="audit-user">
+                              {entry.name ?? entry.email}
+                            </div>
+                            {entry.name ? (
+                              <div className="audit-user__meta">{entry.email}</div>
+                            ) : null}
+                          </div>
+                          <div className="audit-grid__cell">
+                            {entry.readContexts.length > 0 ? (
+                              <div className="audit-chip-row">
+                                {entry.readContexts.map((context) => (
+                                  <span className="audit-chip" key={context}>
+                                    {context}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="audit-empty">No read access</span>
+                            )}
+                          </div>
+                          <div className="audit-grid__cell">
+                            {entry.writeContexts.length > 0 ? (
+                              <div className="audit-chip-row">
+                                {entry.writeContexts.map((context) => (
+                                  <span className="audit-chip" key={context}>
+                                    {context}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="audit-empty">No write access</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="form-view__hint">No access entries found.</div>
+                  )}
+                </div>
+                <div className="audit-section">
+                  <h3>Change Log</h3>
+                  {entityAudit.changes.length > 0 ? (
+                    <div className="audit-log">
+                      {entityAudit.changes.map((entry) => {
+                        const updateChanges =
+                          entry.action === "update" ? getUpdateChanges(entry.details) : [];
+                        const hasDetails = updateChanges.length > 0;
+                        const isOpen = openAuditEntryId === entry.id;
+                        return (
+                          <div className="audit-log__item" key={entry.id}>
+                            <button
+                              type="button"
+                              className="audit-log__row"
+                              onClick={() =>
+                                setOpenAuditEntryId(isOpen ? null : entry.id)
+                              }
+                              disabled={!hasDetails}
+                            >
+                              <div className="audit-log__primary">
+                                <span className="audit-log__action">
+                                  {formatAuditAction(entry.action)}
+                                </span>
+                                <span className="audit-log__actor">
+                                  {entry.actor?.name ??
+                                    entry.actor?.email ??
+                                    "Unknown"}
+                                </span>
+                              </div>
+                              <div className="audit-log__meta">
+                                {formatAuditTimestamp(entry.createdAt)}
+                              </div>
+                            </button>
+                            {isOpen && hasDetails ? (
+                              <div className="audit-log__details">
+                                {updateChanges.map((change, index) => (
+                                  <div
+                                    className="audit-log__detail"
+                                    key={`${entry.id}-${index}`}
+                                  >
+                                    <span className="audit-log__detail-label">
+                                      {change.label ??
+                                        change.fieldKey ??
+                                        "Field"}
+                                    </span>
+                                    <span className="audit-log__detail-values">
+                                      {formatAuditValue(change.from)}
+                                      {" -> "}
+                                      {formatAuditValue(change.to)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="form-view__hint">No audit entries yet.</div>
+                  )}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
         <div className="form-view__actions">

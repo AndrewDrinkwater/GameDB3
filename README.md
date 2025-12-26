@@ -31,6 +31,7 @@ Frontend runs on `http://localhost:5173`, backend on `http://localhost:4000`.
 Backend env: `backend/.env`
 - `PORT`
 - `DATABASE_URL`
+- `DATABASE_URL_TEST` (test database, required for backend Jest runs)
 
 ## Scripts
 Root:
@@ -57,6 +58,9 @@ Frontend (`frontend/`):
 ## Tests
 Backend tests cover auth, permissions, related lists, list view preferences, and entity filtering.
 Frontend tests cover context selection, related lists, list filtering, and condition builder behaviors.
+
+Backend tests require a separate database. Set `DATABASE_URL_TEST` to a different database name,
+run migrations against it, then run `npm run test`.
 
 ## Notes
 - List view preferences are stored per user and view; entity-type defaults are admin-configurable.

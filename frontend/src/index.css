@@ -1591,6 +1591,8 @@ body {
   display: grid;
   gap: 1.25rem;
   padding: 0.5rem 0;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  align-items: start;
 }
 
 .entity-access__section {
@@ -1628,30 +1630,13 @@ body {
   gap: 0.5rem;
 }
 
-.access-selector .reference-field {
-  margin-top: 0.2rem;
-}
-
-.access-selector .reference-field input {
-  background: color-mix(in srgb, var(--surface-2) 85%, transparent);
-}
-
-.access-selector .reference-field__chip {
-  border-radius: 999px;
-  padding: 0.25rem 0.65rem;
-  font-size: 0.85rem;
-  color: var(--text);
-  background: color-mix(in srgb, var(--surface-2) 85%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-}
-
 .access-selector {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.65rem;
 }
 
 .access-selector__label {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -1661,6 +1646,200 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.access-selector .reference-field {
+  margin-top: 0.1rem;
+  padding: 0.2rem;
+  border-radius: 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface) 90%, var(--surface-2));
+  box-shadow: 0 10px 18px color-mix(in srgb, var(--shadow) 30%, transparent);
+}
+
+.access-selector .reference-field input {
+  border: none;
+  background: transparent;
+  padding: 0.45rem 0.65rem;
+  color: var(--text);
+}
+
+.access-selector .reference-field__options {
+  margin-top: 0.35rem;
+}
+
+.access-selector .reference-field__chip {
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.audit-panel {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.audit-section {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.audit-section h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.audit-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 1.2fr) minmax(220px, 1.2fr);
+  gap: 0.75rem;
+}
+
+.audit-grid__row {
+  display: contents;
+}
+
+.audit-grid__header {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.audit-grid__cell {
+  padding: 0.7rem 0.85rem;
+  border-radius: 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, var(--surface-2));
+}
+
+.audit-user {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.audit-user__meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.audit-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.audit-chip {
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  font-size: 0.82rem;
+}
+
+.audit-empty {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.audit-log {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.audit-log__item {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.audit-log__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.4rem 0.8rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, var(--surface-2));
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  appearance: none;
+  font: inherit;
+  color: var(--text);
+}
+
+.audit-log__row:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.audit-log__row:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 2px;
+}
+
+.audit-log__primary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.audit-log__action {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.audit-log__actor {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.audit-log__meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.audit-log__details {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.7rem;
+  border: 1px dashed color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, var(--surface-2));
+}
+
+.audit-log__detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.8rem;
+  justify-content: space-between;
+}
+
+.audit-log__detail-label {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.audit-log__detail-values {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+@media (max-width: 720px) {
+  .audit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-grid__header {
+    display: none;
+  }
 }
 
 .form-view__actions {

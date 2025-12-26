@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "crypto";
 import {
   Prisma,
   PrismaClient,
@@ -25,6 +25,10 @@ const app = express();
 const port = process.env.PORT ? Number(process.env.PORT) : 4000;
 const prisma = new PrismaClient();
 const tokenSecret = process.env.AUTH_SECRET ?? "ttrpg-dev-secret";
+const accessTokenPropertyKey = "auth.access_token_ttl_minutes";
+const refreshTokenPropertyKey = "auth.refresh_token_ttl_days";
+const defaultAccessTokenMinutes = 30;
+const defaultRefreshTokenDays = 30;
 
 const toBase64Url = (value: string) =>
   Buffer.from(value)
@@ -33,6 +37,46 @@ const toBase64Url = (value: string) =>
     .replace(/\+/g, "-")
     .replace(/\//g, "_");
 
+const getCookieValue = (req: express.Request, name: string) => {
+  const header = req.header("cookie");
+  if (!header) return null;
+  const cookies = header.split(";").map((part) => part.trim());
+  for (const cookie of cookies) {
+    const [key, ...rest] = cookie.split("=");
+    if (key === name) {
+      return rest.join("=");
+    }
+  }
+  return null;
+};
+
+const parsePropertyNumber = (value: string) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const getSystemPropertyNumber = async (key: string, fallback: number) => {
+  const property = await prisma.systemProperty.findUnique({ where: { key } });
+  if (!property) return fallback;
+  const parsed = parsePropertyNumber(property.value);
+  return parsed ?? fallback;
+};
+
+const hashToken = (token: string) =>
+  createHash("sha256").update(token).digest("hex");
+
+const createRefreshToken = () => randomBytes(48).toString("base64url");
+
+const setRefreshCookie = (res: express.Response, token: string, maxAgeSeconds: number) => {
+  res.cookie("ttrpg_refresh", token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: maxAgeSeconds * 1000,
+    path: "/"
+  });
+};
+
 const fromBase64Url = (value: string) => {
   const padded = value.replace(/-/g, "+").replace(/_/g, "/");
   const padLength = padded.length % 4 === 0 ? 0 : 4 - (padded.length % 4);
@@ -40,7 +84,7 @@ const fromBase64Url = (value: string) => {
   return Buffer.from(normalized, "base64").toString("utf8");
 };
 
-const signToken = (payload: { userId: string; iat: number }) => {
+const signToken = (payload: { userId: string; iat: number; exp: number }) => {
   const encoded = toBase64Url(JSON.stringify(payload));
   const signature = createHmac("sha256", tokenSecret).update(encoded).digest("base64");
   const signatureUrl = signature.replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
@@ -57,8 +101,13 @@ const verifyToken = (token: string) => {
   if (sigBuffer.length !== expBuffer.length) return null;
   if (!timingSafeEqual(sigBuffer, expBuffer)) return null;
   try {
-    const payload = JSON.parse(fromBase64Url(encoded)) as { userId: string; iat: number };
-    if (!payload?.userId) return null;
+    const payload = JSON.parse(fromBase64Url(encoded)) as {
+      userId: string;
+      iat: number;
+      exp: number;
+    };
+    if (!payload?.userId || !payload?.exp) return null;
+    if (payload.exp <= Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch {
     return null;
@@ -324,6 +373,18 @@ type EntityAccessEntry = {
   scopeId?: string | null;
 };
 
+const buildAccessSignature = (
+  entries: Array<{
+    accessType: EntityAccessType;
+    scopeType: EntityAccessScope;
+    scopeId?: string | null;
+  }>
+) =>
+  entries
+    .map((entry) => `${entry.accessType}:${entry.scopeType}:${entry.scopeId ?? ""}`)
+    .sort()
+    .join("|");
+
 type ViewFieldSeed = {
   fieldKey: string;
   label: string;
@@ -372,6 +433,21 @@ type RelatedListSeed = {
 };
 
 const relatedListSeeds: Record<string, RelatedListSeed> = {
+  "world.character_creators": {
+    key: "world.character_creators",
+    title: "Character Creators",
+    parentEntityKey: "worlds",
+    relatedEntityKey: "users",
+    joinEntityKey: "worldCharacterCreator",
+    parentFieldKey: "worldId",
+    relatedFieldKey: "userId",
+    listOrder: 3,
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", source: RelatedListFieldSource.RELATED, listOrder: 1 },
+      { fieldKey: "email", label: "Email", source: RelatedListFieldSource.RELATED, listOrder: 2 }
+    ]
+  },
   "entity_types.fields": {
     key: "entity_types.fields",
     title: "Fields",
@@ -753,7 +829,8 @@ const buildEntityAccessFilter = async (
   campaignId?: string,
   characterId?: string
 ): Promise<Prisma.EntityWhereInput> => {
-  if (await isWorldArchitect(user.id, worldId)) {
+  const isArchitect = await isWorldArchitect(user.id, worldId);
+  if (isArchitect && !characterId) {
     return { worldId };
   }
 
@@ -786,6 +863,57 @@ const buildEntityAccessFilter = async (
   }
 
   return { worldId, OR: accessFilters };
+};
+
+const logSystemAudit = async (
+  tx: Prisma.TransactionClient,
+  payload: {
+    entityKey: string;
+    entityId: string;
+    action: string;
+    actorId: string;
+    details?: Prisma.InputJsonValue;
+  }
+) => {
+  await tx.systemAudit.create({ data: payload });
+};
+
+const normalizeEntityValue = (
+  fieldType: EntityFieldType,
+  rawValue: unknown
+): string | boolean | null => {
+  if (
+    fieldType === EntityFieldType.TEXT ||
+    fieldType === EntityFieldType.TEXTAREA ||
+    fieldType === EntityFieldType.CHOICE ||
+    fieldType === EntityFieldType.ENTITY_REFERENCE ||
+    fieldType === EntityFieldType.LOCATION_REFERENCE
+  ) {
+    return rawValue ? String(rawValue) : null;
+  }
+  if (fieldType === EntityFieldType.BOOLEAN) {
+    return Boolean(rawValue);
+  }
+  return rawValue ? String(rawValue) : null;
+};
+
+const getStoredEntityValue = (value: Prisma.EntityFieldValue): string | boolean | null => {
+  if (value.valueString !== null && value.valueString !== undefined) {
+    return value.valueString;
+  }
+  if (value.valueText !== null && value.valueText !== undefined) {
+    return value.valueText;
+  }
+  if (value.valueBoolean !== null && value.valueBoolean !== undefined) {
+    return value.valueBoolean;
+  }
+  if (value.valueNumber !== null && value.valueNumber !== undefined) {
+    return String(value.valueNumber);
+  }
+  if (value.valueJson !== null && value.valueJson !== undefined) {
+    return JSON.stringify(value.valueJson);
+  }
+  return null;
 };
 
 const canWriteEntity = async (
@@ -1072,10 +1200,34 @@ app.post("/api/auth/login", async (req, res) => {
       return;
     }
 
-    const token = signToken({ userId: user.id, iat: Date.now() });
+    const accessMinutes = await getSystemPropertyNumber(
+      accessTokenPropertyKey,
+      defaultAccessTokenMinutes
+    );
+    const refreshDays = await getSystemPropertyNumber(
+      refreshTokenPropertyKey,
+      defaultRefreshTokenDays
+    );
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const accessToken = signToken({
+      userId: user.id,
+      iat: nowSeconds,
+      exp: nowSeconds + Math.max(1, Math.floor(accessMinutes * 60))
+    });
+
+    const refreshToken = createRefreshToken();
+    const refreshTtlSeconds = Math.max(1, Math.floor(refreshDays * 24 * 60 * 60));
+    await prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashToken(refreshToken),
+        expiresAt: new Date(Date.now() + refreshTtlSeconds * 1000)
+      }
+    });
+    setRefreshCookie(res, refreshToken, refreshTtlSeconds);
 
     res.json({
-      token,
+      token: accessToken,
       user: {
         id: user.id,
         email: user.email,
@@ -1117,7 +1269,65 @@ app.get("/api/auth/me", async (req, res) => {
 });
 
 app.post("/api/auth/logout", (req, res) => {
+  const refreshToken = getCookieValue(req, "ttrpg_refresh");
+  if (refreshToken) {
+    prisma.refreshToken
+      .updateMany({
+        where: { tokenHash: hashToken(refreshToken), revokedAt: null },
+        data: { revokedAt: new Date() }
+      })
+      .catch(() => undefined);
+  }
+  res.clearCookie("ttrpg_refresh", { path: "/" });
   res.json({ ok: true });
+});
+
+app.post("/api/auth/refresh", async (req, res) => {
+  const refreshToken = getCookieValue(req, "ttrpg_refresh");
+  if (!refreshToken) {
+    res.status(401).json({ error: "Missing refresh token." });
+    return;
+  }
+
+  const stored = await prisma.refreshToken.findUnique({
+    where: { tokenHash: hashToken(refreshToken) }
+  });
+  if (!stored || stored.revokedAt || stored.expiresAt <= new Date()) {
+    res.status(401).json({ error: "Invalid refresh token." });
+    return;
+  }
+
+  const accessMinutes = await getSystemPropertyNumber(
+    accessTokenPropertyKey,
+    defaultAccessTokenMinutes
+  );
+  const refreshDays = await getSystemPropertyNumber(
+    refreshTokenPropertyKey,
+    defaultRefreshTokenDays
+  );
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const accessToken = signToken({
+    userId: stored.userId,
+    iat: nowSeconds,
+    exp: nowSeconds + Math.max(1, Math.floor(accessMinutes * 60))
+  });
+
+  const nextRefreshToken = createRefreshToken();
+  const refreshTtlSeconds = Math.max(1, Math.floor(refreshDays * 24 * 60 * 60));
+  await prisma.refreshToken.update({
+    where: { id: stored.id },
+    data: { revokedAt: new Date() }
+  });
+  await prisma.refreshToken.create({
+    data: {
+      userId: stored.userId,
+      tokenHash: hashToken(nextRefreshToken),
+      expiresAt: new Date(Date.now() + refreshTtlSeconds * 1000)
+    }
+  });
+  setRefreshCookie(res, nextRefreshToken, refreshTtlSeconds);
+
+  res.json({ token: accessToken });
 });
 
 app.get("/api/choices", requireAuth, async (req, res) => {
@@ -1418,6 +1628,7 @@ app.get("/api/related-lists", requireAuth, async (req, res) => {
 
   if (entityKey === "worlds") {
     await ensureSeededRelatedList("world.game_masters");
+    await ensureSeededRelatedList("world.character_creators");
   }
   if (entityKey === "campaigns") {
     await ensureSeededRelatedList("campaign.characters");
@@ -1454,10 +1665,13 @@ app.get("/api/related-lists/:key", requireAuth, async (req, res) => {
     return;
   }
 
-  const relatedList = await prisma.systemRelatedList.findUnique({
+  let relatedList = await prisma.systemRelatedList.findUnique({
     where: { key },
     include: { fields: { orderBy: { listOrder: "asc" } } }
   });
+  if (!relatedList && relatedListSeeds[key]) {
+    relatedList = await ensureSeededRelatedList(key);
+  }
 
   if (!relatedList) {
     res.status(404).json({ error: "Related list not found." });
@@ -1637,7 +1851,10 @@ app.post("/api/related-lists/:key", requireAuth, async (req, res) => {
     return;
   }
 
-  const relatedList = await prisma.systemRelatedList.findUnique({ where: { key } });
+  let relatedList = await prisma.systemRelatedList.findUnique({ where: { key } });
+  if (!relatedList && relatedListSeeds[key]) {
+    relatedList = await ensureSeededRelatedList(key);
+  }
   if (!relatedList) {
     res.status(404).json({ error: "Related list not found." });
     return;
@@ -1774,7 +1991,10 @@ app.delete("/api/related-lists/:key", requireAuth, async (req, res) => {
     return;
   }
 
-  const relatedList = await prisma.systemRelatedList.findUnique({ where: { key } });
+  let relatedList = await prisma.systemRelatedList.findUnique({ where: { key } });
+  if (!relatedList && relatedListSeeds[key]) {
+    relatedList = await ensureSeededRelatedList(key);
+  }
   if (!relatedList) {
     res.status(404).json({ error: "Related list not found." });
     return;
@@ -2135,31 +2355,37 @@ app.get("/api/references", requireAuth, async (req, res) => {
     if (worldId) filters.push({ worldId });
     if (entityTypeId) filters.push({ entityTypeId });
 
-    if (!isAdmin(user)) {
-      if (!worldId) {
-        res.json([]);
-        return;
-      }
-
-      const isArchitect = await isWorldArchitect(user.id, worldId);
-      if (!isArchitect) {
-        const accessFilters: Prisma.EntityWhereInput[] = [
-          { access: { some: { accessType: EntityAccessType.READ, scopeType: EntityAccessScope.GLOBAL } } }
-        ];
-        if (campaignId) {
-          accessFilters.push({
-            access: { some: { accessType: EntityAccessType.READ, scopeType: EntityAccessScope.CAMPAIGN, scopeId: campaignId } }
-          });
-        }
-        if (characterId) {
-          accessFilters.push({
-            access: { some: { accessType: EntityAccessType.READ, scopeType: EntityAccessScope.CHARACTER, scopeId: characterId } }
-          });
+      if (!isAdmin(user)) {
+        if (!worldId) {
+          res.json([]);
+          return;
         }
 
-        filters.push({ OR: accessFilters });
+        const canAccess = await canAccessWorld(user.id, worldId);
+        if (!canAccess) {
+          res.json([]);
+          return;
+        }
+
+        const isArchitect = await isWorldArchitect(user.id, worldId);
+        if (!isArchitect || characterId) {
+          const accessFilters: Prisma.EntityWhereInput[] = [
+            { access: { some: { accessType: EntityAccessType.READ, scopeType: EntityAccessScope.GLOBAL } } }
+          ];
+          if (campaignId) {
+            accessFilters.push({
+              access: { some: { accessType: EntityAccessType.READ, scopeType: EntityAccessScope.CAMPAIGN, scopeId: campaignId } }
+            });
+          }
+          if (characterId) {
+            accessFilters.push({
+              access: { some: { accessType: EntityAccessType.READ, scopeType: EntityAccessScope.CHARACTER, scopeId: characterId } }
+            });
+          }
+
+          filters.push({ OR: accessFilters });
+        }
       }
-    }
 
     const whereClause: Prisma.EntityWhereInput = filters.length > 1 ? { AND: filters } : baseClause;
     const select: Record<string, boolean> = { id: true };
@@ -2381,6 +2607,15 @@ app.delete("/api/views/:id", requireAuth, requireSystemAdmin, async (req, res) =
 app.get("/api/system/properties", requireAuth, requireSystemAdmin, async (_req, res) => {
   const properties = await prisma.systemProperty.findMany({ orderBy: { key: "asc" } });
   res.json(properties);
+});
+
+app.get("/api/system/properties/:id", requireAuth, requireSystemAdmin, async (req, res) => {
+  const property = await prisma.systemProperty.findUnique({ where: { id: req.params.id } });
+  if (!property) {
+    res.status(404).json({ error: "Property not found." });
+    return;
+  }
+  res.json(property);
 });
 
 app.post("/api/system/properties", requireAuth, requireSystemAdmin, async (req, res) => {
@@ -5042,13 +5277,17 @@ app.get("/api/entities", requireAuth, async (req, res) => {
   }
 
   let whereClause: Prisma.EntityWhereInput = {};
-  if (worldId) {
-    if (isAdmin(user)) {
-      whereClause = { worldId };
-    } else {
-      whereClause = await buildEntityAccessFilter(user, worldId, campaignId, characterId);
+    if (worldId) {
+      if (isAdmin(user)) {
+        whereClause = { worldId };
+      } else {
+        if (!(await canAccessWorld(user.id, worldId))) {
+          res.json([]);
+          return;
+        }
+        whereClause = await buildEntityAccessFilter(user, worldId, campaignId, characterId);
+      }
     }
-  }
 
   if (entityTypeId) {
     whereClause = { AND: [whereClause, { entityTypeId }] };
@@ -5427,12 +5666,26 @@ app.post("/api/entities", requireAuth, async (req, res) => {
       }
     }
 
-    await tx.entityAccess.createMany({
-      data: accessEntries
-    });
+      await tx.entityAccess.createMany({
+        data: accessEntries
+      });
 
-    return entity;
-  });
+      await logSystemAudit(tx, {
+        entityKey: "entities",
+        entityId: entity.id,
+        action: "create",
+        actorId: user.id,
+        details: {
+          name,
+          description,
+          worldId,
+          entityTypeId,
+          access: access ?? null
+        }
+      });
+
+      return entity;
+    });
 
   res.status(201).json(created);
 });
@@ -5461,10 +5714,15 @@ app.get("/api/entities/:id", requireAuth, async (req, res) => {
     return;
   }
 
-  if (!isAdmin(user)) {
-    const accessFilters: Prisma.EntityAccessWhereInput[] = [
-      { scopeType: EntityAccessScope.GLOBAL }
-    ];
+    if (!isAdmin(user)) {
+      if (!(await canAccessWorld(user.id, entity.worldId))) {
+        res.status(403).json({ error: "Forbidden." });
+        return;
+      }
+
+      const accessFilters: Prisma.EntityAccessWhereInput[] = [
+        { scopeType: EntityAccessScope.GLOBAL }
+      ];
     if (campaignId) {
       accessFilters.push({ scopeType: EntityAccessScope.CAMPAIGN, scopeId: campaignId });
     }
@@ -5528,10 +5786,25 @@ app.put("/api/entities/:id", requireAuth, async (req, res) => {
   const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
   const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
 
-  const entity = await prisma.entity.findUnique({
-    where: { id },
-    select: { worldId: true, entityTypeId: true }
-  });
+    const entity = await prisma.entity.findUnique({
+      where: { id },
+      select: {
+        worldId: true,
+        entityTypeId: true,
+        name: true,
+        description: true,
+        values: {
+          select: {
+            fieldId: true,
+            valueString: true,
+            valueText: true,
+            valueBoolean: true,
+            valueNumber: true,
+            valueJson: true
+          }
+        }
+      }
+    });
   if (!entity) {
     res.status(404).json({ error: "Entity not found." });
     return;
@@ -5542,23 +5815,67 @@ app.put("/api/entities/:id", requireAuth, async (req, res) => {
     return;
   }
 
-  const { name, description, fieldValues } = req.body as {
-    name?: string;
-    description?: string;
-    fieldValues?: Record<string, unknown>;
-  };
+    const { name, description, fieldValues } = req.body as {
+      name?: string;
+      description?: string;
+      fieldValues?: Record<string, unknown>;
+    };
 
-  const fields: EntityFieldRecord[] = await prisma.entityField.findMany({
-    where: { entityTypeId: entity.entityTypeId },
-    include: { choices: true }
-  });
-  const fieldMap = new Map(fields.map((field) => [field.fieldKey, field]));
-
-  const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    const entityRecord = await tx.entity.update({
-      where: { id },
-      data: { name, description }
+    const fields: EntityFieldRecord[] = await prisma.entityField.findMany({
+      where: { entityTypeId: entity.entityTypeId },
+      include: { choices: true }
     });
+    const fieldMap = new Map(fields.map((field) => [field.fieldKey, field]));
+    const storedValueMap = new Map(
+      entity.values.map((value) => [value.fieldId, getStoredEntityValue(value)])
+    );
+    const changes: Array<{
+      fieldKey: string;
+      label: string;
+      from: string | boolean | null;
+      to: string | boolean | null;
+    }> = [];
+
+    if (name !== undefined && name !== entity.name) {
+      changes.push({
+        fieldKey: "name",
+        label: "Name",
+        from: entity.name,
+        to: name
+      });
+    }
+
+    if (description !== undefined && description !== entity.description) {
+      changes.push({
+        fieldKey: "description",
+        label: "Description",
+        from: entity.description ?? null,
+        to: description ?? null
+      });
+    }
+
+    if (fieldValues) {
+      for (const [fieldKey, rawValue] of Object.entries(fieldValues)) {
+        const field = fieldMap.get(fieldKey);
+        if (!field) continue;
+        const previous = storedValueMap.get(field.id) ?? null;
+        const next = normalizeEntityValue(field.fieldType, rawValue);
+        if (previous !== next) {
+          changes.push({
+            fieldKey,
+            label: field.label,
+            from: previous,
+            to: next
+          });
+        }
+      }
+    }
+
+    const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const entityRecord = await tx.entity.update({
+        where: { id },
+        data: { name, description }
+      });
 
     if (fieldValues) {
       for (const [fieldKey, rawValue] of Object.entries(fieldValues)) {
@@ -5599,12 +5916,22 @@ app.put("/api/entities/:id", requireAuth, async (req, res) => {
             update: valueData,
             create: valueData
           });
+          }
         }
       }
-    }
 
-    return entityRecord;
-  });
+      if (changes.length > 0) {
+        await logSystemAudit(tx, {
+          entityKey: "entities",
+          entityId: id,
+          action: "update",
+          actorId: user.id,
+          details: { changes }
+        });
+      }
+
+      return entityRecord;
+    });
 
   res.json(updated);
 });
@@ -5617,10 +5944,10 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
   }
 
   const { id } = req.params;
-  const entity = await prisma.entity.findUnique({
-    where: { id },
-    select: { worldId: true }
-  });
+    const entity = await prisma.entity.findUnique({
+      where: { id },
+      select: { worldId: true, name: true }
+    });
   if (!entity) {
     res.status(404).json({ error: "Entity not found." });
     return;
@@ -5631,15 +5958,24 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
     return;
   }
 
-  await prisma.$transaction([
-    prisma.entityAccess.deleteMany({ where: { entityId: id } }),
-    prisma.entityFieldValue.deleteMany({ where: { entityId: id } }),
-    prisma.entity.delete({ where: { id } })
-  ]);
+    await prisma.$transaction([
+      prisma.systemAudit.create({
+        data: {
+          entityKey: "entities",
+          entityId: id,
+          action: "delete",
+          actorId: user.id,
+          details: { name: entity.name }
+        }
+      }),
+      prisma.entityAccess.deleteMany({ where: { entityId: id } }),
+      prisma.entityFieldValue.deleteMany({ where: { entityId: id } }),
+      prisma.entity.delete({ where: { id } })
+    ]);
   res.json({ ok: true });
 });
 
-app.get("/api/entities/:id/access", requireAuth, async (req, res) => {
+  app.get("/api/entities/:id/access", requireAuth, async (req, res) => {
   const user = (req as AuthRequest).user;
   if (!user) {
     res.status(401).json({ error: "Unauthorized." });
@@ -5710,10 +6046,269 @@ app.get("/api/entities/:id/access", requireAuth, async (req, res) => {
       .filter(Boolean) as string[]
   };
 
-  res.json({ read, write });
-});
+    res.json({ read, write });
+  });
 
-app.put("/api/entities/:id/access", requireAuth, async (req, res) => {
+  app.get("/api/entities/:id/audit", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const entity = await prisma.entity.findUnique({
+      where: { id },
+      select: { worldId: true }
+    });
+    if (!entity) {
+      res.status(404).json({ error: "Entity not found." });
+      return;
+    }
+
+    const isArchitect = await isWorldArchitect(user.id, entity.worldId);
+    const isGm =
+      (await isWorldGameMaster(user.id, entity.worldId)) ||
+      (await isWorldGm(user.id, entity.worldId));
+    if (!isAdmin(user) && !isArchitect && !isGm) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const access = await prisma.entityAccess.findMany({ where: { entityId: id } });
+    const readGlobal = access.some(
+      (entry) =>
+        entry.accessType === EntityAccessType.READ &&
+        entry.scopeType === EntityAccessScope.GLOBAL
+    );
+    const writeGlobal = access.some(
+      (entry) =>
+        entry.accessType === EntityAccessType.WRITE &&
+        entry.scopeType === EntityAccessScope.GLOBAL
+    );
+    const readCampaignIds = access
+      .filter(
+        (entry) =>
+          entry.accessType === EntityAccessType.READ &&
+          entry.scopeType === EntityAccessScope.CAMPAIGN
+      )
+      .map((entry) => entry.scopeId)
+      .filter(Boolean) as string[];
+    const writeCampaignIds = access
+      .filter(
+        (entry) =>
+          entry.accessType === EntityAccessType.WRITE &&
+          entry.scopeType === EntityAccessScope.CAMPAIGN
+      )
+      .map((entry) => entry.scopeId)
+      .filter(Boolean) as string[];
+    const readCharacterIds = access
+      .filter(
+        (entry) =>
+          entry.accessType === EntityAccessType.READ &&
+          entry.scopeType === EntityAccessScope.CHARACTER
+      )
+      .map((entry) => entry.scopeId)
+      .filter(Boolean) as string[];
+    const writeCharacterIds = access
+      .filter(
+        (entry) =>
+          entry.accessType === EntityAccessType.WRITE &&
+          entry.scopeType === EntityAccessScope.CHARACTER
+      )
+      .map((entry) => entry.scopeId)
+      .filter(Boolean) as string[];
+
+    const campaignIds = Array.from(new Set([...readCampaignIds, ...writeCampaignIds]));
+    const characterIds = Array.from(new Set([...readCharacterIds, ...writeCharacterIds]));
+
+    const [campaigns, characters] = await Promise.all([
+      campaignIds.length > 0
+        ? prisma.campaign.findMany({
+            where: { id: { in: campaignIds } },
+            select: {
+              id: true,
+              name: true,
+              gmUserId: true,
+              roster: { select: { character: { select: { playerId: true } } } }
+            }
+          })
+        : Promise.resolve([]),
+      characterIds.length > 0
+        ? prisma.character.findMany({
+            where: { id: { in: characterIds } },
+            select: { id: true, name: true, playerId: true }
+          })
+        : Promise.resolve([])
+    ]);
+
+    const campaignUserMap = new Map<string, { label: string; userIds: Set<string> }>();
+    campaigns.forEach((campaign) => {
+      const userIds = new Set<string>([campaign.gmUserId]);
+      campaign.roster.forEach((entry) => {
+        userIds.add(entry.character.playerId);
+      });
+      campaignUserMap.set(campaign.id, { label: `Campaign: ${campaign.name}`, userIds });
+    });
+
+    const characterUserMap = new Map<string, { label: string; userId: string }>();
+    characters.forEach((character) => {
+      characterUserMap.set(character.id, {
+        label: `Character: ${character.name}`,
+        userId: character.playerId
+      });
+    });
+
+    const needsGlobal = readGlobal || writeGlobal;
+    const scopedUserIds = new Set<string>();
+    campaignUserMap.forEach((entry) => entry.userIds.forEach((id) => scopedUserIds.add(id)));
+    characterUserMap.forEach((entry) => scopedUserIds.add(entry.userId));
+
+    const [globalUsers, scopedUsers] = await Promise.all([
+      needsGlobal
+        ? prisma.user.findMany({
+            where: { role: Role.USER },
+            select: { id: true, name: true, email: true }
+          })
+        : Promise.resolve([]),
+      scopedUserIds.size > 0
+        ? prisma.user.findMany({
+            where: { id: { in: Array.from(scopedUserIds) }, role: Role.USER },
+            select: { id: true, name: true, email: true }
+          })
+        : Promise.resolve([])
+    ]);
+
+    const userDirectory = new Map<string, { id: string; name: string | null; email: string }>();
+    globalUsers.forEach((entry) => userDirectory.set(entry.id, entry));
+    scopedUsers.forEach((entry) => userDirectory.set(entry.id, entry));
+
+    const accessMap = new Map<
+      string,
+      {
+        user: { id: string; name: string | null; email: string };
+        readContexts: Set<string>;
+        writeContexts: Set<string>;
+      }
+    >();
+
+    const ensureAccessEntry = (userId: string) => {
+      const userInfo = userDirectory.get(userId);
+      if (!userInfo) return;
+      if (!accessMap.has(userId)) {
+        accessMap.set(userId, {
+          user: userInfo,
+          readContexts: new Set<string>(),
+          writeContexts: new Set<string>()
+        });
+      }
+    };
+
+    if (readGlobal || writeGlobal) {
+      globalUsers.forEach((entry) => {
+        ensureAccessEntry(entry.id);
+        const accessEntry = accessMap.get(entry.id);
+        if (!accessEntry) return;
+        if (readGlobal) accessEntry.readContexts.add("Global");
+        if (writeGlobal) accessEntry.writeContexts.add("Global");
+      });
+    }
+
+    readCampaignIds.forEach((campaignId) => {
+      const campaign = campaignUserMap.get(campaignId);
+      if (!campaign) return;
+      campaign.userIds.forEach((userId) => {
+        ensureAccessEntry(userId);
+        accessMap.get(userId)?.readContexts.add(campaign.label);
+      });
+    });
+
+    writeCampaignIds.forEach((campaignId) => {
+      const campaign = campaignUserMap.get(campaignId);
+      if (!campaign) return;
+      campaign.userIds.forEach((userId) => {
+        ensureAccessEntry(userId);
+        accessMap.get(userId)?.writeContexts.add(campaign.label);
+      });
+    });
+
+    readCharacterIds.forEach((characterId) => {
+      const character = characterUserMap.get(characterId);
+      if (!character) return;
+      ensureAccessEntry(character.userId);
+      accessMap.get(character.userId)?.readContexts.add(character.label);
+    });
+
+    writeCharacterIds.forEach((characterId) => {
+      const character = characterUserMap.get(characterId);
+      if (!character) return;
+      ensureAccessEntry(character.userId);
+      accessMap.get(character.userId)?.writeContexts.add(character.label);
+    });
+
+    const changes = await prisma.systemAudit.findMany({
+      where: { entityKey: "entities", entityId: id },
+      include: { actor: { select: { id: true, name: true, email: true } } },
+      orderBy: { createdAt: "desc" }
+    });
+
+    const world = await prisma.world.findUnique({
+      where: { id: entity.worldId },
+      select: {
+        primaryArchitectId: true,
+        architects: { select: { userId: true } }
+      }
+    });
+    const architectIds = world
+      ? [
+          world.primaryArchitectId,
+          ...world.architects.map((entry) => entry.userId)
+        ].filter(Boolean)
+      : [];
+    const missingArchitectIds = architectIds.filter((id) => !userDirectory.has(id));
+    if (missingArchitectIds.length > 0) {
+      const architectUsers = await prisma.user.findMany({
+        where: { id: { in: missingArchitectIds } },
+        select: { id: true, name: true, email: true }
+      });
+      architectUsers.forEach((entry) => userDirectory.set(entry.id, entry));
+    }
+
+    architectIds.forEach((architectId) => {
+      ensureAccessEntry(architectId);
+      const accessEntry = accessMap.get(architectId);
+      if (!accessEntry) return;
+      accessEntry.readContexts.add("Architect");
+      accessEntry.writeContexts.add("Architect");
+    });
+
+    const accessSummary = Array.from(accessMap.values())
+      .map((entry) => ({
+        id: entry.user.id,
+        name: entry.user.name,
+        email: entry.user.email,
+        readContexts: Array.from(entry.readContexts).sort(),
+        writeContexts: Array.from(entry.writeContexts).sort()
+      }))
+      .sort((a, b) => {
+        const labelA = (a.name ?? a.email).toLowerCase();
+        const labelB = (b.name ?? b.email).toLowerCase();
+        return labelA.localeCompare(labelB);
+      });
+
+    res.json({
+      access: accessSummary,
+      changes: changes.map((entry) => ({
+        id: entry.id,
+        action: entry.action,
+        createdAt: entry.createdAt,
+        actor: entry.actor,
+        details: entry.details
+      }))
+    });
+  });
+
+  app.put("/api/entities/:id/access", requireAuth, async (req, res) => {
   const user = (req as AuthRequest).user;
   if (!user) {
     res.status(401).json({ error: "Unauthorized." });
@@ -5730,15 +6325,18 @@ app.put("/api/entities/:id/access", requireAuth, async (req, res) => {
     return;
   }
 
-  if (!isAdmin(user) && !(await isWorldArchitect(user.id, entity.worldId))) {
-    res.status(403).json({ error: "Forbidden." });
-    return;
-  }
+    if (!isAdmin(user) && !(await isWorldArchitect(user.id, entity.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
 
-  const { read, write } = req.body as {
-    read?: { global?: boolean; campaigns?: string[]; characters?: string[] };
-    write?: { global?: boolean; campaigns?: string[]; characters?: string[] };
-  };
+    const existingAccess = await prisma.entityAccess.findMany({ where: { entityId: id } });
+    const currentSignature = buildAccessSignature(existingAccess);
+
+    const { read, write } = req.body as {
+      read?: { global?: boolean; campaigns?: string[]; characters?: string[] };
+      write?: { global?: boolean; campaigns?: string[]; characters?: string[] };
+    };
 
   const accessEntries: EntityAccessEntry[] = [];
   if (read?.global) {
@@ -5780,22 +6378,41 @@ app.put("/api/entities/:id/access", requireAuth, async (req, res) => {
       scopeId: campaignId
     })
   );
-  write?.characters?.forEach((characterId) =>
-    accessEntries.push({
-      entityId: id,
-      accessType: EntityAccessType.WRITE,
-      scopeType: EntityAccessScope.CHARACTER,
-      scopeId: characterId
-    })
-  );
+    write?.characters?.forEach((characterId) =>
+      accessEntries.push({
+        entityId: id,
+        accessType: EntityAccessType.WRITE,
+        scopeType: EntityAccessScope.CHARACTER,
+        scopeId: characterId
+      })
+    );
 
-  await prisma.$transaction([
-    prisma.entityAccess.deleteMany({ where: { entityId: id } }),
-    prisma.entityAccess.createMany({ data: accessEntries })
-  ]);
+    const nextSignature = buildAccessSignature(accessEntries);
+    const accessChanged = currentSignature !== nextSignature;
 
-  res.json({ ok: true });
-});
+    const operations: Prisma.PrismaPromise<unknown>[] = [
+      prisma.entityAccess.deleteMany({ where: { entityId: id } }),
+      prisma.entityAccess.createMany({ data: accessEntries })
+    ];
+
+    if (accessChanged) {
+      operations.push(
+        prisma.systemAudit.create({
+          data: {
+            entityKey: "entities",
+            entityId: id,
+            action: "access_update",
+            actorId: user.id,
+            details: { read: read ?? null, write: write ?? null }
+          }
+        })
+      );
+    }
+
+    await prisma.$transaction(operations);
+
+    res.json({ ok: true });
+  });
 
 app.post("/api/campaigns/:id/roster", requireAuth, async (req, res) => {
   const user = (req as AuthRequest).user;

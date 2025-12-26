@@ -110,9 +110,10 @@ function AppShell() {
     const [entityTypeStats, setEntityTypeStats] = useState<
       Array<{ id: string; name: string; count: number }>
     >([]);
-    const [entityTypeStatsVersion, setEntityTypeStatsVersion] = useState(0);
-    const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-    const [lastEntitiesListRoute, setLastEntitiesListRoute] = useState<string | null>(null);
+  const [entityTypeStatsVersion, setEntityTypeStatsVersion] = useState(0);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [lastEntitiesListRoute, setLastEntitiesListRoute] = useState<string | null>(null);
+  const refreshInFlightRef = useRef<Promise<boolean> | null>(null);
 
     const contextStorageKey = "ttrpg.context";
     const contextPanelRef = useRef<HTMLDivElement | null>(null);
@@ -242,6 +243,37 @@ function AppShell() {
     }
   }, []);
 
+  const attemptRefresh = useCallback(async () => {
+    if (refreshInFlightRef.current) {
+      return refreshInFlightRef.current;
+    }
+    const refreshPromise = (async () => {
+      const response = await fetch("/api/auth/refresh", {
+        method: "POST",
+        credentials: "include"
+      });
+      if (!response.ok) {
+        return false;
+      }
+      const data = (await response.json()) as { token?: string };
+      if (!data.token) return false;
+      localStorage.setItem(tokenStorageKey, data.token);
+      setToken(data.token);
+      const meResponse = await fetch("/api/auth/me", {
+        headers: { Authorization: `Bearer ${data.token}` }
+      });
+      if (!meResponse.ok) return false;
+      const userData = (await meResponse.json()) as User;
+      setUser(userData);
+      return true;
+    })();
+
+    refreshInFlightRef.current = refreshPromise;
+    const ok = await refreshPromise;
+    refreshInFlightRef.current = null;
+    return ok;
+  }, []);
+
   useEffect(() => {
     const tokenValue = localStorage.getItem(tokenStorageKey);
     if (!tokenValue) return;
@@ -258,19 +290,31 @@ function AppShell() {
       .then(async (data: User) => {
         setUser(data);
         setToken(tokenValue);
-        const defaultsValue = await resolvePreferences(tokenValue);
-        await resolveContextFromDefaults(tokenValue, defaultsValue);
+        const preferences = await resolvePreferences(tokenValue);
+        await resolveContextFromDefaults(tokenValue, preferences.defaults);
       })
-      .catch(() => {
+      .catch(async () => {
+        const refreshed = await attemptRefresh();
+        if (refreshed) {
+          const refreshedToken = localStorage.getItem(tokenStorageKey);
+          if (!refreshedToken) return;
+          const preferences = await resolvePreferences(refreshedToken);
+          await resolveContextFromDefaults(refreshedToken, preferences.defaults);
+          return;
+        }
         localStorage.removeItem(tokenStorageKey);
         sessionStorage.removeItem(contextStorageKey);
         setToken(null);
         setUser(null);
       });
-  }, []);
+  }, [attemptRefresh]);
 
   useEffect(() => {
-    const handleUnauthorized = () => {
+    const handleUnauthorized = async () => {
+      const refreshed = await attemptRefresh();
+      if (refreshed) {
+        return;
+      }
       localStorage.removeItem(tokenStorageKey);
       sessionStorage.removeItem(contextStorageKey);
       setToken(null);
@@ -279,7 +323,7 @@ function AppShell() {
 
     window.addEventListener("ttrpg:unauthorized", handleUnauthorized);
     return () => window.removeEventListener("ttrpg:unauthorized", handleUnauthorized);
-  }, []);
+  }, [attemptRefresh]);
 
   useEffect(() => {
     const syncRoute = () => {
@@ -453,7 +497,12 @@ function AppShell() {
 
   const isSidebarOpen = sidebarMode !== "collapsed";
 
-  const resolvePreferences = async (tokenValue: string): Promise<ContextDefaults> => {
+  const resolvePreferences = async (
+    tokenValue: string
+  ): Promise<{ defaults: ContextDefaults; homepage: string }> => {
+    const fallbackHomepage = "/home";
+    const fallbackDefaults: ContextDefaults = { enabled: false };
+
     try {
       const [userPrefsResponse, defaultsResponse] = await Promise.all([
         fetch("/api/user/preferences", {
@@ -465,11 +514,11 @@ function AppShell() {
       ]);
 
       if (handleUnauthorized(userPrefsResponse) || handleUnauthorized(defaultsResponse)) {
-        return { enabled: false };
+        return { defaults: fallbackDefaults, homepage: fallbackHomepage };
       }
 
       if (!userPrefsResponse.ok || !defaultsResponse.ok) {
-        return;
+        return { defaults: fallbackDefaults, homepage: fallbackHomepage };
       }
 
       const userPrefs = (await userPrefsResponse.json()) as Array<{
@@ -492,7 +541,8 @@ function AppShell() {
       const defaultCampaignId = userPrefs.find((pref) => pref.key === "contextCampaignId")?.value || undefined;
       const defaultCharacterId = userPrefs.find((pref) => pref.key === "contextCharacterId")?.value || undefined;
 
-      setHomepage(userHomepage ?? defaultHomepage ?? "/home");
+      const resolvedHomepage = userHomepage ?? defaultHomepage ?? fallbackHomepage;
+      setHomepage(resolvedHomepage);
       setTheme(
         userTheme === "dark" || userTheme === "light"
           ? (userTheme as Theme)
@@ -514,15 +564,14 @@ function AppShell() {
         characterId: defaultCharacterId ?? undefined
       };
       setContextDefaults(defaultsValue);
-      return defaultsValue;
+      return { defaults: defaultsValue, homepage: resolvedHomepage };
     } catch {
-      setHomepage("/home");
+      setHomepage(fallbackHomepage);
       setTheme("light");
       setIsSidebarPinned(true);
       setSidebarMode(resolveSidebarMode(true));
-      const fallback = { enabled: false };
-      setContextDefaults(fallback);
-      return fallback;
+      setContextDefaults(fallbackDefaults);
+      return { defaults: fallbackDefaults, homepage: fallbackHomepage };
     }
   };
 
@@ -551,8 +600,9 @@ function AppShell() {
       setPassword("");
       sessionStorage.removeItem(contextStorageKey);
       setContext({});
-      const defaultsValue = await resolvePreferences(data.token);
-      await resolveContextFromDefaults(data.token, defaultsValue);
+      const preferences = await resolvePreferences(data.token);
+      await resolveContextFromDefaults(data.token, preferences.defaults);
+      window.location.hash = preferences.homepage;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Login failed");
     } finally {

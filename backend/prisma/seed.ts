@@ -146,6 +146,36 @@ async function main() {
     }
   });
 
+  await prisma.systemProperty.upsert({
+    where: { key: "auth.access_token_ttl_minutes" },
+    update: {
+      valueType: "INTEGER",
+      value: "30",
+      description: "Access token lifetime in minutes."
+    },
+    create: {
+      key: "auth.access_token_ttl_minutes",
+      valueType: "INTEGER",
+      value: "30",
+      description: "Access token lifetime in minutes."
+    }
+  });
+
+  await prisma.systemProperty.upsert({
+    where: { key: "auth.refresh_token_ttl_days" },
+    update: {
+      valueType: "INTEGER",
+      value: "30",
+      description: "Refresh token lifetime in days."
+    },
+    create: {
+      key: "auth.refresh_token_ttl_days",
+      valueType: "INTEGER",
+      value: "30",
+      description: "Refresh token lifetime in days."
+    }
+  });
+
   const choiceData = [
     { listKey: "dm_label", value: "dungeon_master", label: "Dungeon Master", sortOrder: 1 },
     { listKey: "dm_label", value: "game_master", label: "Game Master", sortOrder: 2 },

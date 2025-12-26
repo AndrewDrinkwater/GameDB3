@@ -105,6 +105,8 @@ model User {
   campaignCharacterAccess CampaignCharacterCreator[]
   gmCampaigns        Campaign[]          @relation("CampaignGM")
   createdCampaigns   Campaign[]          @relation("CampaignCreator")
+  refreshTokens      RefreshToken[]
+  systemAudits       SystemAudit[]
 }
 
 model World {
@@ -475,6 +477,19 @@ model SystemUserPreference {
   @@index([userId])
 }
 
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
 model SystemChoice {
   id        String   @id @default(uuid())
   listKey   String
@@ -621,4 +636,19 @@ model SystemDictionary {
 
   @@unique([entityKey, fieldKey])
   @@index([entityKey])
+}
+
+model SystemAudit {
+  id        String   @id @default(uuid())
+  entityKey String
+  entityId  String
+  action    String
+  actorId   String
+  details   Json?
+  createdAt DateTime @default(now())
+
+  actor User @relation(fields: [actorId], references: [id])
+
+  @@index([entityKey, entityId])
+  @@index([actorId])
 }
