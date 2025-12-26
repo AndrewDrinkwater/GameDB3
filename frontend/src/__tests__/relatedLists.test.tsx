@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import RelatedLists from "../components/RelatedLists";
+import PopoutProvider from "../components/PopoutProvider";
 
 type MockResponse = {
   ok: boolean;
@@ -12,6 +13,9 @@ describe("RelatedLists", () => {
     ok: true,
     json: async () => data
   });
+
+  const renderWithProvider = (ui: React.ReactElement) =>
+    render(<PopoutProvider>{ui}</PopoutProvider>);
 
   beforeEach(() => {
     (global as typeof globalThis).fetch = jest.fn((input: RequestInfo, init?: RequestInit) => {
@@ -59,7 +63,9 @@ describe("RelatedLists", () => {
   });
 
   it("renders related list tabs", async () => {
-    render(<RelatedLists token="token" parentEntityKey="campaigns" parentId="camp-1" />);
+    renderWithProvider(
+      <RelatedLists token="token" parentEntityKey="campaigns" parentId="camp-1" />
+    );
 
     expect(await screen.findByText("Related Lists")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Characters" })).toBeInTheDocument();
@@ -67,7 +73,9 @@ describe("RelatedLists", () => {
 
   it("adds an item using the search box", async () => {
     const user = userEvent.setup();
-    render(<RelatedLists token="token" parentEntityKey="campaigns" parentId="camp-1" />);
+    renderWithProvider(
+      <RelatedLists token="token" parentEntityKey="campaigns" parentId="camp-1" />
+    );
 
     const input = await screen.findByPlaceholderText("Add Characters...");
     await user.type(input, "Test");
@@ -84,7 +92,7 @@ describe("RelatedLists", () => {
   });
 
   it("shows a disabled message when record is new", () => {
-    render(
+    renderWithProvider(
       <RelatedLists
         token="token"
         parentEntityKey="campaigns"

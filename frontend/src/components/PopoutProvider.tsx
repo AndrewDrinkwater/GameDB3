@@ -24,6 +24,7 @@ type PopoutEntry = {
 type PopoutContextValue = {
   showPopout: (options: PopoutOptions) => string;
   closePopout: (id: string) => void;
+  updatePopout: (id: string, options: PopoutOptions) => void;
 };
 
 const PopoutContext = createContext<PopoutContextValue | null>(null);
@@ -52,7 +53,16 @@ export default function PopoutProvider({ children }: { children: ReactNode }) {
     return id;
   }, []);
 
-  const value = useMemo(() => ({ showPopout, closePopout }), [showPopout, closePopout]);
+  const updatePopout = useCallback((id: string, options: PopoutOptions) => {
+    setPopouts((current) =>
+      current.map((popout) => (popout.id === id ? { ...popout, options } : popout))
+    );
+  }, []);
+
+  const value = useMemo(
+    () => ({ showPopout, closePopout, updatePopout }),
+    [showPopout, closePopout, updatePopout]
+  );
   const activePopout = popouts[popouts.length - 1];
 
   return (

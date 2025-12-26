@@ -19,6 +19,11 @@ type TestContext = {
   viewerCharacterId: string;
   entityTypeId: string;
   entityFieldId: string;
+  entityIdOne: string;
+  entityIdTwo: string;
+  personaEntityTypeId: string;
+  personaEntityFieldId: string;
+  personaChoiceId: string;
 };
 
 const prisma = new PrismaClient();
@@ -190,6 +195,20 @@ afterAll(async () => {
       where: { characterId: context.viewerCharacterId }
     });
     await prisma.character.delete({ where: { id: context.viewerCharacterId } }).catch(() => undefined);
+  }
+  if (context.entityIdOne || context.entityIdTwo) {
+    await prisma.entity.deleteMany({
+      where: { id: { in: [context.entityIdOne, context.entityIdTwo].filter(Boolean) as string[] } }
+    });
+  }
+  if (context.personaChoiceId) {
+    await prisma.entityFieldChoice.delete({ where: { id: context.personaChoiceId } }).catch(() => undefined);
+  }
+  if (context.personaEntityFieldId) {
+    await prisma.entityField.delete({ where: { id: context.personaEntityFieldId } }).catch(() => undefined);
+  }
+  if (context.personaEntityTypeId) {
+    await prisma.entityType.delete({ where: { id: context.personaEntityTypeId } }).catch(() => undefined);
   }
 
   if (context.worldId && context.adminId) {
@@ -460,5 +479,202 @@ describe("Campaign creation permissions", () => {
 
     expect(response.status).toBe(201);
     context.gmCampaignId = response.body.id;
+  });
+});
+
+describe("List view preferences", () => {
+  it("saves and loads user list view preferences with filter groups", async () => {
+    const payload = {
+      columns: ["name", "description"],
+      filters: {
+        logic: "OR",
+        rules: [{ fieldKey: "name", operator: "contains", value: "Test" }]
+      }
+    };
+
+    const putResponse = await request(app)
+      .put("/api/list-view-preferences?viewKey=entities.list")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send(payload);
+
+    expect(putResponse.status).toBe(200);
+
+    const getResponse = await request(app)
+      .get("/api/list-view-preferences?viewKey=entities.list")
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(getResponse.status).toBe(200);
+    expect(getResponse.body.user.columnsJson).toEqual(payload.columns);
+    expect(getResponse.body.user.filtersJson).toEqual(payload.filters);
+  });
+
+  it("stores entity type list defaults for admins", async () => {
+    const payload = {
+      columns: ["name"],
+      filters: { logic: "AND", rules: [{ fieldKey: "name", operator: "contains", value: "NPC" }] }
+    };
+
+    const response = await request(app)
+      .put(`/api/entity-type-list-defaults?entityTypeId=${context.entityTypeId}`)
+      .set("Authorization", `Bearer ${context.token}`)
+      .send(payload);
+
+    expect(response.status).toBe(200);
+    expect(response.body.entityTypeId).toBe(context.entityTypeId);
+    expect(response.body.filtersJson).toEqual(payload.filters);
+  });
+});
+
+describe("Entity list filters", () => {
+  it("applies OR filter logic for entity list queries", async () => {
+    const entityOne = await prisma.entity.create({
+      data: {
+        worldId: context.worldId as string,
+        entityTypeId: context.entityTypeId as string,
+        name: "Goblin Scout",
+        description: "Test entry one",
+        createdById: context.adminId as string
+      }
+    });
+    const entityTwo = await prisma.entity.create({
+      data: {
+        worldId: context.worldId as string,
+        entityTypeId: context.entityTypeId as string,
+        name: "Forest Sprite",
+        description: "Goblin ally",
+        createdById: context.adminId as string
+      }
+    });
+    context.entityIdOne = entityOne.id;
+    context.entityIdTwo = entityTwo.id;
+
+    const filters = {
+      logic: "OR",
+      rules: [
+        { fieldKey: "name", operator: "contains", value: "Goblin" },
+        { fieldKey: "description", operator: "contains", value: "Goblin" }
+      ]
+    };
+
+    const response = await request(app)
+      .get(
+        `/api/entities?worldId=${context.worldId}&entityTypeId=${context.entityTypeId}&filters=${encodeURIComponent(
+          JSON.stringify(filters)
+        )}`
+      )
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(response.status).toBe(200);
+    const ids = response.body.map((item: { id: string }) => item.id);
+    expect(ids).toEqual(expect.arrayContaining([entityOne.id, entityTwo.id]));
+  });
+});
+
+describe("Entity type and field permissions", () => {
+  const cleanupEntityType = async (entityTypeId: string) => {
+    const fields = await prisma.entityField.findMany({
+      where: { entityTypeId },
+      select: { id: true }
+    });
+    const fieldIds = fields.map((field) => field.id);
+    if (fieldIds.length > 0) {
+      await prisma.entityFieldChoice.deleteMany({ where: { entityFieldId: { in: fieldIds } } });
+      await prisma.entityFieldValue.deleteMany({ where: { fieldId: { in: fieldIds } } });
+      await prisma.entityField.deleteMany({ where: { id: { in: fieldIds } } });
+    }
+    await prisma.entityFormSection.deleteMany({ where: { entityTypeId } });
+    await prisma.entityType.delete({ where: { id: entityTypeId } });
+  };
+
+  beforeAll(async () => {
+    if (context.personaEntityTypeId) return;
+    const response = await request(app)
+      .post("/api/entity-types")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({ worldId: context.worldId, name: "Architect Type" });
+
+    if (response.status !== 201) {
+      throw new Error(`Failed to create architect entity type: ${response.status}`);
+    }
+    context.personaEntityTypeId = response.body.id;
+  });
+
+  it("allows admins and architects to create entity types", async () => {
+    const adminResponse = await request(app)
+      .post("/api/entity-types")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({ worldId: context.worldId, name: "Admin Type" });
+
+    expect(adminResponse.status).toBe(201);
+    await cleanupEntityType(adminResponse.body.id);
+
+    const architectResponse = await request(app)
+      .post("/api/entity-types")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({ worldId: context.worldId, name: "Architect Type Second" });
+
+    expect(architectResponse.status).toBe(201);
+    await cleanupEntityType(architectResponse.body.id);
+  });
+
+  it("blocks viewers from creating entity types", async () => {
+    const response = await request(app)
+      .post("/api/entity-types")
+      .set("Authorization", `Bearer ${context.viewerToken}`)
+      .send({ worldId: context.worldId, name: "Viewer Type" });
+
+    expect(response.status).toBe(403);
+  });
+
+  it("allows architects to create fields and choices", async () => {
+    const fieldResponse = await request(app)
+      .post("/api/entity-fields")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({
+        entityTypeId: context.personaEntityTypeId,
+        fieldKey: "choice_field",
+        label: "Choice Field",
+        fieldType: "CHOICE"
+      });
+
+    expect(fieldResponse.status).toBe(201);
+    context.personaEntityFieldId = fieldResponse.body.id;
+
+    const choiceResponse = await request(app)
+      .post("/api/entity-field-choices")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({
+        entityFieldId: context.personaEntityFieldId,
+        value: "alpha",
+        label: "Alpha"
+      });
+
+    expect(choiceResponse.status).toBe(201);
+    context.personaChoiceId = choiceResponse.body.id;
+  });
+
+  it("blocks viewers from creating fields and choices", async () => {
+    const fieldResponse = await request(app)
+      .post("/api/entity-fields")
+      .set("Authorization", `Bearer ${context.viewerToken}`)
+      .send({
+        entityTypeId: context.personaEntityTypeId,
+        fieldKey: "viewer_field",
+        label: "Viewer Field",
+        fieldType: "TEXT"
+      });
+
+    expect(fieldResponse.status).toBe(403);
+
+    const choiceResponse = await request(app)
+      .post("/api/entity-field-choices")
+      .set("Authorization", `Bearer ${context.viewerToken}`)
+      .send({
+        entityFieldId: context.personaEntityFieldId,
+        value: "viewer",
+        label: "Viewer"
+      });
+
+    expect(choiceResponse.status).toBe(403);
   });
 });

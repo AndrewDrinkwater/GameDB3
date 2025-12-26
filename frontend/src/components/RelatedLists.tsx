@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { dispatchUnauthorized } from "../utils/auth";
+import { usePopout } from "./PopoutProvider";
 
 type RelatedListField = {
   id: string;
@@ -47,7 +48,123 @@ type AddState = {
 
 const emptyAddState: AddState = { query: "", options: [], open: false, loading: false };
 
+const entityFieldTypeOptions: Choice[] = [
+  { value: "TEXT", label: "Text" },
+  { value: "TEXTAREA", label: "Text Area" },
+  { value: "BOOLEAN", label: "Boolean" },
+  { value: "CHOICE", label: "Choice" },
+  { value: "ENTITY_REFERENCE", label: "Entity Reference" },
+  { value: "LOCATION_REFERENCE", label: "Location Reference" }
+];
+
+type EntityFieldCreateFormProps = {
+  token: string;
+  entityTypeId: string;
+  onCreated: () => void;
+  onClose: () => void;
+};
+
+const EntityFieldCreateForm = ({ token, entityTypeId, onCreated, onClose }: EntityFieldCreateFormProps) => {
+  const [fieldKey, setFieldKey] = useState("");
+  const [label, setLabel] = useState("");
+  const [fieldType, setFieldType] = useState("TEXT");
+  const [required, setRequired] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    if (!fieldKey.trim() || !label.trim()) {
+      setError("Field key and label are required.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await fetch("/api/entity-fields", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          entityTypeId,
+          fieldKey: fieldKey.trim(),
+          label: label.trim(),
+          fieldType,
+          required
+        })
+      });
+      if (response.status === 401) {
+        dispatchUnauthorized();
+        return;
+      }
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? "Unable to create field.");
+      }
+      onCreated();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to create field.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form className="related-lists__field-form" onSubmit={handleSubmit}>
+      <label>
+        <span>Field Key</span>
+        <input
+          type="text"
+          value={fieldKey}
+          onChange={(event) => setFieldKey(event.target.value)}
+          placeholder="e.g. armor_class"
+        />
+      </label>
+      <label>
+        <span>Label</span>
+        <input
+          type="text"
+          value={label}
+          onChange={(event) => setLabel(event.target.value)}
+          placeholder="Armor Class"
+        />
+      </label>
+      <label>
+        <span>Field Type</span>
+        <select value={fieldType} onChange={(event) => setFieldType(event.target.value)}>
+          {entityFieldTypeOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="related-lists__checkbox">
+        <input
+          type="checkbox"
+          checked={required}
+          onChange={(event) => setRequired(event.target.checked)}
+        />
+        <span>Required</span>
+      </label>
+      {error ? <div className="related-lists__error">{error}</div> : null}
+      <div className="related-lists__field-actions">
+        <button type="button" className="ghost-button" onClick={onClose} disabled={saving}>
+          Cancel
+        </button>
+        <button type="submit" className="primary-button" disabled={saving}>
+          {saving ? "Creating..." : "Create field"}
+        </button>
+      </div>
+    </form>
+  );
+};
+
 export default function RelatedLists({ token, parentEntityKey, parentId, disabled }: RelatedListsProps) {
+  const { showPopout, closePopout } = usePopout();
   const [lists, setLists] = useState<RelatedListConfig[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [itemsByList, setItemsByList] = useState<Record<string, RelatedListItem[]>>({});
@@ -126,6 +243,7 @@ export default function RelatedLists({ token, parentEntityKey, parentId, disable
 
   const activeItems = activeList ? itemsByList[activeList.key] ?? [] : [];
   const addState = activeList ? addStateByList[activeList.key] ?? emptyAddState : emptyAddState;
+  const canCreateEntityField = activeList?.joinEntityKey === "entityField";
 
   const handleSearch = async (list: RelatedListConfig, query: string) => {
     setAddStateByList((current) => ({
@@ -249,43 +367,69 @@ export default function RelatedLists({ token, parentEntityKey, parentId, disable
       {activeList ? (
         <div className="related-lists__panel">
           <div className="related-lists__toolbar">
-            <div className="related-lists__add" onBlur={(event) => {
-              const nextTarget = event.relatedTarget as Node | null;
-              if (nextTarget && event.currentTarget.contains(nextTarget)) return;
-              setAddStateByList((current) => ({
-                ...current,
-                [activeList.key]: { ...(current[activeList.key] ?? emptyAddState), open: false }
-              }));
-            }}>
-              <input
-                type="text"
-                placeholder={`Add ${activeList.title}...`}
-                value={addState.query}
-                onFocus={() => {
-                  void handleSearch(activeList, addState.query);
+            {canCreateEntityField ? (
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  let popoutId = "";
+                  popoutId = showPopout({
+                    title: "New Field",
+                    message: (
+                      <EntityFieldCreateForm
+                        token={token}
+                        entityTypeId={parentId}
+                        onCreated={() => {
+                          void loadItems(activeList.key);
+                        }}
+                        onClose={() => closePopout(popoutId)}
+                      />
+                    ),
+                    actions: [{ label: "Close" }]
+                  });
                 }}
-                onChange={(event) => {
-                  void handleSearch(activeList, event.target.value);
-                }}
-              />
-              {addState.open ? (
-                <div className="related-lists__options">
-                  {addState.options.length > 0 ? (
-                    addState.options.map((option) => (
-                      <button
-                        type="button"
-                        key={option.value}
-                        onClick={() => handleAdd(activeList, option)}
-                      >
-                        {option.label}
-                      </button>
-                    ))
-                  ) : (
-                    <div className="related-lists__empty">No matches.</div>
-                  )}
-                </div>
-              ) : null}
-            </div>
+              >
+                New field
+              </button>
+            ) : (
+              <div className="related-lists__add" onBlur={(event) => {
+                const nextTarget = event.relatedTarget as Node | null;
+                if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                setAddStateByList((current) => ({
+                  ...current,
+                  [activeList.key]: { ...(current[activeList.key] ?? emptyAddState), open: false }
+                }));
+              }}>
+                <input
+                  type="text"
+                  placeholder={`Add ${activeList.title}...`}
+                  value={addState.query}
+                  onFocus={() => {
+                    void handleSearch(activeList, addState.query);
+                  }}
+                  onChange={(event) => {
+                    void handleSearch(activeList, event.target.value);
+                  }}
+                />
+                {addState.open ? (
+                  <div className="related-lists__options">
+                    {addState.options.length > 0 ? (
+                      addState.options.map((option) => (
+                        <button
+                          type="button"
+                          key={option.value}
+                          onClick={() => handleAdd(activeList, option)}
+                        >
+                          {option.label}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="related-lists__empty">No matches.</div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            )}
           </div>
 
           <div className="related-lists__table">

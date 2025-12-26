@@ -19,6 +19,8 @@ type FieldDefinition = {
   formSectionId?: string | null;
   formColumn?: number | null;
   conditions?: unknown;
+  choices?: Choice[];
+  referenceEntityTypeId?: string | null;
 };
 
 type Choice = { value: string; label: string };
@@ -40,8 +42,19 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const dragFieldId = useRef<string | null>(null);
 
-  const conditionFieldOptions = useMemo<Choice[]>(
-    () => fields.map((field) => ({ value: field.fieldKey, label: field.label })),
+  const conditionFieldOptions = useMemo(
+    () =>
+      fields.map((field) => ({
+        value: field.fieldKey,
+        label: field.label,
+        fieldType: field.fieldType,
+        options: field.choices?.map((choice) => ({
+          value: choice.value,
+          label: choice.label
+        })),
+        referenceEntityKey: field.fieldType === "ENTITY_REFERENCE" ? "entities" : undefined,
+        referenceEntityTypeId: field.referenceEntityTypeId ?? null
+      })),
     [fields]
   );
 
@@ -436,6 +449,7 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                             <ConditionBuilder
                               value={resolveConditions(field.conditions) as any}
                               fieldOptions={conditionFieldOptions}
+                              token={token}
                               onChange={(next) => {
                                 updateField(field.id, (current) => ({
                                   ...current,

@@ -945,6 +945,7 @@ function AppShell() {
               extraParams={extraParams}
               titleOverride={titleOverride}
               subtitleOverride={subtitleOverride}
+              currentUserRole={user.role}
               onOpenForm={(id) => {
                 if (routeParts[1] === "entities" && id === "new" && entityTypeIdParam) {
                   navigateWithGuard(`/form/entities/new?entityTypeId=${entityTypeIdParam}`);
@@ -1057,15 +1058,16 @@ function AppShell() {
 
       return (
         <section className="app__panel app__panel--wide">
-          <ListView
-            token={token}
-            viewKey={config.listKey}
-            formViewKey={config.formKey}
-            onOpenForm={(id) => {
-              navigateWithGuard(`/admin/${routeParts[1]}/${id}`);
-              handleSidebarSelect();
-            }}
-          />
+            <ListView
+              token={token}
+              viewKey={config.listKey}
+              formViewKey={config.formKey}
+              currentUserRole={user.role}
+              onOpenForm={(id) => {
+                navigateWithGuard(`/admin/${routeParts[1]}/${id}`);
+                handleSidebarSelect();
+              }}
+            />
         </section>
       );
     }

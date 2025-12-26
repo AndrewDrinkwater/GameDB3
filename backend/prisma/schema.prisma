@@ -96,6 +96,8 @@ model User {
   createdEntities    Entity[]            @relation("EntityCreator")
   systemRoles        SystemUserRole[]
   systemPreferences  SystemUserPreference[]
+  listViewPreferences UserListViewPreference[]
+  entityTypeListDefaults EntityTypeListViewDefault[] @relation("EntityTypeListDefaults")
   architectWorlds    WorldArchitect[]
   worldGameMasters   WorldGameMaster[]
   worldCampaignAccess WorldCampaignCreator[]
@@ -171,6 +173,8 @@ model EntityType {
   formSections EntityFormSection[]
   referencedByFields EntityField[] @relation("EntityFieldReferenceType")
   entities  Entity[]
+  listViewDefault EntityTypeListViewDefault?
+  listViewPreferences UserListViewPreference[]
 
   @@index([worldId])
   @@index([createdById])
@@ -217,6 +221,37 @@ model EntityFormSection {
   fields     EntityField[]
 
   @@index([entityTypeId])
+}
+
+model UserListViewPreference {
+  id           String   @id @default(uuid())
+  userId       String
+  viewKey      String
+  entityTypeId String?
+  columnsJson  Json?
+  filtersJson  Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user       User        @relation(fields: [userId], references: [id])
+  entityType EntityType? @relation(fields: [entityTypeId], references: [id])
+
+  @@unique([userId, viewKey, entityTypeId])
+  @@index([userId])
+  @@index([viewKey])
+}
+
+model EntityTypeListViewDefault {
+  id           String   @id @default(uuid())
+  entityTypeId String   @unique
+  columnsJson  Json?
+  filtersJson  Json?
+  updatedById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  entityType EntityType @relation(fields: [entityTypeId], references: [id])
+  updatedBy  User?      @relation("EntityTypeListDefaults", fields: [updatedById], references: [id])
 }
 
 model EntityFieldChoice {

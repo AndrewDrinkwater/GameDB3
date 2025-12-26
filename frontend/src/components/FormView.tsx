@@ -39,6 +39,15 @@ type SystemView = {
 
 type Choice = { value: string; label: string };
 
+type ConditionFieldOption = Choice & {
+  fieldType?: string;
+  options?: Choice[];
+  referenceEntityKey?: string;
+  referenceScope?: string | null;
+  referenceEntityTypeId?: string | null;
+  allowMultiple?: boolean;
+};
+
 type EntityFieldChoice = {
   id: string;
   value: string;
@@ -121,7 +130,12 @@ type ConditionGroup = {
 const evaluateRule = (rule: ConditionRule, values: Record<string, unknown>) => {
   const rawValue = values[rule.fieldKey];
   const value = rawValue === undefined || rawValue === null ? "" : String(rawValue);
-  const target = rule.value ?? "";
+  const targetValues = Array.isArray(rule.value)
+    ? rule.value.map((item) => String(item))
+    : rule.value
+      ? [String(rule.value)]
+      : [];
+  const target = targetValues[0] ?? "";
 
   switch (rule.operator) {
     case "equals":
@@ -130,6 +144,8 @@ const evaluateRule = (rule: ConditionRule, values: Record<string, unknown>) => {
       return value !== target;
     case "contains":
       return value.toLowerCase().includes(target.toLowerCase());
+    case "contains_any":
+      return targetValues.some((item) => item === value);
     case "is_set":
       return value !== "";
     case "is_not_set":
@@ -197,7 +213,7 @@ export default function FormView({
   const [entityReferenceLabels, setEntityReferenceLabels] = useState<Record<string, string>>({});
   const [entityReferenceOpen, setEntityReferenceOpen] = useState<Record<string, boolean>>({});
   const [entityAccess, setEntityAccess] = useState<EntityAccessState | null>(null);
-  const [conditionFieldOptions, setConditionFieldOptions] = useState<Choice[]>([]);
+  const [conditionFieldOptions, setConditionFieldOptions] = useState<ConditionFieldOption[]>([]);
   const [entityTab, setEntityTab] = useState<"info" | "config" | "access">("info");
   const [entityTypeTab, setEntityTypeTab] = useState<"details" | "designer">("details");
   const [fieldChoices, setFieldChoices] = useState<EntityFieldChoice[]>([]);
@@ -697,15 +713,23 @@ export default function FormView({
       if (handleUnauthorized(response)) return;
       if (!response.ok) return;
       const data = (await response.json()) as EntityFieldDefinition[];
-      if (!ignore) {
-        setConditionFieldOptions(
-          data.map((field) => ({
-            value: field.fieldKey,
-            label: field.label
-          }))
-        );
-      }
-    };
+        if (!ignore) {
+          setConditionFieldOptions(
+            data.map((field) => ({
+              value: field.fieldKey,
+              label: field.label,
+              fieldType: field.fieldType,
+              options: field.choices?.map((choice) => ({
+                value: choice.value,
+                label: choice.label
+              })),
+              referenceEntityKey:
+                field.fieldType === "ENTITY_REFERENCE" ? "entities" : undefined,
+              referenceEntityTypeId: field.referenceEntityTypeId ?? null
+            }))
+          );
+        }
+      };
 
     void loadOptions();
 
@@ -1119,7 +1143,18 @@ export default function FormView({
         return;
       }
       if (value !== undefined) {
-        payload[field.fieldKey] = field.fieldType === "BOOLEAN" ? Boolean(value) : value;
+        if (field.fieldType === "BOOLEAN") {
+          payload[field.fieldKey] = Boolean(value);
+        } else if (field.fieldType === "NUMBER") {
+          if (value === "" || value === null) {
+            payload[field.fieldKey] = null;
+          } else {
+            const numericValue = typeof value === "number" ? value : Number(value);
+            payload[field.fieldKey] = Number.isNaN(numericValue) ? null : numericValue;
+          }
+        } else {
+          payload[field.fieldKey] = value;
+        }
       }
     });
 
@@ -1446,6 +1481,12 @@ export default function FormView({
                     <ConditionBuilder
                       value={parsedValue ?? undefined}
                       fieldOptions={conditionFieldOptions}
+                      token={token}
+                      context={{
+                        worldId: contextWorldId,
+                        campaignId: contextCampaignId,
+                        characterId: contextCharacterId
+                      }}
                       onChange={(next) => handleChange(field.fieldKey, next)}
                     />
                   </label>

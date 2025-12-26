@@ -74,6 +74,31 @@ app.get("/health", (_req, res) => {
 
 type AuthRequest = express.Request & { user?: User };
 
+type ListViewFilterRule = {
+  fieldKey: string;
+  operator: string;
+  value?: unknown;
+};
+
+type ListViewFilterGroup = {
+  logic?: "AND" | "OR";
+  rules?: ListViewFilterRule[];
+};
+
+const normalizeListViewFilters = (input: unknown): { logic: "AND" | "OR"; rules: ListViewFilterRule[] } => {
+  if (Array.isArray(input)) {
+    return { logic: "AND", rules: input as ListViewFilterRule[] };
+  }
+  if (input && typeof input === "object") {
+    const group = input as ListViewFilterGroup;
+    return {
+      logic: group.logic === "OR" ? "OR" : "AND",
+      rules: Array.isArray(group.rules) ? group.rules : []
+    };
+  }
+  return { logic: "AND", rules: [] };
+};
+
 const getBearerToken = (req: express.Request) => {
   const header = req.header("authorization");
   if (!header) return null;
@@ -347,6 +372,38 @@ type RelatedListSeed = {
 };
 
 const relatedListSeeds: Record<string, RelatedListSeed> = {
+  "entity_types.fields": {
+    key: "entity_types.fields",
+    title: "Fields",
+    parentEntityKey: "entity_types",
+    relatedEntityKey: "entity_fields",
+    joinEntityKey: "entityField",
+    parentFieldKey: "entityTypeId",
+    relatedFieldKey: "id",
+    listOrder: 1,
+    adminOnly: false,
+    fields: [
+      { fieldKey: "fieldKey", label: "Key", source: RelatedListFieldSource.RELATED, listOrder: 1 },
+      { fieldKey: "label", label: "Label", source: RelatedListFieldSource.RELATED, listOrder: 2 },
+      { fieldKey: "fieldType", label: "Type", source: RelatedListFieldSource.RELATED, listOrder: 3 },
+      { fieldKey: "required", label: "Required", source: RelatedListFieldSource.RELATED, listOrder: 4 }
+    ]
+  },
+  "campaign.characters": {
+    key: "campaign.characters",
+    title: "Characters",
+    parentEntityKey: "campaigns",
+    relatedEntityKey: "characters",
+    joinEntityKey: "characterCampaign",
+    parentFieldKey: "campaignId",
+    relatedFieldKey: "characterId",
+    listOrder: 1,
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", source: RelatedListFieldSource.RELATED, listOrder: 1 },
+      { fieldKey: "playerName", label: "Played By", source: RelatedListFieldSource.RELATED, listOrder: 2 }
+    ]
+  },
   "world.game_masters": {
     key: "world.game_masters",
     title: "Game Masters",
@@ -676,7 +733,7 @@ const canAccessEntityType = async (userId: string, entityTypeId: string) => {
   if (!entityType) return false;
   if (entityType.isTemplate) return true;
   if (!entityType.worldId) return false;
-  return isWorldArchitect(userId, entityType.worldId);
+  return canAccessWorld(userId, entityType.worldId);
 };
 
 const canManageEntityType = async (userId: string, entityTypeId: string) => {
@@ -1178,6 +1235,174 @@ app.get("/api/views/:key", requireAuth, async (req, res) => {
   res.json(view);
 });
 
+app.get("/api/list-view-preferences", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const viewKey = typeof req.query.viewKey === "string" ? req.query.viewKey : undefined;
+  const entityTypeId =
+    typeof req.query.entityTypeId === "string" ? req.query.entityTypeId : null;
+
+  if (!viewKey) {
+    res.status(400).json({ error: "viewKey is required." });
+    return;
+  }
+
+  const preference = await prisma.userListViewPreference.findFirst({
+    where: { userId: user.id, viewKey, entityTypeId }
+  });
+
+  const defaults = entityTypeId
+    ? await prisma.entityTypeListViewDefault.findUnique({
+        where: { entityTypeId }
+      })
+    : null;
+
+  res.json({
+    user: preference,
+    defaults
+  });
+});
+
+app.put("/api/list-view-preferences", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const viewKey = typeof req.query.viewKey === "string" ? req.query.viewKey : undefined;
+  const entityTypeId =
+    typeof req.query.entityTypeId === "string" ? req.query.entityTypeId : null;
+
+  if (!viewKey) {
+    res.status(400).json({ error: "viewKey is required." });
+    return;
+  }
+
+  const { columns, filters } = req.body as {
+    columns?: string[];
+    filters?: ListViewFilterRule[] | ListViewFilterGroup;
+  };
+
+  const columnsJson = columns ? (columns as Prisma.InputJsonValue) : undefined;
+  const filtersJson = filters ? (filters as Prisma.InputJsonValue) : undefined;
+
+  let preference;
+  if (entityTypeId) {
+    preference = await prisma.userListViewPreference.upsert({
+      where: { userId_viewKey_entityTypeId: { userId: user.id, viewKey, entityTypeId } },
+      update: {
+        columnsJson,
+        filtersJson
+      },
+      create: {
+        userId: user.id,
+        viewKey,
+        entityTypeId,
+        columnsJson,
+        filtersJson
+      }
+    });
+  } else {
+    const existing = await prisma.userListViewPreference.findFirst({
+      where: { userId: user.id, viewKey, entityTypeId: null }
+    });
+
+    preference = existing
+      ? await prisma.userListViewPreference.update({
+          where: { id: existing.id },
+          data: { columnsJson, filtersJson }
+        })
+      : await prisma.userListViewPreference.create({
+          data: { userId: user.id, viewKey, entityTypeId: null, columnsJson, filtersJson }
+        });
+  }
+
+  res.json(preference);
+});
+
+app.delete("/api/list-view-preferences", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const viewKey = typeof req.query.viewKey === "string" ? req.query.viewKey : undefined;
+  const entityTypeId =
+    typeof req.query.entityTypeId === "string" ? req.query.entityTypeId : null;
+
+  if (!viewKey) {
+    res.status(400).json({ error: "viewKey is required." });
+    return;
+  }
+
+  await prisma.userListViewPreference.deleteMany({
+    where: { userId: user.id, viewKey, entityTypeId }
+  });
+
+  res.json({ ok: true });
+});
+
+app.get("/api/entity-type-list-defaults", requireAuth, requireSystemAdmin, async (req, res) => {
+  const entityTypeId =
+    typeof req.query.entityTypeId === "string" ? req.query.entityTypeId : undefined;
+  if (!entityTypeId) {
+    res.status(400).json({ error: "entityTypeId is required." });
+    return;
+  }
+
+  const defaults = await prisma.entityTypeListViewDefault.findUnique({
+    where: { entityTypeId }
+  });
+
+  res.json(defaults);
+});
+
+app.put("/api/entity-type-list-defaults", requireAuth, requireSystemAdmin, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const entityTypeId =
+    typeof req.query.entityTypeId === "string" ? req.query.entityTypeId : undefined;
+  if (!entityTypeId) {
+    res.status(400).json({ error: "entityTypeId is required." });
+    return;
+  }
+
+  const { columns, filters } = req.body as {
+    columns?: string[];
+    filters?: ListViewFilterRule[] | ListViewFilterGroup;
+  };
+
+  const columnsJson = columns ? (columns as Prisma.InputJsonValue) : undefined;
+  const filtersJson = filters ? (filters as Prisma.InputJsonValue) : undefined;
+
+  const defaults = await prisma.entityTypeListViewDefault.upsert({
+    where: { entityTypeId },
+    update: {
+      columnsJson,
+      filtersJson,
+      updatedById: user.id
+    },
+    create: {
+      entityTypeId,
+      columnsJson,
+      filtersJson,
+      updatedById: user.id
+    }
+  });
+
+  res.json(defaults);
+});
+
 app.get("/api/related-lists", requireAuth, async (req, res) => {
   const user = (req as AuthRequest).user;
   if (!user) {
@@ -1193,6 +1418,12 @@ app.get("/api/related-lists", requireAuth, async (req, res) => {
 
   if (entityKey === "worlds") {
     await ensureSeededRelatedList("world.game_masters");
+  }
+  if (entityKey === "campaigns") {
+    await ensureSeededRelatedList("campaign.characters");
+  }
+  if (entityKey === "entity_types") {
+    await ensureSeededRelatedList("entity_types.fields");
   }
 
   const relatedLists = await prisma.systemRelatedList.findMany({
@@ -1254,9 +1485,18 @@ app.get("/api/related-lists/:key", requireAuth, async (req, res) => {
     }
   }
 
+  if (relatedList.parentEntityKey === "entity_types") {
+    const canAccess = isAdmin(user) || (await canAccessEntityType(user.id, parentId));
+    if (!canAccess) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+  }
+
   const relatedFields = relatedList.fields.filter((field) => field.source === "RELATED");
   const relatedSelect: Record<string, boolean> = { id: true };
   relatedFields.forEach((field) => {
+    if (field.fieldKey === "playerName") return;
     relatedSelect[field.fieldKey] = true;
   });
 
@@ -1267,14 +1507,32 @@ app.get("/api/related-lists/:key", requireAuth, async (req, res) => {
   }> = [];
 
   if (relatedList.joinEntityKey === "characterCampaign") {
+    const includePlayer = relatedFields.some((field) => field.fieldKey === "playerName");
     const rows = await prisma.characterCampaign.findMany({
       where: { campaignId: parentId },
-      include: { character: { select: relatedSelect as Record<string, true> } }
+      include: {
+        character: {
+          select: {
+            ...(relatedSelect as Record<string, true>),
+            ...(includePlayer ? { player: { select: { name: true, email: true } } } : {})
+          }
+        }
+      }
     });
 
     items = rows.map((row) => ({
       relatedId: row.characterId,
-      relatedData: row.character as Record<string, unknown>,
+      relatedData: {
+        ...(row.character as Record<string, unknown>),
+        ...(includePlayer
+          ? {
+              playerName:
+                row.character.player?.name ??
+                row.character.player?.email ??
+                "-"
+            }
+          : {})
+      },
       joinData: { status: row.status }
     }));
   }
@@ -1344,6 +1602,23 @@ app.get("/api/related-lists/:key", requireAuth, async (req, res) => {
     }));
   }
 
+  if (relatedList.joinEntityKey === "entityField") {
+    const rows = await prisma.entityField.findMany({
+      where: { entityTypeId: parentId },
+      select: {
+        ...(relatedSelect as Record<string, true>),
+        id: true
+      },
+      orderBy: { listOrder: "asc" }
+    });
+
+    items = rows.map((row) => ({
+      relatedId: row.id,
+      relatedData: row as Record<string, unknown>,
+      joinData: {}
+    }));
+  }
+
   res.json({ items });
 });
 
@@ -1383,6 +1658,14 @@ app.post("/api/related-lists/:key", requireAuth, async (req, res) => {
 
   if (relatedList.parentEntityKey === "worlds") {
     const canManage = isAdmin(user) || (await isWorldArchitect(user.id, parentId));
+    if (!canManage) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+  }
+
+  if (relatedList.parentEntityKey === "entity_types") {
+    const canManage = isAdmin(user) || (await canManageEntityType(user.id, parentId));
     if (!canManage) {
       res.status(403).json({ error: "Forbidden." });
       return;
@@ -1468,6 +1751,11 @@ app.post("/api/related-lists/:key", requireAuth, async (req, res) => {
     return;
   }
 
+  if (relatedList.joinEntityKey === "entityField") {
+    res.status(400).json({ error: "Use /api/entity-fields to create fields." });
+    return;
+  }
+
   res.status(400).json({ error: "Unsupported related list." });
 });
 
@@ -1507,6 +1795,14 @@ app.delete("/api/related-lists/:key", requireAuth, async (req, res) => {
 
   if (relatedList.parentEntityKey === "worlds") {
     const canManage = isAdmin(user) || (await isWorldArchitect(user.id, parentId));
+    if (!canManage) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+  }
+
+  if (relatedList.parentEntityKey === "entity_types") {
+    const canManage = isAdmin(user) || (await canManageEntityType(user.id, parentId));
     if (!canManage) {
       res.status(403).json({ error: "Forbidden." });
       return;
@@ -1562,6 +1858,20 @@ app.delete("/api/related-lists/:key", requireAuth, async (req, res) => {
     await prisma.campaignCharacterCreator.delete({
       where: { campaignId_userId: { campaignId: parentId, userId: relatedId } }
     });
+    res.json({ ok: true });
+    return;
+  }
+
+  if (relatedList.joinEntityKey === "entityField") {
+    const existing = await prisma.entityField.findFirst({
+      where: { id: relatedId, entityTypeId: parentId },
+      select: { id: true }
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Field not found." });
+      return;
+    }
+    await prisma.entityField.delete({ where: { id: relatedId } });
     res.json({ ok: true });
     return;
   }
@@ -4630,16 +4940,24 @@ app.post("/api/entity-field-choices", requireAuth, async (req, res) => {
     return;
   }
 
-  const choice = await prisma.entityFieldChoice.create({
-    data: {
-      entityFieldId,
-      value,
-      label,
-      sortOrder
-    }
-  });
+  try {
+    const choice = await prisma.entityFieldChoice.create({
+      data: {
+        entityFieldId,
+        value,
+        label,
+        sortOrder
+      }
+    });
 
-  res.status(201).json(choice);
+    res.status(201).json(choice);
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      res.status(409).json({ error: "Choice value already exists for this field." });
+      return;
+    }
+    throw error;
+  }
 });
 
 app.put("/api/entity-field-choices/:id", requireAuth, async (req, res) => {
@@ -4715,6 +5033,8 @@ app.get("/api/entities", requireAuth, async (req, res) => {
   const entityTypeId = typeof req.query.entityTypeId === "string" ? req.query.entityTypeId : undefined;
   const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
   const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+  const fieldKeysParam = typeof req.query.fieldKeys === "string" ? req.query.fieldKeys : undefined;
+  const filtersParam = typeof req.query.filters === "string" ? req.query.filters : undefined;
 
   if (!worldId && !isAdmin(user)) {
     res.json([]);
@@ -4734,12 +5054,199 @@ app.get("/api/entities", requireAuth, async (req, res) => {
     whereClause = { AND: [whereClause, { entityTypeId }] };
   }
 
-  const entities = await prisma.entity.findMany({
-    where: whereClause,
-    orderBy: { name: "asc" }
+  let filterGroup = normalizeListViewFilters(null);
+  if (filtersParam) {
+    try {
+      const parsed = JSON.parse(filtersParam);
+      filterGroup = normalizeListViewFilters(parsed);
+    } catch {
+      res.status(400).json({ error: "Invalid filters payload." });
+      return;
+    }
+  }
+
+  const fieldKeyList = fieldKeysParam
+    ? fieldKeysParam.split(",").map((item) => item.trim()).filter(Boolean)
+    : [];
+
+  if (filterGroup.rules.length > 0 || fieldKeyList.length > 0) {
+    if (!entityTypeId) {
+      res.status(400).json({ error: "entityTypeId is required for list filters." });
+      return;
+    }
+  }
+
+  const entityFieldMap = new Map<string, EntityFieldType>();
+  if (filterGroup.rules.length > 0 || fieldKeyList.length > 0) {
+    const fields = await prisma.entityField.findMany({
+      where: { entityTypeId },
+      select: { fieldKey: true, fieldType: true }
+    });
+    fields.forEach((field) => entityFieldMap.set(field.fieldKey, field.fieldType));
+  }
+
+  const filterClauses: Prisma.EntityWhereInput[] = [];
+  filterGroup.rules.forEach((rule) => {
+    if (!rule.fieldKey || !rule.operator) return;
+    if (rule.fieldKey === "name" || rule.fieldKey === "description") {
+      const value = rule.value ? String(rule.value) : "";
+      if (rule.operator === "is_set") {
+        filterClauses.push({
+          [rule.fieldKey]: { not: null }
+        });
+        return;
+      }
+      if (rule.operator === "is_not_set") {
+        filterClauses.push({
+          OR: [{ [rule.fieldKey]: null }, { [rule.fieldKey]: "" }]
+        });
+        return;
+      }
+      if (!value) return;
+      if (rule.operator === "equals") {
+        filterClauses.push({ [rule.fieldKey]: value });
+        return;
+      }
+      if (rule.operator === "not_equals") {
+        filterClauses.push({ [rule.fieldKey]: { not: value } });
+        return;
+      }
+      if (rule.operator === "contains") {
+        filterClauses.push({ [rule.fieldKey]: { contains: value, mode: "insensitive" } });
+        return;
+      }
+      return;
+    }
+
+    const fieldType = entityFieldMap.get(rule.fieldKey);
+    if (!fieldType) return;
+
+    const valueList = Array.isArray(rule.value)
+      ? rule.value.map((item) => String(item))
+      : rule.value !== undefined
+        ? [String(rule.value)]
+        : [];
+
+    if (rule.operator === "is_set") {
+      filterClauses.push({
+        values: {
+          some: {
+            field: { fieldKey: rule.fieldKey }
+          }
+        }
+      });
+      return;
+    }
+    if (rule.operator === "is_not_set") {
+      filterClauses.push({
+        values: {
+          none: {
+            field: { fieldKey: rule.fieldKey }
+          }
+        }
+      });
+      return;
+    }
+
+    if (valueList.length === 0) return;
+
+    const value = valueList[0];
+    const valueFilter: Prisma.EntityFieldValueWhereInput = {
+      field: { fieldKey: rule.fieldKey }
+    };
+
+    if (fieldType === EntityFieldType.BOOLEAN) {
+      const boolValue = value === "true" || value === "1";
+      if (rule.operator === "equals") {
+        valueFilter.valueBoolean = boolValue;
+      } else if (rule.operator === "not_equals") {
+        valueFilter.valueBoolean = { not: boolValue };
+      } else {
+        valueFilter.valueBoolean = boolValue;
+      }
+    } else if (fieldType === EntityFieldType.TEXTAREA) {
+      if (rule.operator === "contains") {
+        valueFilter.valueText = { contains: value, mode: "insensitive" };
+      } else if (rule.operator === "not_equals") {
+        valueFilter.valueText = { not: value };
+      } else {
+        valueFilter.valueText = value;
+      }
+    } else {
+      if (rule.operator === "contains") {
+        valueFilter.valueString = { contains: value, mode: "insensitive" };
+      } else if (rule.operator === "not_equals") {
+        valueFilter.valueString = { not: value };
+      } else if (rule.operator === "contains_any") {
+        valueFilter.valueString = { in: valueList };
+      } else {
+        valueFilter.valueString = value;
+      }
+    }
+
+    filterClauses.push({ values: { some: valueFilter } });
   });
 
-  res.json(entities);
+  if (filterClauses.length > 0) {
+    const combined =
+      filterGroup.logic === "OR" ? { OR: filterClauses } : { AND: filterClauses };
+    whereClause = { AND: [whereClause, combined] };
+  }
+
+  const includeValues =
+    entityTypeId && fieldKeyList.length > 0
+      ? {
+          values: {
+            where: { field: { fieldKey: { in: fieldKeyList } } },
+            include: { field: true }
+          }
+        }
+      : undefined;
+
+  const entities = await prisma.entity.findMany({
+    where: whereClause,
+    orderBy: { name: "asc" },
+    include: includeValues
+  });
+
+  if (!includeValues) {
+    res.json(entities);
+    return;
+  }
+
+  const results = entities.map((entity) => {
+    const values = (entity as typeof entity & {
+      values?: Array<{
+        field: { fieldKey: string };
+        valueString: string | null;
+        valueText: string | null;
+        valueBoolean: boolean | null;
+        valueNumber: number | null;
+        valueJson: Prisma.JsonValue | null;
+      }>;
+    }).values ?? [];
+
+    const fieldValues: Record<string, unknown> = {};
+    values.forEach((entry) => {
+      const key = entry.field.fieldKey;
+      if (entry.valueString !== null && entry.valueString !== undefined) {
+        fieldValues[key] = entry.valueString;
+      } else if (entry.valueText !== null && entry.valueText !== undefined) {
+        fieldValues[key] = entry.valueText;
+      } else if (entry.valueBoolean !== null && entry.valueBoolean !== undefined) {
+        fieldValues[key] = entry.valueBoolean;
+      } else if (entry.valueNumber !== null && entry.valueNumber !== undefined) {
+        fieldValues[key] = entry.valueNumber;
+      } else if (entry.valueJson !== null && entry.valueJson !== undefined) {
+        fieldValues[key] = entry.valueJson;
+      }
+    });
+
+    const { values: _values, ...rest } = entity as typeof entity & { values?: unknown };
+    return { ...rest, fieldValues };
+  });
+
+  res.json(results);
 });
 
 app.post("/api/entities", requireAuth, async (req, res) => {

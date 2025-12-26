@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { dispatchUnauthorized } from "../utils/auth";
+import { usePopout } from "./PopoutProvider";
 
 type ViewField = {
   id: string;
@@ -31,6 +32,31 @@ type SystemView = {
 
 type Choice = { value: string; label: string };
 
+type ListFilterRule = {
+  fieldKey: string;
+  operator: string;
+  value?: string | string[];
+};
+
+type ListFilterGroup = {
+  logic: "AND" | "OR";
+  rules: ListFilterRule[];
+};
+
+type ListField = {
+  fieldKey: string;
+  label: string;
+  fieldType: string;
+  listOrder?: number;
+  width?: string | null;
+  referenceEntityKey?: string | null;
+  referenceEntityTypeId?: string | null;
+  optionsListKey?: string | null;
+  choices?: Choice[];
+  source: "system" | "entity";
+  allowMultiple?: boolean;
+};
+
 type ListViewProps = {
   token: string;
   viewKey: string;
@@ -42,17 +68,24 @@ type ListViewProps = {
   extraParams?: Record<string, string | undefined>;
   titleOverride?: string;
   subtitleOverride?: string;
+  currentUserRole?: string;
 };
 
-const fieldSorter = (a: ViewField, b: ViewField) => a.listOrder - b.listOrder;
+const fieldSorter = (a: ListField, b: ListField) =>
+  (a.listOrder ?? 0) - (b.listOrder ?? 0);
 
-const filterRows = (rows: Record<string, unknown>[], fields: ViewField[], query: string) => {
+const filterRows = (rows: Record<string, unknown>[], fields: ListField[], query: string) => {
   if (!query) return rows;
   const normalized = query.toLowerCase();
-  const keys = fields.map((field) => field.fieldKey);
 
   return rows.filter((row) =>
-    keys.some((key) => String(row[key] ?? "").toLowerCase().includes(normalized))
+    fields.some((field) => {
+      const value =
+        field.source === "entity"
+          ? (row.fieldValues as Record<string, unknown> | undefined)?.[field.fieldKey]
+          : row[field.fieldKey];
+      return String(value ?? "").toLowerCase().includes(normalized);
+    })
   );
 };
 
@@ -86,22 +119,56 @@ export default function ListView({
   contextCharacterId,
   extraParams,
   titleOverride,
-  subtitleOverride
+  subtitleOverride,
+  currentUserRole
 }: ListViewProps) {
   const [view, setView] = useState<SystemView | null>(null);
+  const [availableFields, setAvailableFields] = useState<ListField[]>([]);
+  const [listColumns, setListColumns] = useState<string[]>([]);
+  const [filters, setFilters] = useState<ListFilterRule[]>([]);
+  const [filterLogic, setFilterLogic] = useState<"AND" | "OR">("AND");
+  const { showPopout, updatePopout } = usePopout();
+  const [prefsLoading, setPrefsLoading] = useState(false);
+  const [prefsError, setPrefsError] = useState<string | null>(null);
+  const [prefsVersion, setPrefsVersion] = useState(0);
+  const [filterReferenceOptions, setFilterReferenceOptions] = useState<Record<string, Choice[]>>(
+    {}
+  );
+  const [configPopoutId, setConfigPopoutId] = useState<string | null>(null);
+  const [selectedAvailable, setSelectedAvailable] = useState<string | null>(null);
+  const [selectedShown, setSelectedShown] = useState<string | null>(null);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [viewLoading, setViewLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [choiceMaps, setChoiceMaps] = useState<Record<string, Record<string, string>>>({});
   const [referenceMaps, setReferenceMaps] = useState<Record<string, Record<string, string>>>({});
   const extraParamsKey = JSON.stringify(extraParams ?? {});
+  const filtersKey = JSON.stringify({ logic: filterLogic, rules: filters });
+  const listColumnsKey = JSON.stringify(listColumns);
+  const entityTypeId = extraParams?.entityTypeId;
+  const isEntityTypeList = view?.entityKey === "entities" && Boolean(entityTypeId);
+
+  const normalizeFilterGroup = (input: unknown): ListFilterGroup => {
+    if (Array.isArray(input)) {
+      return { logic: "AND", rules: input as ListFilterRule[] };
+    }
+    if (input && typeof input === "object") {
+      const group = input as { logic?: string; rules?: unknown };
+      return {
+        logic: group.logic === "OR" ? "OR" : "AND",
+        rules: Array.isArray(group.rules) ? (group.rules as ListFilterRule[]) : []
+      };
+    }
+    return { logic: "AND", rules: [] };
+  };
 
   useEffect(() => {
     let ignore = false;
 
     const loadView = async () => {
-      setLoading(true);
+      setViewLoading(true);
       setError(null);
       try {
         const viewResponse = await fetch(`/api/views/${viewKey}`, {
@@ -155,43 +222,83 @@ export default function ListView({
         });
         setChoiceMaps(newChoiceMaps);
 
+      } catch (err) {
+        if (!ignore) {
+          setError(err instanceof Error ? err.message : "Failed to load view.");
+        }
+      } finally {
+        if (!ignore) setViewLoading(false);
+      }
+    };
+
+    void loadView();
+
+    return () => {
+      ignore = true;
+    };
+  }, [token, viewKey]);
+
+  useEffect(() => {
+    let ignore = false;
+    if (!view) return;
+
+    const loadData = async () => {
+      setDataLoading(true);
+      setError(null);
+      try {
         const params = new URLSearchParams();
         if (extraParams) {
           Object.entries(extraParams).forEach(([key, value]) => {
             if (value) params.set(key, value);
           });
         }
-        if (viewData.entityKey === "worlds" && contextWorldId) {
+        if (view.entityKey === "worlds" && contextWorldId) {
           params.set("worldId", contextWorldId);
         }
-        if (viewData.entityKey === "entity_types" && contextWorldId) {
+        if (view.entityKey === "entity_types" && contextWorldId) {
           params.set("worldId", contextWorldId);
         }
-        if (viewData.entityKey === "entity_fields" && contextWorldId) {
+        if (view.entityKey === "entity_fields" && contextWorldId) {
           params.set("worldId", contextWorldId);
         }
-        if (viewData.entityKey === "entity_field_choices" && contextWorldId) {
+        if (view.entityKey === "entity_field_choices" && contextWorldId) {
           params.set("worldId", contextWorldId);
         }
-        if (viewData.entityKey === "campaigns") {
+        if (view.entityKey === "campaigns") {
           if (contextWorldId) params.set("worldId", contextWorldId);
           if (contextCampaignId) params.set("campaignId", contextCampaignId);
           if (contextCharacterId) params.set("characterId", contextCharacterId);
         }
-        if (viewData.entityKey === "characters") {
+        if (view.entityKey === "characters") {
           if (contextWorldId) params.set("worldId", contextWorldId);
           if (contextCampaignId) params.set("campaignId", contextCampaignId);
           if (contextCharacterId) params.set("characterId", contextCharacterId);
         }
-        if (viewData.entityKey === "entities") {
+        if (view.entityKey === "entities") {
           if (contextWorldId) params.set("worldId", contextWorldId);
           if (contextCampaignId) params.set("campaignId", contextCampaignId);
           if (contextCharacterId) params.set("characterId", contextCharacterId);
+          if (entityTypeId) {
+            const entityFieldKeys = availableFields
+              .filter((field) => field.source === "entity")
+              .map((field) => field.fieldKey);
+            const filterFieldKeys = filters
+              .map((filter) => filter.fieldKey)
+              .filter((key) => entityFieldKeys.includes(key));
+            const columnFieldKeys = listColumns.filter((key) => entityFieldKeys.includes(key));
+            const fieldKeys = Array.from(new Set([...filterFieldKeys, ...columnFieldKeys]));
+            if (fieldKeys.length > 0) {
+              params.set("fieldKeys", fieldKeys.join(","));
+            }
+            if (filters.length > 0) {
+              params.set("filters", JSON.stringify({ logic: filterLogic, rules: filters }));
+            }
+          }
         }
 
         const dataUrl = params.toString()
-          ? `${viewData.endpoint}?${params.toString()}`
-          : viewData.endpoint;
+          ? `${view.endpoint}?${params.toString()}`
+          : view.endpoint;
 
         const dataResponse = await fetch(dataUrl, {
           headers: { Authorization: `Bearer ${token}` }
@@ -214,16 +321,202 @@ export default function ListView({
           setError(err instanceof Error ? err.message : "Failed to load view.");
         }
       } finally {
-        if (!ignore) setLoading(false);
+        if (!ignore) setDataLoading(false);
       }
     };
 
-    void loadView();
+    void loadData();
 
     return () => {
       ignore = true;
     };
-  }, [token, viewKey, contextWorldId, contextCampaignId, contextCharacterId, extraParamsKey]);
+  }, [
+    view,
+    token,
+    contextWorldId,
+    contextCampaignId,
+    contextCharacterId,
+    extraParamsKey,
+    filtersKey,
+    listColumnsKey,
+    availableFields
+  ]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const loadFieldsAndPrefs = async () => {
+      if (!view) return;
+      setPrefsLoading(true);
+      setPrefsError(null);
+
+      let fields: ListField[] = [];
+      if (view.entityKey === "entities" && entityTypeId) {
+        const baseFields: ListField[] = [
+          {
+            fieldKey: "name",
+            label: "Name",
+            fieldType: "TEXT",
+            listOrder: 0,
+            source: "system"
+          },
+          {
+            fieldKey: "description",
+            label: "Description",
+            fieldType: "TEXTAREA",
+            listOrder: 1,
+            source: "system"
+          }
+        ];
+        const response = await fetch(`/api/entity-fields?entityTypeId=${entityTypeId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (response.status === 401) {
+          dispatchUnauthorized();
+          return;
+        }
+        if (response.ok) {
+          const data = (await response.json()) as Array<{
+            fieldKey: string;
+            label: string;
+            fieldType: string;
+            listOrder: number;
+            choices?: Choice[];
+            referenceEntityTypeId?: string | null;
+          }>;
+          fields = [
+            ...baseFields,
+            ...data.map((field) => ({
+              fieldKey: field.fieldKey,
+              label: field.label,
+              fieldType: field.fieldType,
+              listOrder: field.listOrder ?? 0,
+              source: "entity" as const,
+              choices: field.choices?.map((choice) => ({
+                value: choice.value,
+                label: choice.label
+              })),
+              referenceEntityKey:
+                field.fieldType === "ENTITY_REFERENCE" ? "entities" : undefined,
+              referenceEntityTypeId: field.referenceEntityTypeId ?? null
+            }))
+          ];
+        } else {
+          fields = baseFields;
+          if (response.status !== 403) {
+            setPrefsError("Unable to load entity fields.");
+          }
+        }
+      } else {
+        fields = view.fields.map((field) => ({
+          fieldKey: field.fieldKey,
+          label: field.label,
+          fieldType: field.fieldType,
+          listOrder: field.listOrder,
+          width: field.width,
+          referenceEntityKey: field.referenceEntityKey ?? null,
+          optionsListKey: field.optionsListKey ?? null,
+          allowMultiple: field.allowMultiple,
+          source: "system" as const
+        }));
+      }
+
+      if (ignore) return;
+      setAvailableFields(fields);
+
+      const prefParams = new URLSearchParams({ viewKey });
+      if (entityTypeId) prefParams.set("entityTypeId", entityTypeId);
+      const prefResponse = await fetch(`/api/list-view-preferences?${prefParams.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (prefResponse.status === 401) {
+        dispatchUnauthorized();
+        return;
+      }
+      if (!prefResponse.ok) {
+        setPrefsError("Unable to load list preferences.");
+        setPrefsLoading(false);
+        return;
+      }
+
+      const prefData = (await prefResponse.json()) as {
+        user?: { columnsJson?: unknown; filtersJson?: unknown } | null;
+        defaults?: { columnsJson?: unknown; filtersJson?: unknown } | null;
+      };
+
+      const userFiltersPayload = prefData.user?.filtersJson;
+      const defaultFiltersPayload = prefData.defaults?.filtersJson;
+      const hasUserFilters = userFiltersPayload !== undefined && userFiltersPayload !== null;
+      const hasDefaultFilters = defaultFiltersPayload !== undefined && defaultFiltersPayload !== null;
+
+      const availableKeys = new Set(fields.map((field) => field.fieldKey));
+      const userColumns = Array.isArray(prefData.user?.columnsJson)
+        ? (prefData.user?.columnsJson as string[])
+        : null;
+      const defaultColumns = Array.isArray(prefData.defaults?.columnsJson)
+        ? (prefData.defaults?.columnsJson as string[])
+        : null;
+      const userFilters = normalizeFilterGroup(userFiltersPayload);
+      const defaultFilters = normalizeFilterGroup(defaultFiltersPayload);
+
+      const fallbackColumns =
+        view.entityKey === "entities" && entityTypeId
+          ? [
+              "name",
+              "description",
+              ...fields
+                .filter((field) => field.source === "entity")
+                .sort(fieldSorter)
+                .slice(0, 3)
+                .map((field) => field.fieldKey)
+            ]
+          : fields
+              .filter((field) => {
+                const original = view.fields.find((item) => item.fieldKey === field.fieldKey);
+                return original?.listVisible ?? true;
+              })
+              .sort(fieldSorter)
+              .map((field) => field.fieldKey);
+
+      const nextColumns = (userColumns ?? defaultColumns ?? fallbackColumns).filter((key) =>
+        availableKeys.has(key)
+      );
+
+      setListColumns(nextColumns);
+      const selectedFilters = hasUserFilters
+        ? userFilters
+        : hasDefaultFilters
+          ? defaultFilters
+          : { logic: "AND", rules: [] };
+      setFilterLogic(selectedFilters.logic);
+      setFilters(selectedFilters.rules);
+      setPrefsLoading(false);
+    };
+
+    void loadFieldsAndPrefs();
+
+    return () => {
+      ignore = true;
+    };
+  }, [view, token, viewKey, entityTypeId, prefsVersion]);
+
+  const listFields = useMemo(() => {
+    if (!view) return [];
+    const fieldMap = new Map(availableFields.map((field) => [field.fieldKey, field]));
+    const ordered = listColumns
+      .map((key) => fieldMap.get(key))
+      .filter((field): field is ListField => Boolean(field));
+    if (ordered.length > 0) return ordered;
+    return availableFields
+      .filter((field) => {
+        if (field.source === "system") {
+          const systemField = view.fields.find((item) => item.fieldKey === field.fieldKey);
+          return systemField?.listVisible ?? true;
+        }
+        return true;
+      })
+      .sort(fieldSorter);
+  }, [view, availableFields, listColumns]);
 
   useEffect(() => {
     let ignore = false;
@@ -231,52 +524,62 @@ export default function ListView({
     const loadReferences = async () => {
       if (!view) return;
 
-      const refFields = view.fields.filter(
-        (field) => field.listVisible && field.fieldType === "REFERENCE" && field.referenceEntityKey
-      );
+      const refFields = listFields.filter((field) => field.referenceEntityKey);
 
       if (refFields.length === 0 || rows.length === 0) {
         setReferenceMaps({});
         return;
       }
 
-      const idsByEntity: Record<string, Set<string>> = {};
+      const idsByKey: Record<string, Set<string>> = {};
       refFields.forEach((field) => {
         const entityKey = field.referenceEntityKey as string;
-        if (!idsByEntity[entityKey]) idsByEntity[entityKey] = new Set();
+        const entityTypePart = field.referenceEntityTypeId ?? "any";
+        const key = `${entityKey}:${entityTypePart}`;
+        if (!idsByKey[key]) idsByKey[key] = new Set();
         rows.forEach((row) => {
-          const value = row[field.fieldKey];
-          if (value) idsByEntity[entityKey].add(String(value));
+          const rawValue =
+            field.source === "entity"
+              ? (row.fieldValues as Record<string, unknown> | undefined)?.[field.fieldKey]
+              : row[field.fieldKey];
+          if (rawValue) idsByKey[key].add(String(rawValue));
         });
       });
 
-      const entityKeys = Object.keys(idsByEntity);
+      const keys = Object.keys(idsByKey);
       const results = await Promise.all(
-        entityKeys.map(async (entityKey) => {
-          const ids = Array.from(idsByEntity[entityKey]);
-          if (ids.length === 0) return [entityKey, {}] as const;
-          const response = await fetch(
-            `/api/references?entityKey=${entityKey}&ids=${ids.join(",")}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
+        keys.map(async (key) => {
+          const [entityKey, entityTypePart] = key.split(":");
+          const ids = Array.from(idsByKey[key]);
+          if (ids.length === 0) return [key, {}] as const;
+          const params = new URLSearchParams({
+            entityKey,
+            ids: ids.join(",")
+          });
+          if (entityTypePart && entityTypePart !== "any") {
+            params.set("entityTypeId", entityTypePart);
+          }
+          const response = await fetch(`/api/references?${params.toString()}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
           if (response.status === 401) {
             dispatchUnauthorized();
-            return [entityKey, {}] as const;
+            return [key, {}] as const;
           }
-          if (!response.ok) return [entityKey, {}] as const;
+          if (!response.ok) return [key, {}] as const;
           const data = (await response.json()) as Array<{ id: string; label: string }>;
           const map = data.reduce<Record<string, string>>((acc, item) => {
             acc[item.id] = item.label;
             return acc;
           }, {});
-          return [entityKey, map] as const;
+          return [key, map] as const;
         })
       );
 
       if (ignore) return;
       const nextMaps: Record<string, Record<string, string>> = {};
-      results.forEach(([entityKey, map]) => {
-        nextMaps[entityKey] = map;
+      results.forEach(([key, map]) => {
+        nextMaps[key] = map;
       });
       setReferenceMaps(nextMaps);
     };
@@ -286,20 +589,356 @@ export default function ListView({
     return () => {
       ignore = true;
     };
-  }, [view, rows, token]);
+  }, [view, rows, token, listFields]);
 
-  const listFields = useMemo(() => {
-    if (!view) return [];
-    return view.fields.filter((field) => field.listVisible).sort(fieldSorter);
-  }, [view]);
+  useEffect(() => {
+    if (!token) return;
+    const pending = filters
+      .map((filter) => availableFields.find((field) => field.fieldKey === filter.fieldKey))
+      .filter((field): field is ListField => Boolean(field))
+      .filter((field) => field.referenceEntityKey && !filterReferenceOptions[field.fieldKey]);
+
+    if (pending.length === 0) return;
+
+    let ignore = false;
+
+    const load = async () => {
+      const nextOptions: Record<string, Choice[]> = {};
+      await Promise.all(
+        pending.map(async (field) => {
+          const params = new URLSearchParams({
+            entityKey: field.referenceEntityKey as string,
+            query: ""
+          });
+          if (contextWorldId) params.set("worldId", contextWorldId);
+          if (contextCampaignId) params.set("campaignId", contextCampaignId);
+          if (contextCharacterId) params.set("characterId", contextCharacterId);
+          if (field.referenceEntityTypeId) {
+            params.set("entityTypeId", field.referenceEntityTypeId);
+          }
+          const response = await fetch(`/api/references?${params.toString()}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (!response.ok) return;
+          const data = (await response.json()) as Array<{ id: string; label: string }>;
+          nextOptions[field.fieldKey] = data.map((item) => ({
+            value: item.id,
+            label: item.label
+          }));
+        })
+      );
+      if (ignore) return;
+      if (Object.keys(nextOptions).length > 0) {
+        setFilterReferenceOptions((current) => ({ ...current, ...nextOptions }));
+      }
+    };
+
+    void load();
+
+    return () => {
+      ignore = true;
+    };
+  }, [
+    token,
+    filters,
+    availableFields,
+    filterReferenceOptions,
+    contextWorldId,
+    contextCampaignId,
+    contextCharacterId
+  ]);
 
   const filteredRows = useMemo(() => filterRows(rows, listFields, query), [rows, listFields, query]);
   const primaryField = listFields[0];
   const statusField = listFields.find((field) => field.fieldType === "SELECT" && isStatusField(field));
   const secondaryFields = listFields.filter((field) => field !== primaryField);
+  const canConfigureList = availableFields.length > 0;
+  const showEntityFilters = Boolean(isEntityTypeList);
+  const isAdmin = currentUserRole === "ADMIN";
 
-  const getDisplayValue = (field: ViewField, row: Record<string, unknown>) => {
-    const rawValue = row[field.fieldKey];
+  const updateFilter = (index: number, next: Partial<ListFilterRule>) => {
+    setFilters((current) =>
+      current.map((filter, i) => (i === index ? { ...filter, ...next } : filter))
+    );
+  };
+
+  const addFilter = () => {
+    const defaultField = availableFields[0]?.fieldKey ?? "";
+    setFilters((current) => [
+      ...current,
+      { fieldKey: defaultField, operator: "equals", value: "" }
+    ]);
+  };
+
+  const removeFilter = (index: number) => {
+    setFilters((current) => current.filter((_, i) => i !== index));
+  };
+
+  const savePreferences = async () => {
+    if (!viewKey) return;
+    setPrefsError(null);
+    const params = new URLSearchParams({ viewKey });
+    if (entityTypeId) params.set("entityTypeId", entityTypeId);
+    const response = await fetch(`/api/list-view-preferences?${params.toString()}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ columns: listColumns, filters: { logic: filterLogic, rules: filters } })
+    });
+    if (response.status === 401) {
+      dispatchUnauthorized();
+      return;
+    }
+    if (!response.ok) {
+      setPrefsError("Unable to save list preferences.");
+      return;
+    }
+    setPrefsVersion((current) => current + 1);
+  };
+
+  const resetPreferences = async () => {
+    if (!viewKey) return;
+    setPrefsError(null);
+    const params = new URLSearchParams({ viewKey });
+    if (entityTypeId) params.set("entityTypeId", entityTypeId);
+    const response = await fetch(`/api/list-view-preferences?${params.toString()}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (response.status === 401) {
+      dispatchUnauthorized();
+      return;
+    }
+    if (!response.ok) {
+      setPrefsError("Unable to reset list preferences.");
+      return;
+    }
+    setPrefsVersion((current) => current + 1);
+  };
+
+  const saveDefaultPreferences = async () => {
+    if (!entityTypeId) return;
+    setPrefsError(null);
+    const params = new URLSearchParams({ entityTypeId });
+    const response = await fetch(`/api/entity-type-list-defaults?${params.toString()}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ columns: listColumns, filters: { logic: filterLogic, rules: filters } })
+    });
+    if (response.status === 401) {
+      dispatchUnauthorized();
+      return;
+    }
+    if (!response.ok) {
+      setPrefsError("Unable to save list defaults.");
+      return;
+    }
+    setPrefsVersion((current) => current + 1);
+  };
+
+  const availableList = availableFields
+    .filter((field) => !listColumns.includes(field.fieldKey))
+    .sort(fieldSorter);
+  const shownList = listColumns
+    .map((key) => availableFields.find((field) => field.fieldKey === key))
+    .filter((field): field is ListField => Boolean(field));
+  const selectedShownIndex = selectedShown
+    ? listColumns.findIndex((key) => key === selectedShown)
+    : -1;
+  const canAdd = Boolean(selectedAvailable);
+  const canRemove = Boolean(selectedShown);
+  const canMoveUp = selectedShownIndex > 0;
+  const canMoveDown = selectedShownIndex >= 0 && selectedShownIndex < listColumns.length - 1;
+
+  const handleAddSelected = () => {
+    if (!selectedAvailable) return;
+    setListColumns((current) => [...current, selectedAvailable]);
+    setSelectedAvailable(null);
+  };
+
+  const handleRemoveSelected = () => {
+    if (!selectedShown) return;
+    setListColumns((current) => current.filter((key) => key !== selectedShown));
+    setSelectedShown(null);
+  };
+
+  const handleMoveSelected = (direction: -1 | 1) => {
+    if (selectedShownIndex < 0) return;
+    const targetIndex = selectedShownIndex + direction;
+    if (targetIndex < 0 || targetIndex >= listColumns.length) return;
+    setListColumns((current) => {
+      const next = [...current];
+      const [moved] = next.splice(selectedShownIndex, 1);
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
+  };
+
+  const renderConfigContent = () => (
+    <div className="list-view__config">
+      <div className="list-view__config-header">
+        <span>List configuration</span>
+        {prefsLoading ? <span className="list-view__config-status">Loading...</span> : null}
+        {prefsError ? <span className="list-view__config-error">{prefsError}</span> : null}
+      </div>
+      <div className="list-view__config-body">
+        <div className="list-view__config-section">
+          <div className="list-view__config-title">Columns</div>
+          <div className="list-view__config-panels">
+            <div className="list-view__config-panel">
+              <div className="list-view__config-panel-title">Available fields</div>
+              <div className="list-view__config-list">
+                {availableList.map((field) => (
+                  <button
+                    key={field.fieldKey}
+                    type="button"
+                    className={`list-view__config-item ${
+                      selectedAvailable === field.fieldKey ? "is-selected" : ""
+                    }`}
+                    onClick={() => {
+                      setSelectedAvailable(field.fieldKey);
+                      setSelectedShown(null);
+                    }}
+                  >
+                    <span>{field.label}</span>
+                  </button>
+                ))}
+                {availableList.length === 0 ? (
+                  <div className="list-view__filters-empty">All fields are visible.</div>
+                ) : null}
+              </div>
+            </div>
+            <div className="list-view__config-controls">
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={!canAdd}
+                onClick={handleAddSelected}
+              >
+                Add →
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={!canRemove}
+                onClick={handleRemoveSelected}
+              >
+                ← Remove
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={!canMoveUp}
+                onClick={() => handleMoveSelected(-1)}
+              >
+                Move up
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={!canMoveDown}
+                onClick={() => handleMoveSelected(1)}
+              >
+                Move down
+              </button>
+            </div>
+            <div className="list-view__config-panel">
+              <div className="list-view__config-panel-title">Shown fields</div>
+              <div className="list-view__config-list">
+                {shownList.map((field) => (
+                  <button
+                    key={field.fieldKey}
+                    type="button"
+                    className={`list-view__config-item ${
+                      selectedShown === field.fieldKey ? "is-selected" : ""
+                    }`}
+                    onClick={() => {
+                      setSelectedShown(field.fieldKey);
+                      setSelectedAvailable(null);
+                    }}
+                  >
+                    <span>{field.label}</span>
+                  </button>
+                ))}
+                {shownList.length === 0 ? (
+                  <div className="list-view__filters-empty">No fields selected.</div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const popoutActions = [
+    {
+      label: "Reset to default",
+      onClick: () => {
+        void resetPreferences();
+      },
+      closeOnClick: false
+    },
+    {
+      label: "Save view",
+      onClick: () => {
+        void savePreferences();
+      },
+      closeOnClick: false
+    },
+    ...(isAdmin && isEntityTypeList
+      ? [
+          {
+            label: "Set as default",
+            tone: "primary" as const,
+            onClick: () => {
+              void saveDefaultPreferences();
+            },
+            closeOnClick: false
+          }
+        ]
+      : []),
+    { label: "Close" }
+  ];
+
+  const openConfigPopout = () => {
+    const id = showPopout({
+      title: "List configuration",
+      message: renderConfigContent(),
+      actions: popoutActions
+    });
+    setConfigPopoutId(id);
+  };
+
+  useEffect(() => {
+    if (!configPopoutId) return;
+    updatePopout(configPopoutId, {
+      title: "List configuration",
+      message: renderConfigContent(),
+      actions: popoutActions
+    });
+  }, [
+    configPopoutId,
+    availableList,
+    shownList,
+    selectedAvailable,
+    selectedShown,
+    listColumns,
+    prefsLoading,
+    prefsError,
+    updatePopout
+  ]);
+
+  const getDisplayValue = (field: ListField, row: Record<string, unknown>) => {
+    const rawValue =
+      field.source === "entity"
+        ? (row.fieldValues as Record<string, unknown> | undefined)?.[field.fieldKey]
+        : row[field.fieldKey];
     if (rawValue === null || rawValue === undefined) return "";
 
     if (field.fieldType === "BOOLEAN") {
@@ -309,16 +948,19 @@ export default function ListView({
 
     const listKey = field.optionsListKey ?? "";
     const mapped = listKey && rawValue != null ? choiceMaps[listKey]?.[String(rawValue)] : undefined;
+    const choiceMapped =
+      field.choices?.find((choice) => choice.value === String(rawValue))?.label ?? undefined;
     const referenceEntity = field.referenceEntityKey ?? "";
+    const referenceKey = `${referenceEntity}:${field.referenceEntityTypeId ?? "any"}`;
     const referenceLabel =
-      field.fieldType === "REFERENCE" && rawValue != null
-        ? referenceMaps[referenceEntity]?.[String(rawValue)]
+      field.referenceEntityKey && rawValue != null
+        ? referenceMaps[referenceKey]?.[String(rawValue)]
         : undefined;
 
-    return mapped ?? referenceLabel ?? rawValue;
+    return mapped ?? choiceMapped ?? referenceLabel ?? rawValue;
   };
 
-  const renderCellValue = (field: ViewField, row: Record<string, unknown>) => {
+  const renderCellValue = (field: ListField, row: Record<string, unknown>) => {
     const display = getDisplayValue(field, row);
     const text = String(display ?? "");
     if (field.fieldType === "SELECT" && isStatusField(field) && text) {
@@ -328,7 +970,7 @@ export default function ListView({
     return text;
   };
 
-  if (loading) {
+  if (viewLoading || dataLoading) {
     return <div className="view-state">Loading view...</div>;
   }
 
@@ -350,11 +992,161 @@ export default function ListView({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
+          {canConfigureList ? (
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={openConfigPopout}
+            >
+              List config
+            </button>
+          ) : null}
           <button type="button" className="primary-button" onClick={() => onOpenForm("new")}>
             New
           </button>
         </div>
       </div>
+      {showEntityFilters ? (
+        <div className="list-view__filters">
+          <div className="list-view__filters-header">
+            <span>Filters</span>
+            <div className="list-view__filters-actions">
+              <label className="list-view__filters-logic">
+                Match
+                <select
+                  value={filterLogic}
+                  onChange={(event) => setFilterLogic(event.target.value as "AND" | "OR")}
+                >
+                  <option value="AND">All</option>
+                  <option value="OR">Any</option>
+                </select>
+              </label>
+              <button type="button" className="ghost-button" onClick={addFilter}>
+                Add filter
+              </button>
+            </div>
+          </div>
+          {filters.length === 0 ? (
+            <div className="list-view__filters-empty">No filters applied.</div>
+          ) : (
+            <div className="list-view__filters-body">
+              {filters.map((filter, index) => {
+                const fieldMeta = availableFields.find(
+                  (field) => field.fieldKey === filter.fieldKey
+                );
+                const operatorOptions = [
+                  { value: "equals", label: "Equals" },
+                  { value: "not_equals", label: "Not equals" },
+                  { value: "contains", label: "Contains" },
+                  { value: "is_set", label: "Is set" },
+                  { value: "is_not_set", label: "Is not set" }
+                ];
+                if (fieldMeta?.allowMultiple) {
+                  operatorOptions.push({ value: "contains_any", label: "Contains any of" });
+                }
+
+                const valueInput =
+                  filter.operator === "is_set" || filter.operator === "is_not_set" ? null : fieldMeta?.choices &&
+                    fieldMeta.choices.length > 0 ? (
+                      <select
+                        value={String(filter.value ?? "")}
+                        onChange={(event) =>
+                          updateFilter(index, { value: event.target.value })
+                        }
+                      >
+                        <option value="">Select value...</option>
+                        {fieldMeta.choices.map((choice) => (
+                          <option key={choice.value} value={choice.value}>
+                            {choice.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : fieldMeta?.optionsListKey ? (
+                      <select
+                        value={String(filter.value ?? "")}
+                        onChange={(event) =>
+                          updateFilter(index, { value: event.target.value })
+                        }
+                      >
+                        <option value="">Select value...</option>
+                        {Object.entries(choiceMaps[fieldMeta.optionsListKey] ?? {}).map(
+                          ([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    ) : fieldMeta?.referenceEntityKey ? (
+                      <select
+                        value={String(filter.value ?? "")}
+                        onChange={(event) =>
+                          updateFilter(index, { value: event.target.value })
+                        }
+                      >
+                        <option value="">Select value...</option>
+                        {(filterReferenceOptions[fieldMeta.fieldKey] ?? []).map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={String(filter.value ?? "")}
+                        onChange={(event) =>
+                          updateFilter(index, { value: event.target.value })
+                        }
+                      />
+                    );
+
+                return (
+                  <div key={`${filter.fieldKey}-${index}`} className="list-view__filter-row">
+                    <select
+                      value={filter.fieldKey}
+                      onChange={(event) =>
+                        updateFilter(index, {
+                          fieldKey: event.target.value,
+                          operator: "equals",
+                          value: ""
+                        })
+                      }
+                    >
+                      <option value="">Select field...</option>
+                      {availableFields.map((field) => (
+                        <option key={field.fieldKey} value={field.fieldKey}>
+                          {field.label}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={filter.operator}
+                      onChange={(event) =>
+                        updateFilter(index, { operator: event.target.value })
+                      }
+                    >
+                      {operatorOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    {valueInput}
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={() => removeFilter(index)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : null}
 
       <div className="list-view__table">
         <div className="list-view__row list-view__row--header" role="row">
