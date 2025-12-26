@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ConditionBuilder from "./ConditionBuilder";
 import EntityFormDesigner from "./EntityFormDesigner";
 import EntityAccessEditor from "./EntityAccessEditor";
 import RelatedLists from "./RelatedLists";
 import { usePopout } from "./PopoutProvider";
+import { useUnsavedChangesPrompt } from "../utils/unsavedChanges";
 import { dispatchUnauthorized } from "../utils/auth";
 
 type ViewField = {
@@ -150,6 +151,19 @@ const evaluateGroup = (group: ConditionGroup, values: Record<string, unknown>) =
   return group.logic === "AND" ? results.every(Boolean) : results.some(Boolean);
 };
 
+const stableStringify = (value: unknown): string => {
+  if (value === null || value === undefined) return String(value);
+  if (typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return `{${keys
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`)
+    .join(",")}}`;
+};
+
 export default function FormView({
   token,
   viewKey,
@@ -184,11 +198,26 @@ export default function FormView({
   const [entityReferenceOpen, setEntityReferenceOpen] = useState<Record<string, boolean>>({});
   const [entityAccess, setEntityAccess] = useState<EntityAccessState | null>(null);
   const [conditionFieldOptions, setConditionFieldOptions] = useState<Choice[]>([]);
-  const [entityTab, setEntityTab] = useState<"info" | "access">("info");
+  const [entityTab, setEntityTab] = useState<"info" | "config" | "access">("info");
   const [entityTypeTab, setEntityTypeTab] = useState<"details" | "designer">("details");
+  const [fieldChoices, setFieldChoices] = useState<EntityFieldChoice[]>([]);
+  const [fieldChoicesLoading, setFieldChoicesLoading] = useState(false);
+  const [fieldChoicesError, setFieldChoicesError] = useState<string | null>(null);
+  const [newChoice, setNewChoice] = useState({ value: "", label: "", sortOrder: "" });
+  const [isDirty, setIsDirty] = useState(false);
   const { showPopout } = usePopout();
+  const initialSnapshotRef = useRef<string>("");
+  const hasSnapshotRef = useRef(false);
+  const snapshotKeyRef = useRef<string>("");
+  const isDirtyRef = useRef(false);
 
   const isNew = recordId === "new";
+  const buildSnapshot = () => stableStringify({ formData, entityValues, entityAccess });
+  const clearDirty = () => {
+    isDirtyRef.current = false;
+    setIsDirty(false);
+    window.dispatchEvent(new CustomEvent("ttrpg:form-dirty", { detail: { dirty: false } }));
+  };
 
   const handleUnauthorized = (response: Response) => {
     if (response.status === 401) {
@@ -303,11 +332,15 @@ export default function FormView({
     return () => {
       ignore = true;
     };
-  }, [token, viewKey, recordId, isNew, initialValues, initialLabels]);
+  }, [token, viewKey, recordId, isNew]);
 
   useEffect(() => {
     setEntityTab("info");
     setEntityTypeTab("details");
+    hasSnapshotRef.current = false;
+    snapshotKeyRef.current = "";
+    initialSnapshotRef.current = "";
+    setIsDirty(false);
   }, [viewKey, recordId]);
 
   useEffect(() => {
@@ -334,6 +367,36 @@ export default function FormView({
       setReferenceLabels((current) => ({ ...current, playerId: currentUserLabel }));
     }
   }, [view, isNew, currentUserId, currentUserLabel]);
+
+  useEffect(() => {
+    isDirtyRef.current = isDirty;
+    window.dispatchEvent(
+      new CustomEvent("ttrpg:form-dirty", { detail: { dirty: isDirty } })
+    );
+  }, [isDirty]);
+
+  useEffect(() => {
+    return () => {
+      window.dispatchEvent(new CustomEvent("ttrpg:form-dirty", { detail: { dirty: false } }));
+    };
+  }, []);
+
+  useEffect(() => {
+    if (loading || !view) return;
+    if (view.entityKey === "entities" && entityAccess === null) return;
+    const key = `${viewKey}:${recordId}`;
+    if (snapshotKeyRef.current === key) return;
+    snapshotKeyRef.current = key;
+    initialSnapshotRef.current = buildSnapshot();
+    hasSnapshotRef.current = true;
+    setIsDirty(false);
+  }, [loading, view, viewKey, recordId, entityAccess]);
+
+  useEffect(() => {
+    if (!hasSnapshotRef.current) return;
+    const nextSnapshot = buildSnapshot();
+    setIsDirty(nextSnapshot !== initialSnapshotRef.current);
+  }, [formData, entityValues, entityAccess]);
 
   useEffect(() => {
     let ignore = false;
@@ -491,6 +554,50 @@ export default function FormView({
     setEntityValues({});
     setEntityReferenceLabels({});
   }, [view, recordId, formData.entityTypeId]);
+
+  useEffect(() => {
+    let ignore = false;
+    if (!view || view.entityKey !== "entity_fields") return;
+    if (recordId === "new" || formData.fieldType !== "CHOICE") {
+      setFieldChoices([]);
+      setFieldChoicesError(null);
+      setNewChoice({ value: "", label: "", sortOrder: "" });
+      return;
+    }
+
+    const loadChoices = async () => {
+      setFieldChoicesLoading(true);
+      setFieldChoicesError(null);
+      try {
+        const response = await fetch(`/api/entity-field-choices?entityFieldId=${recordId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (handleUnauthorized(response)) return;
+        if (!response.ok) {
+          throw new Error("Unable to load field choices.");
+        }
+        const data = (await response.json()) as EntityFieldChoice[];
+        if (!ignore) {
+          const sorted = [...data].sort(
+            (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
+          );
+          setFieldChoices(sorted);
+        }
+      } catch (err) {
+        if (!ignore) {
+          setFieldChoicesError(err instanceof Error ? err.message : "Unable to load field choices.");
+        }
+      } finally {
+        if (!ignore) setFieldChoicesLoading(false);
+      }
+    };
+
+    void loadChoices();
+
+    return () => {
+      ignore = true;
+    };
+  }, [view, recordId, formData.fieldType, token]);
 
   useEffect(() => {
     let ignore = false;
@@ -800,6 +907,97 @@ export default function FormView({
     setReferenceOptions((current) => ({ ...current, [field.fieldKey]: options }));
   };
 
+  const isChoiceField = view?.entityKey === "entity_fields" && formData.fieldType === "CHOICE";
+
+  const updateChoice = (choiceId: string, updates: Partial<EntityFieldChoice>) => {
+    setFieldChoices((current) =>
+      current.map((choice) => (choice.id === choiceId ? { ...choice, ...updates } : choice))
+    );
+  };
+
+  const saveChoice = async (choice: EntityFieldChoice) => {
+    try {
+      const response = await fetch(`/api/entity-field-choices/${choice.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          value: choice.value,
+          label: choice.label,
+          sortOrder: choice.sortOrder ?? null
+        })
+      });
+      if (handleUnauthorized(response)) return;
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? "Unable to save choice.");
+      }
+      const updated = (await response.json()) as EntityFieldChoice;
+      setFieldChoices((current) =>
+        [...current.map((item) => (item.id === updated.id ? updated : item))].sort(
+          (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
+        )
+      );
+    } catch (err) {
+      setFieldChoicesError(err instanceof Error ? err.message : "Unable to save choice.");
+    }
+  };
+
+  const deleteChoice = async (choiceId: string) => {
+    try {
+      const response = await fetch(`/api/entity-field-choices/${choiceId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (handleUnauthorized(response)) return;
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? "Unable to delete choice.");
+      }
+      setFieldChoices((current) => current.filter((choice) => choice.id !== choiceId));
+    } catch (err) {
+      setFieldChoicesError(err instanceof Error ? err.message : "Unable to delete choice.");
+    }
+  };
+
+  const addChoice = async () => {
+    if (!recordId || recordId === "new") return;
+    if (!newChoice.value.trim() || !newChoice.label.trim()) {
+      setFieldChoicesError("Value and label are required.");
+      return;
+    }
+    try {
+      const response = await fetch("/api/entity-field-choices", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          entityFieldId: recordId,
+          value: newChoice.value.trim(),
+          label: newChoice.label.trim(),
+          sortOrder: newChoice.sortOrder ? Number(newChoice.sortOrder) : undefined
+        })
+      });
+      if (handleUnauthorized(response)) return;
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? "Unable to add choice.");
+      }
+      const created = (await response.json()) as EntityFieldChoice;
+      setFieldChoices((current) =>
+        [...current, created].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+      );
+      setNewChoice({ value: "", label: "", sortOrder: "" });
+      setFieldChoicesError(null);
+    } catch (err) {
+      setFieldChoicesError(err instanceof Error ? err.message : "Unable to add choice.");
+    }
+  };
+
   const handleEntityReferenceSearch = async (field: EntityFieldDefinition, query: string) => {
     const params = new URLSearchParams({
       entityKey: "entities",
@@ -871,9 +1069,19 @@ export default function FormView({
     }
   };
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!view) return;
+  const markSaved = () => {
+    isDirtyRef.current = false;
+    initialSnapshotRef.current = buildSnapshot();
+    hasSnapshotRef.current = true;
+    setIsDirty(false);
+    window.dispatchEvent(
+      new CustomEvent("ttrpg:form-dirty", { detail: { dirty: false } })
+    );
+  };
+
+  const saveRecord = async () => {
+    if (!view) return false;
+    setError(null);
     setSaving(true);
 
     const payload: Record<string, unknown> = {};
@@ -902,7 +1110,7 @@ export default function FormView({
     if (missingFields.length > 0) {
       setError(`Missing required fields: ${missingFields.join(", ")}`);
       setSaving(false);
-      return;
+      return false;
     }
 
     formFields.forEach((field) => {
@@ -950,7 +1158,8 @@ export default function FormView({
       });
 
       if (handleUnauthorized(response)) {
-        return;
+        setSaving(false);
+        return false;
       }
 
       if (!response.ok) {
@@ -986,8 +1195,13 @@ export default function FormView({
           })
         });
         if (handleUnauthorized(accessResponse)) {
-          return;
+          setSaving(false);
+          return false;
         }
+      }
+
+      if (view.entityKey === "entities") {
+        window.dispatchEvent(new Event("ttrpg:entities-updated"));
       }
 
       if (
@@ -1012,12 +1226,33 @@ export default function FormView({
         });
       }
 
-      onBack();
+      markSaved();
+      setSaving(false);
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed.");
-    } finally {
       setSaving(false);
+      return false;
     }
+  };
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void saveRecord().then((ok) => {
+      if (ok) {
+        onBack();
+      }
+    });
+  };
+
+  const confirmUnsavedChanges = useUnsavedChangesPrompt({
+    isDirtyRef,
+    onSave: saveRecord,
+    onDiscard: clearDirty
+  });
+
+  const handleNavigateAway = (proceed: () => void) => {
+    confirmUnsavedChanges(proceed);
   };
 
   const handleDelete = async () => {
@@ -1038,17 +1273,49 @@ export default function FormView({
         throw new Error("Delete failed.");
       }
 
+      if (view.entityKey === "entities") {
+        window.dispatchEvent(new Event("ttrpg:entities-updated"));
+      }
+
       onBack();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Delete failed.");
     }
   };
 
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!isDirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
+  useEffect(() => {
+    const handleSaveRequest = (event: Event) => {
+      const customEvent = event as CustomEvent<{ requestId?: string }>;
+      const requestId = customEvent.detail?.requestId;
+      if (!requestId) return;
+      void saveRecord().then((ok) => {
+        window.dispatchEvent(
+          new CustomEvent("ttrpg:form-save-result", { detail: { requestId, ok } })
+        );
+      });
+    };
+
+    window.addEventListener("ttrpg:form-save-request", handleSaveRequest as EventListener);
+    return () =>
+      window.removeEventListener("ttrpg:form-save-request", handleSaveRequest as EventListener);
+  }, [saveRecord]);
+
   if (loading) {
     return <div className="view-state">Loading form...</div>;
   }
 
-  if (error || !view) {
+  if (!view) {
     return <div className="view-state error">{error ?? "Form unavailable."}</div>;
   }
 
@@ -1064,13 +1331,24 @@ export default function FormView({
           return false;
         })
       : formFields;
+  const configFieldKeys = new Set(isEntityView ? ["worldId"] : []);
+  const canViewConfigTab =
+    isEntityView && (isNew || currentUserRole === "ADMIN" || entityAccess !== null);
+  const infoFields = isEntityView
+    ? entityTypeFields.filter(
+        (field) => !configFieldKeys.has(field.fieldKey) || !canViewConfigTab
+      )
+    : entityTypeFields;
+  const configFields = canViewConfigTab
+    ? entityTypeFields.filter((field) => configFieldKeys.has(field.fieldKey))
+    : [];
 
   return (
     <div className="form-view">
       <div className="form-view__header">
-        <button type="button" className="ghost-button" onClick={onBack}>
-          &lt;- Back
-        </button>
+          <button type="button" className="ghost-button" onClick={() => handleNavigateAway(onBack)}>
+            &lt;- Back
+          </button>
         <div>
           <h1>{view.title}</h1>
           <p className="form-view__subtitle">{isNew ? "Create" : "Edit"}</p>
@@ -1083,26 +1361,38 @@ export default function FormView({
           ) : null}
         </div>
       </div>
+      {error ? <div className="form-view__error">{error}</div> : null}
 
-      <form className="form-view__form" onSubmit={handleSubmit}>
-        {isEntityView ? (
-          <div className="form-view__tabs" role="tablist">
-            <button
-              type="button"
-              className={`form-view__tab ${entityTab === "info" ? "is-active" : ""}`}
-              onClick={() => setEntityTab("info")}
-              role="tab"
-              aria-selected={entityTab === "info"}
-            >
-              Information
-            </button>
-            <button
-              type="button"
-              className={`form-view__tab ${entityTab === "access" ? "is-active" : ""}`}
-              onClick={() => setEntityTab("access")}
-              role="tab"
-              aria-selected={entityTab === "access"}
-            >
+        <form className="form-view__form" onSubmit={handleSubmit}>
+          {isEntityView ? (
+            <div className="form-view__tabs" role="tablist">
+              <button
+                type="button"
+                className={`form-view__tab ${entityTab === "info" ? "is-active" : ""}`}
+                onClick={() => setEntityTab("info")}
+                role="tab"
+                aria-selected={entityTab === "info"}
+              >
+                Information
+              </button>
+              {canViewConfigTab ? (
+                <button
+                  type="button"
+                  className={`form-view__tab ${entityTab === "config" ? "is-active" : ""}`}
+                  onClick={() => setEntityTab("config")}
+                  role="tab"
+                  aria-selected={entityTab === "config"}
+                >
+                  Config
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={`form-view__tab ${entityTab === "access" ? "is-active" : ""}`}
+                onClick={() => setEntityTab("access")}
+                role="tab"
+                aria-selected={entityTab === "access"}
+              >
               Access
             </button>
           </div>
@@ -1131,7 +1421,7 @@ export default function FormView({
         ) : null}
         {!isEntityView || entityTab === "info" ? (
           <>
-            {entityTypeTab === "designer" && isEntityTypeView ? null : entityTypeFields.map((field) => {
+            {entityTypeTab === "designer" && isEntityTypeView ? null : infoFields.map((field) => {
               const value = formData[field.fieldKey];
               const coerced = coerceValue(field.fieldType, value);
               const listKey = field.optionsListKey ?? "";
@@ -1330,9 +1620,107 @@ export default function FormView({
                 </label>
               );
             })}
+            {isChoiceField && !isNew ? (
+              <div className="form-view__section">
+                <h2>Field choices</h2>
+                {fieldChoicesError ? (
+                  <div className="form-view__hint">{fieldChoicesError}</div>
+                ) : null}
+                {fieldChoicesLoading ? (
+                  <div className="form-view__hint">Loading choices...</div>
+                ) : (
+                  <>
+                    <div className="field-choices__row field-choices__row--header">
+                      <span>Value</span>
+                      <span>Label</span>
+                      <span>Sort</span>
+                      <span>Actions</span>
+                    </div>
+                    {fieldChoices.length === 0 ? (
+                      <div className="form-view__hint">No choices yet.</div>
+                    ) : (
+                      fieldChoices.map((choice) => (
+                        <div key={choice.id} className="field-choices__row">
+                          <input
+                            type="text"
+                            value={choice.value}
+                            onChange={(event) =>
+                              updateChoice(choice.id, { value: event.target.value })
+                            }
+                          />
+                          <input
+                            type="text"
+                            value={choice.label}
+                            onChange={(event) =>
+                              updateChoice(choice.id, { label: event.target.value })
+                            }
+                          />
+                          <input
+                            type="number"
+                            value={choice.sortOrder ?? ""}
+                            onChange={(event) =>
+                              updateChoice(choice.id, {
+                                sortOrder: event.target.value ? Number(event.target.value) : null
+                              })
+                            }
+                          />
+                          <div className="field-choices__actions">
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={() => saveChoice(choice)}
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              className="danger-button"
+                              onClick={() => deleteChoice(choice.id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                    <div className="field-choices__row field-choices__row--new">
+                      <input
+                        type="text"
+                        placeholder="Value"
+                        value={newChoice.value}
+                        onChange={(event) =>
+                          setNewChoice((current) => ({ ...current, value: event.target.value }))
+                        }
+                      />
+                      <input
+                        type="text"
+                        placeholder="Label"
+                        value={newChoice.label}
+                        onChange={(event) =>
+                          setNewChoice((current) => ({ ...current, label: event.target.value }))
+                        }
+                      />
+                      <input
+                        type="number"
+                        placeholder="Sort"
+                        value={newChoice.sortOrder}
+                        onChange={(event) =>
+                          setNewChoice((current) => ({ ...current, sortOrder: event.target.value }))
+                        }
+                      />
+                      <div className="field-choices__actions">
+                        <button type="button" className="primary-button" onClick={addChoice}>
+                          Add
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : null}
             {isEntityView ? (
               <div className="form-view__section">
-                <h2>Type Fields</h2>
+                <h2>Fields</h2>
                 {visibleEntityFields.length > 0 ? (
                   entitySections.length > 0 ? (
                     <div className="entity-form-layout">
@@ -1401,7 +1789,6 @@ export default function FormView({
             ) : null}
             {isEntityTypeView && entityTypeTab === "designer" ? (
               <div className="form-view__section">
-                <h2>Form Designer</h2>
                 {isNew ? (
                   <div className="form-view__hint">
                     Save the entity type to configure its form layout.
@@ -1412,6 +1799,187 @@ export default function FormView({
               </div>
             ) : null}
           </>
+        ) : null}
+        {isEntityView && entityTab === "config" ? (
+          <div className="form-view__section">
+            <h2>Config</h2>
+            {configFields.map((field) => {
+              const value = formData[field.fieldKey];
+              const coerced = coerceValue(field.fieldType, value);
+              const listKey = field.optionsListKey ?? "";
+              const choices = listKey ? choiceMaps[listKey] ?? [] : [];
+
+              if (field.fieldType === "REFERENCE") {
+                const options = referenceOptions[field.fieldKey] ?? [];
+                const labelValue = referenceLabels[field.fieldKey] ?? "";
+                const isOpen = referenceOpen[field.fieldKey];
+                const selections = referenceSelections[field.fieldKey] ?? [];
+                const disabled =
+                  field.readOnly || (field.fieldKey === "playerId" && currentUserRole !== "ADMIN");
+
+                return (
+                  <label key={field.fieldKey} className="form-view__field">
+                    <span className="form-view__label">
+                      {field.label}
+                      {field.required ? <span className="form-view__required">*</span> : null}
+                    </span>
+                    <div
+                      className="reference-field"
+                      onBlur={(event) => {
+                        const nextTarget = event.relatedTarget as Node | null;
+                        if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                        resolveReferenceSelection(field);
+                        setReferenceOpen((current) => ({
+                          ...current,
+                          [field.fieldKey]: false
+                        }));
+                      }}
+                    >
+                      {field.allowMultiple && selections.length > 0 ? (
+                        <div className="reference-field__chips">
+                          {selections.map((item) => (
+                            <button
+                              type="button"
+                              key={item.value}
+                              className="reference-field__chip"
+                              onClick={() => {
+                                const next = selections.filter(
+                                  (entry) => entry.value !== item.value
+                                );
+                                setReferenceSelections((current) => ({
+                                  ...current,
+                                  [field.fieldKey]: next
+                                }));
+                                handleChange(
+                                  field.fieldKey,
+                                  next.map((entry) => entry.value)
+                                );
+                              }}
+                              disabled={disabled}
+                            >
+                              {item.label} {disabled ? "" : "x"}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                      <input
+                        type="text"
+                        value={labelValue}
+                        placeholder={field.placeholder ?? "Search..."}
+                        onClick={() => {
+                          if (disabled) return;
+                          setReferenceOpen((current) => ({
+                            ...current,
+                            [field.fieldKey]: true
+                          }));
+                          void handleReferenceSearch(field, labelValue);
+                        }}
+                        onChange={(event) => {
+                          const next = event.target.value;
+                          setReferenceLabels((current) => ({
+                            ...current,
+                            [field.fieldKey]: next
+                          }));
+                          if (!field.allowMultiple) {
+                            handleChange(field.fieldKey, "");
+                          }
+                          void handleReferenceSearch(field, next);
+                        }}
+                        onFocus={() => {
+                          if (disabled) return;
+                          setReferenceOpen((current) => ({
+                            ...current,
+                            [field.fieldKey]: true
+                          }));
+                          void handleReferenceSearch(field, labelValue);
+                        }}
+                        disabled={disabled}
+                      />
+                      {field.required &&
+                      (!formData[field.fieldKey] ||
+                        (field.allowMultiple &&
+                          Array.isArray(formData[field.fieldKey]) &&
+                          formData[field.fieldKey].length === 0)) ? (
+                        <div className="form-view__hint">Select a value.</div>
+                      ) : null}
+                      {isOpen && options.length > 0 ? (
+                        <div className="reference-field__options">
+                          {options.map((option) => (
+                            <button
+                              type="button"
+                              key={option.value}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleReferenceSelect(field, option);
+                              }}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      ) : isOpen ? (
+                        <div className="reference-field__options reference-field__options--empty">
+                          <div className="reference-field__empty">No available options.</div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </label>
+                );
+              }
+
+              return (
+                <label key={field.fieldKey} className="form-view__field">
+                  <span className="form-view__label">
+                    {field.label}
+                    {field.required ? <span className="form-view__required">*</span> : null}
+                  </span>
+                  {field.fieldType === "TEXTAREA" ? (
+                    <textarea
+                      value={String(coerced)}
+                      placeholder={field.placeholder ?? ""}
+                      onChange={(event) => handleChange(field.fieldKey, event.target.value)}
+                      required={field.required}
+                    />
+                  ) : field.fieldType === "SELECT" ? (
+                    <select
+                      value={String(coerced)}
+                      onChange={(event) => handleChange(field.fieldKey, event.target.value)}
+                      required={field.required}
+                    >
+                      <option value="">Select...</option>
+                      {choices.map((choice) => (
+                        <option key={choice.value} value={choice.value}>
+                          {choice.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={
+                        field.fieldType === "NUMBER"
+                          ? "number"
+                          : field.fieldType === "EMAIL"
+                            ? "email"
+                            : field.fieldType === "PASSWORD"
+                              ? "password"
+                              : "text"
+                      }
+                      value={String(coerced)}
+                      placeholder={field.placeholder ?? ""}
+                      onChange={(event) => handleChange(field.fieldKey, event.target.value)}
+                      required={field.required}
+                      disabled={field.readOnly}
+                    />
+                  )}
+                </label>
+              );
+            })}
+            {configFields.length === 0 ? (
+              <div className="form-view__hint">No configuration fields available.</div>
+            ) : null}
+          </div>
         ) : null}
         {isEntityView && entityTab === "access" ? (
           <div className="form-view__section">

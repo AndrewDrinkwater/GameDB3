@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { dispatchUnauthorized } from "./utils/auth";
 import ListView from "./components/ListView";
 import FormView from "./components/FormView";
 import ContextBar, { ContextSelection } from "./components/ContextBar";
 import PopoutProvider from "./components/PopoutProvider";
+import { useUnsavedChangesPrompt } from "./utils/unsavedChanges";
 
 type User = {
   id: string;
@@ -86,7 +87,7 @@ const adminViewRegistry: Record<string, ViewConfig> = {
   }
 };
 
-function App() {
+function AppShell() {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem(tokenStorageKey));
   const [email, setEmail] = useState("");
@@ -106,20 +107,124 @@ function App() {
   const [contextOpen, setContextOpen] = useState(false);
   const [worldAdminExpanded, setWorldAdminExpanded] = useState(true);
   const [worldAdminAllowed, setWorldAdminAllowed] = useState(false);
-  const [entityTypeStats, setEntityTypeStats] = useState<
-    Array<{ id: string; name: string; count: number }>
-  >([]);
+    const [entityTypeStats, setEntityTypeStats] = useState<
+      Array<{ id: string; name: string; count: number }>
+    >([]);
+    const [entityTypeStatsVersion, setEntityTypeStatsVersion] = useState(0);
+    const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+    const [lastEntitiesListRoute, setLastEntitiesListRoute] = useState<string | null>(null);
 
-  const contextStorageKey = "ttrpg.context";
-  const contextPanelRef = useRef<HTMLDivElement | null>(null);
+    const contextStorageKey = "ttrpg.context";
+    const contextPanelRef = useRef<HTMLDivElement | null>(null);
+    const hasUnsavedChangesRef = useRef(false);
+    const lastHashRef = useRef(window.location.hash);
+    const suppressHashRef = useRef(false);
+    const pendingHashRef = useRef<string | null>(null);
 
-  const handleUnauthorized = (response: Response) => {
-    if (response.status === 401) {
-      dispatchUnauthorized();
-      return true;
-    }
-    return false;
-  };
+    const handleUnauthorized = (response: Response) => {
+      if (response.status === 401) {
+        dispatchUnauthorized();
+        return true;
+      }
+      return false;
+    };
+
+    useEffect(() => {
+      hasUnsavedChangesRef.current = hasUnsavedChanges;
+    }, [hasUnsavedChanges]);
+
+    useEffect(() => {
+      const handleDirty = (event: Event) => {
+        const customEvent = event as CustomEvent<{ dirty?: boolean }>;
+        const nextDirty = Boolean(customEvent.detail?.dirty);
+        hasUnsavedChangesRef.current = nextDirty;
+        setHasUnsavedChanges(nextDirty);
+      };
+
+      window.addEventListener("ttrpg:form-dirty", handleDirty as EventListener);
+      return () => window.removeEventListener("ttrpg:form-dirty", handleDirty as EventListener);
+    }, []);
+
+    const requestFormSave = useCallback(() => {
+      return new Promise<boolean>((resolve) => {
+        const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const handleResult = (event: Event) => {
+          const customEvent = event as CustomEvent<{ requestId?: string; ok?: boolean }>;
+          if (customEvent.detail?.requestId !== requestId) return;
+          cleanup();
+          resolve(Boolean(customEvent.detail?.ok));
+        };
+        const cleanup = () => {
+          window.clearTimeout(timeoutId);
+          window.removeEventListener(
+            "ttrpg:form-save-result",
+            handleResult as EventListener
+          );
+        };
+        const timeoutId = window.setTimeout(() => {
+          cleanup();
+          resolve(false);
+        }, 8000);
+
+        window.addEventListener("ttrpg:form-save-result", handleResult as EventListener);
+        window.dispatchEvent(
+          new CustomEvent("ttrpg:form-save-request", { detail: { requestId } })
+        );
+      });
+    }, []);
+
+    const confirmUnsavedChanges = useUnsavedChangesPrompt({
+      isDirtyRef: hasUnsavedChangesRef,
+      onSave: requestFormSave,
+      onDiscard: () => {
+        hasUnsavedChangesRef.current = false;
+        setHasUnsavedChanges(false);
+      }
+    });
+
+    const navigateWithGuard = useCallback(
+      (nextHash: string) => {
+        if (!hasUnsavedChangesRef.current) {
+          window.location.hash = nextHash;
+          return;
+        }
+        confirmUnsavedChanges(() => {
+          suppressHashRef.current = true;
+          window.location.hash = nextHash;
+        });
+      },
+      [confirmUnsavedChanges]
+    );
+
+    useEffect(() => {
+      const handleHashChange = () => {
+        if (suppressHashRef.current) {
+          suppressHashRef.current = false;
+          lastHashRef.current = window.location.hash;
+          return;
+        }
+
+        const nextHash = window.location.hash;
+        if (!hasUnsavedChangesRef.current) {
+          lastHashRef.current = nextHash;
+          return;
+        }
+
+        pendingHashRef.current = nextHash;
+        suppressHashRef.current = true;
+        window.location.hash = lastHashRef.current;
+        confirmUnsavedChanges(() => {
+          const target = pendingHashRef.current;
+          pendingHashRef.current = null;
+          if (!target) return;
+          suppressHashRef.current = true;
+          window.location.hash = target;
+        });
+      };
+
+      window.addEventListener("hashchange", handleHashChange);
+      return () => window.removeEventListener("hashchange", handleHashChange);
+    }, [confirmUnsavedChanges]);
 
   const resolveSidebarMode = (pinned: boolean) => {
     if (!pinned) return "collapsed";
@@ -312,7 +417,15 @@ function App() {
     return () => {
       ignore = true;
     };
-  }, [token, context.worldId, context.campaignId, context.characterId]);
+  }, [token, context.worldId, context.campaignId, context.characterId, entityTypeStatsVersion]);
+
+  useEffect(() => {
+    const handleEntityUpdate = () => {
+      setEntityTypeStatsVersion((current) => current + 1);
+    };
+    window.addEventListener("ttrpg:entities-updated", handleEntityUpdate);
+    return () => window.removeEventListener("ttrpg:entities-updated", handleEntityUpdate);
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -660,11 +773,24 @@ function App() {
   const routeParams = new URLSearchParams(routeSearch);
   const entityTypeIdParam = routeParams.get("entityTypeId") ?? undefined;
 
-  const renderContent = () => {
-    if (!user || !token) return null;
+  useEffect(() => {
+    if (routeParts[0] === "list" && routeParts[1] === "entities") {
+      const nextRoute = entityTypeIdParam
+        ? `/list/entities?entityTypeId=${entityTypeIdParam}`
+        : "/list/entities";
+      setLastEntitiesListRoute(nextRoute);
+    }
+  }, [routeParts, entityTypeIdParam]);
 
-    if (routeParts[0] === "profile") {
-      return (
+    const renderContent = () => {
+      if (!user || !token) return null;
+
+      const selectedEntityType = entityTypeIdParam
+        ? entityTypeStats.find((type) => type.id === entityTypeIdParam)
+        : undefined;
+
+      if (routeParts[0] === "profile") {
+        return (
         <section className="app__panel">
           <div className="profile">
             <div className="profile__header">
@@ -794,68 +920,93 @@ function App() {
       );
     }
 
-    if (routeParts[0] === "list" && routeParts[1]) {
-      const config = viewRegistry[routeParts[1]];
-      if (!config) return null;
-      const extraParams =
-        routeParts[1] === "entities" && entityTypeIdParam
-          ? { entityTypeId: entityTypeIdParam }
-          : undefined;
-      return (
-        <section className="app__panel app__panel--wide">
-          <ListView
-            token={token}
-            viewKey={config.listKey}
-            formViewKey={config.formKey}
-            contextWorldId={context.worldId}
-            contextCampaignId={context.campaignId}
-            contextCharacterId={context.characterId}
-            extraParams={extraParams}
-            onOpenForm={(id) => {
-              window.location.hash = `/form/${routeParts[1]}/${id}`;
-              handleSidebarSelect();
-            }}
-          />
-        </section>
-      );
-    }
+      if (routeParts[0] === "list" && routeParts[1]) {
+        const config = viewRegistry[routeParts[1]];
+        if (!config) return null;
+        const extraParams =
+          routeParts[1] === "entities" && entityTypeIdParam
+            ? { entityTypeId: entityTypeIdParam }
+            : undefined;
+        const titleOverride =
+          routeParts[1] === "entities" && selectedEntityType
+            ? selectedEntityType.name
+            : undefined;
+        const subtitleOverride =
+          routeParts[1] === "entities" && selectedEntityType ? "Entities" : undefined;
+        return (
+          <section className="app__panel app__panel--wide">
+            <ListView
+              token={token}
+              viewKey={config.listKey}
+              formViewKey={config.formKey}
+              contextWorldId={context.worldId}
+              contextCampaignId={context.campaignId}
+              contextCharacterId={context.characterId}
+              extraParams={extraParams}
+              titleOverride={titleOverride}
+              subtitleOverride={subtitleOverride}
+              onOpenForm={(id) => {
+                if (routeParts[1] === "entities" && id === "new" && entityTypeIdParam) {
+                  navigateWithGuard(`/form/entities/new?entityTypeId=${entityTypeIdParam}`);
+                } else {
+                  navigateWithGuard(`/form/${routeParts[1]}/${id}`);
+                }
+                handleSidebarSelect();
+              }}
+            />
+          </section>
+        );
+      }
 
-    if (routeParts[0] === "form" && routeParts[1] && routeParts[2]) {
-      const config = viewRegistry[routeParts[1]];
-      if (!config) return null;
-      const initialValues =
-        routeParts[2] === "new"
-          ? routeParts[1] === "campaigns"
-            ? context.worldId
-              ? { worldId: context.worldId }
-              : undefined
-            : routeParts[1] === "characters"
+      if (routeParts[0] === "form" && routeParts[1] && routeParts[2]) {
+        const config = viewRegistry[routeParts[1]];
+        if (!config) return null;
+        const initialValues =
+          routeParts[2] === "new"
+            ? routeParts[1] === "campaigns"
               ? context.worldId
                 ? { worldId: context.worldId }
                 : undefined
-              : routeParts[1] === "entities"
+              : routeParts[1] === "characters"
                 ? context.worldId
                   ? { worldId: context.worldId }
                   : undefined
-              : undefined
-          : undefined;
-      const initialLabels =
-        routeParts[2] === "new" && context.worldLabel
-          ? { worldId: context.worldLabel }
-          : undefined;
+                : routeParts[1] === "entities"
+                  ? context.worldId || entityTypeIdParam
+                    ? {
+                        ...(context.worldId ? { worldId: context.worldId } : {}),
+                        ...(entityTypeIdParam ? { entityTypeId: entityTypeIdParam } : {})
+                      }
+                    : undefined
+                  : routeParts[1] === "entity_types"
+                    ? context.worldId
+                      ? { worldId: context.worldId }
+                      : undefined
+                : undefined
+            : undefined;
+        const initialLabels =
+          routeParts[2] === "new"
+            ? {
+                ...(context.worldLabel ? { worldId: context.worldLabel } : {}),
+                ...(selectedEntityType?.name
+                  ? { entityTypeId: selectedEntityType.name }
+                  : {})
+              }
+            : undefined;
       return (
         <section className="app__panel app__panel--wide">
             <FormView
               token={token}
               viewKey={config.formKey}
               recordId={routeParts[2]}
-              onBack={() => {
-                const listPath =
-                  routeParts[1] === "entities" && entityTypeIdParam
-                    ? `/list/entities?entityTypeId=${entityTypeIdParam}`
-                    : `/list/${routeParts[1]}`;
-                window.location.hash = listPath;
-              }}
+                onBack={() => {
+                  if (routeParts[1] === "entities") {
+                    navigateWithGuard(lastEntitiesListRoute ?? "/list/entities");
+                    return;
+                  }
+                  const listPath = `/list/${routeParts[1]}`;
+                  navigateWithGuard(listPath);
+                }}
               currentUserId={user.id}
               currentUserLabel={user.name ?? user.email}
               currentUserRole={user.role}
@@ -892,7 +1043,7 @@ function App() {
               viewKey={config.formKey}
               recordId={routeParts[2]}
               onBack={() => {
-                window.location.hash = `/admin/${routeParts[1]}`;
+                navigateWithGuard(`/admin/${routeParts[1]}`);
               }}
               currentUserId={user.id}
               currentUserLabel={user.name ?? user.email}
@@ -911,7 +1062,7 @@ function App() {
             viewKey={config.listKey}
             formViewKey={config.formKey}
             onOpenForm={(id) => {
-              window.location.hash = `/admin/${routeParts[1]}/${id}`;
+              navigateWithGuard(`/admin/${routeParts[1]}/${id}`);
               handleSidebarSelect();
             }}
           />
@@ -942,8 +1093,7 @@ function App() {
     );
   };
 
-  return (
-    <PopoutProvider>
+    return (
       <div className="app">
         {user ? (
           <>
@@ -1076,7 +1226,7 @@ function App() {
                     <button
                       type="button"
                       onClick={() => {
-                        window.location.hash = "/list/worlds";
+                        navigateWithGuard("/list/worlds");
                         handleSidebarSelect();
                       }}
                     >
@@ -1085,7 +1235,7 @@ function App() {
                     <button
                       type="button"
                       onClick={() => {
-                        window.location.hash = "/list/campaigns";
+                        navigateWithGuard("/list/campaigns");
                         handleSidebarSelect();
                       }}
                     >
@@ -1094,7 +1244,7 @@ function App() {
                     <button
                       type="button"
                       onClick={() => {
-                        window.location.hash = "/list/characters";
+                        navigateWithGuard("/list/characters");
                         handleSidebarSelect();
                       }}
                     >
@@ -1104,13 +1254,23 @@ function App() {
                       <div className="sidebar__section">
                         <span className="sidebar__section-title">Entities</span>
                         <div className="sidebar__section-body sidebar__entity-list">
+                          <button
+                            type="button"
+                            className="sidebar__entity-item"
+                            onClick={() => {
+                              navigateWithGuard("/list/entities");
+                              handleSidebarSelect();
+                            }}
+                          >
+                            <span>All Entities</span>
+                          </button>
                           {entityTypeStats.map((type) => (
                             <button
                               key={type.id}
                               type="button"
                               className="sidebar__entity-item"
                               onClick={() => {
-                                window.location.hash = `/list/entities?entityTypeId=${type.id}`;
+                                navigateWithGuard(`/list/entities?entityTypeId=${type.id}`);
                                 handleSidebarSelect();
                               }}
                             >
@@ -1120,7 +1280,23 @@ function App() {
                           ))}
                         </div>
                       </div>
-                    ) : null}
+                    ) : (
+                      <div className="sidebar__section">
+                        <span className="sidebar__section-title">Entities</span>
+                        <div className="sidebar__section-body sidebar__entity-list">
+                          <button
+                            type="button"
+                            className="sidebar__entity-item"
+                            onClick={() => {
+                              navigateWithGuard("/list/entities");
+                              handleSidebarSelect();
+                            }}
+                          >
+                            <span>All Entities</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     {worldAdminAllowed ? (
                       <div className="sidebar__section">
                         <button
@@ -1139,7 +1315,7 @@ function App() {
                             <button
                               type="button"
                               onClick={() => {
-                                window.location.hash = "/list/entity_types";
+                                navigateWithGuard("/list/entity_types");
                                 handleSidebarSelect();
                               }}
                             >
@@ -1148,7 +1324,7 @@ function App() {
                             <button
                               type="button"
                               onClick={() => {
-                                window.location.hash = "/list/entity_fields";
+                                navigateWithGuard("/list/entity_fields");
                                 handleSidebarSelect();
                               }}
                             >
@@ -1157,7 +1333,7 @@ function App() {
                             <button
                               type="button"
                               onClick={() => {
-                                window.location.hash = "/list/entity_field_choices";
+                                navigateWithGuard("/list/entity_field_choices");
                                 handleSidebarSelect();
                               }}
                             >
@@ -1185,7 +1361,7 @@ function App() {
                         <button
                           type="button"
                           onClick={() => {
-                            window.location.hash = "/admin/system_choices";
+                            navigateWithGuard("/admin/system_choices");
                             handleSidebarSelect();
                           }}
                         >
@@ -1194,7 +1370,7 @@ function App() {
                         <button
                           type="button"
                           onClick={() => {
-                            window.location.hash = "/admin/system_properties";
+                            navigateWithGuard("/admin/system_properties");
                             handleSidebarSelect();
                           }}
                         >
@@ -1203,7 +1379,7 @@ function App() {
                         <button
                           type="button"
                           onClick={() => {
-                            window.location.hash = "/admin/user_preferences";
+                            navigateWithGuard("/admin/user_preferences");
                             handleSidebarSelect();
                           }}
                         >
@@ -1212,7 +1388,7 @@ function App() {
                         <button
                           type="button"
                           onClick={() => {
-                            window.location.hash = "/admin/system_controls";
+                            navigateWithGuard("/admin/system_controls");
                             handleSidebarSelect();
                           }}
                         >
@@ -1221,7 +1397,7 @@ function App() {
                         <button
                           type="button"
                           onClick={() => {
-                            window.location.hash = "/admin/system_related_lists";
+                            navigateWithGuard("/admin/system_related_lists");
                             handleSidebarSelect();
                           }}
                         >
@@ -1230,7 +1406,7 @@ function App() {
                         <button
                           type="button"
                           onClick={() => {
-                            window.location.hash = "/admin/system_related_list_fields";
+                            navigateWithGuard("/admin/system_related_list_fields");
                             handleSidebarSelect();
                           }}
                         >
@@ -1239,7 +1415,7 @@ function App() {
                         <button
                           type="button"
                           onClick={() => {
-                            window.location.hash = "/admin/users";
+                            navigateWithGuard("/admin/users");
                             handleSidebarSelect();
                           }}
                         >
@@ -1314,7 +1490,14 @@ function App() {
           </section>
         </main>
       )}
-    </div>
+      </div>
+    );
+  }
+
+function App() {
+  return (
+    <PopoutProvider>
+      <AppShell />
     </PopoutProvider>
   );
 }

@@ -54,9 +54,11 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
   };
 
   const fetchSections = async () => {
-    const response = await fetch(`/api/entity-form-sections?entityTypeId=${entityTypeId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const response = await fetch(`/api/entity-form-sections?entityTypeId=${entityTypeId}`,
+      {
+        headers: { Authorization: `Bearer ${token}` }
+      }
+    );
     if (handleUnauthorized(response)) return [];
     if (!response.ok) return [];
     return (await response.json()) as FormSection[];
@@ -226,9 +228,10 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
       list.push(field);
       groups.set(key, list);
     });
+    groups.forEach((list) => list.sort(sortByFormOrder));
 
     const targetKey = groupKey(sectionId, column);
-    const targetList = (groups.get(targetKey) ?? []).sort(sortByFormOrder);
+    const targetList = groups.get(targetKey) ?? [];
     const nextField: FieldDefinition = {
       ...moving,
       formSectionId: sectionId,
@@ -238,9 +241,8 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
     groups.set(targetKey, targetList);
 
     const updatedFields: FieldDefinition[] = [];
-    groups.forEach((list, key) => {
-      const sorted = list.sort(sortByFormOrder);
-      sorted.forEach((field, orderIndex) => {
+    groups.forEach((list) => {
+      list.forEach((field, orderIndex) => {
         const next = { ...field, formOrder: orderIndex + 1 };
         updatedFields.push(next);
       });
@@ -316,7 +318,7 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                     disabled={sections.findIndex((item) => item.id === section.id) === 0}
                     aria-label="Move section up"
                   >
-                    ↑
+                    Up
                   </button>
                   <button
                     type="button"
@@ -327,7 +329,7 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                     }
                     aria-label="Move section down"
                   >
-                    ↓
+                    Down
                   </button>
                 </div>
                 <select
@@ -392,11 +394,11 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                         <div className="form-designer__field-header">
                           <div className="form-designer__field-title-group">
                             <span className="form-designer__drag-handle" aria-hidden="true">
-                              ⋮⋮
+                              ::
                             </span>
                             <div className="form-designer__field-title">{field.label}</div>
                             <div className="form-designer__field-meta">
-                              {field.fieldType} · {field.fieldKey}
+                              {field.fieldType} | {field.fieldKey}
                             </div>
                           </div>
                           <label className="form-designer__required">

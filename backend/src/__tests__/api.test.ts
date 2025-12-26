@@ -13,6 +13,10 @@ type TestContext = {
   architectToken: string;
   viewerId: string;
   viewerToken: string;
+  gmId: string;
+  gmToken: string;
+  gmCampaignId: string;
+  viewerCharacterId: string;
   entityTypeId: string;
   entityFieldId: string;
 };
@@ -128,6 +132,18 @@ beforeAll(async () => {
     .send({ email: "viewer@example.com", password: "Viewer123!" });
   context.viewerToken = viewerLogin.body.token;
 
+  const gmUser = await ensureUser("gm@example.com", "World GM", "Gm123!");
+  context.gmId = gmUser.id;
+  await prisma.worldGameMaster.upsert({
+    where: { worldId_userId: { worldId: world.id, userId: gmUser.id } },
+    update: {},
+    create: { worldId: world.id, userId: gmUser.id }
+  });
+  const gmLogin = await request(app)
+    .post("/api/auth/login")
+    .send({ email: "gm@example.com", password: "Gm123!" });
+  context.gmToken = gmLogin.body.token;
+
   const entityType = await prisma.entityType.create({
     data: {
       worldId: world.id,
@@ -165,6 +181,15 @@ afterAll(async () => {
     await prisma.characterCampaign.deleteMany({
       where: { campaignId: context.campaignId, characterId: context.characterId }
     });
+  }
+  if (context.gmCampaignId) {
+    await prisma.campaign.delete({ where: { id: context.gmCampaignId } }).catch(() => undefined);
+  }
+  if (context.viewerCharacterId) {
+    await prisma.characterCampaign.deleteMany({
+      where: { characterId: context.viewerCharacterId }
+    });
+    await prisma.character.delete({ where: { id: context.viewerCharacterId } }).catch(() => undefined);
   }
 
   if (context.worldId && context.adminId) {
@@ -281,6 +306,40 @@ describe("Context filters", () => {
     expect(ids).toContain(context.campaignId);
   });
 
+  it("shows campaigns where the user is a player", async () => {
+    const viewerCharacter = await prisma.character.create({
+      data: {
+        name: `Viewer Character ${Date.now()}`,
+        worldId: context.worldId as string,
+        playerId: context.viewerId as string
+      }
+    });
+    context.viewerCharacterId = viewerCharacter.id;
+
+    await prisma.characterCampaign.upsert({
+      where: {
+        characterId_campaignId: {
+          characterId: viewerCharacter.id,
+          campaignId: context.campaignId as string
+        }
+      },
+      update: {},
+      create: {
+        characterId: viewerCharacter.id,
+        campaignId: context.campaignId as string,
+        status: "ACTIVE"
+      }
+    });
+
+    const response = await request(app)
+      .get("/api/campaigns")
+      .set("Authorization", `Bearer ${context.viewerToken}`);
+
+    expect(response.status).toBe(200);
+    const ids = response.body.map((item: { id: string }) => item.id);
+    expect(ids).toContain(context.campaignId);
+  });
+
   it("filters character references by campaign", async () => {
     const response = await request(app)
       .get(`/api/references?entityKey=characters&campaignId=${context.campaignId}`)
@@ -380,5 +439,26 @@ describe("World admin access", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.key).toBe("entity_types.list");
+  });
+});
+
+describe("Campaign creation permissions", () => {
+  it("blocks non-GM users from creating campaigns", async () => {
+    const response = await request(app)
+      .post("/api/campaigns")
+      .set("Authorization", `Bearer ${context.viewerToken}`)
+      .send({ worldId: context.worldId, name: "Viewer Campaign" });
+
+    expect(response.status).toBe(403);
+  });
+
+  it("allows world GMs to create campaigns", async () => {
+    const response = await request(app)
+      .post("/api/campaigns")
+      .set("Authorization", `Bearer ${context.gmToken}`)
+      .send({ worldId: context.worldId, name: "GM Campaign", gmUserId: context.gmId });
+
+    expect(response.status).toBe(201);
+    context.gmCampaignId = response.body.id;
   });
 });

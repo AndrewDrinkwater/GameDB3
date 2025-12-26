@@ -704,6 +704,16 @@ body {
   font-size: 0.9rem;
 }
 
+.form-view__error {
+  margin: 1rem 0 0;
+  padding: 0.75rem 1rem;
+  background: color-mix(in srgb, #f59e0b 18%, var(--surface));
+  border: 1px solid color-mix(in srgb, #f59e0b 45%, var(--border));
+  border-radius: 0.75rem;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
 .list-view__actions {
   display: flex;
   gap: 0.75rem;
@@ -1056,6 +1066,38 @@ body {
 .form-view__section h2 {
   margin: 0;
   font-size: 1.05rem;
+}
+
+.field-choices__row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.2fr) minmax(180px, 1.6fr) minmax(90px, 0.4fr) minmax(140px, 0.8fr);
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.field-choices__row input {
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  color: var(--text);
+}
+
+.field-choices__row--header {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.field-choices__row--new {
+  margin-top: 0.75rem;
+}
+
+.field-choices__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .entity-form-layout {

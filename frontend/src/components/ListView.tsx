@@ -40,6 +40,8 @@ type ListViewProps = {
   contextCampaignId?: string;
   contextCharacterId?: string;
   extraParams?: Record<string, string | undefined>;
+  titleOverride?: string;
+  subtitleOverride?: string;
 };
 
 const fieldSorter = (a: ViewField, b: ViewField) => a.listOrder - b.listOrder;
@@ -82,7 +84,9 @@ export default function ListView({
   contextWorldId,
   contextCampaignId,
   contextCharacterId,
-  extraParams
+  extraParams,
+  titleOverride,
+  subtitleOverride
 }: ListViewProps) {
   const [view, setView] = useState<SystemView | null>(null);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -336,8 +340,8 @@ export default function ListView({
     <div className="list-view">
       <div className="list-view__header">
         <div>
-          <h1>{view.title}</h1>
-          <p className="list-view__subtitle">List view</p>
+          <h1>{titleOverride ?? view.title}</h1>
+          <p className="list-view__subtitle">{subtitleOverride ?? "List view"}</p>
         </div>
         <div className="list-view__actions">
           <input
