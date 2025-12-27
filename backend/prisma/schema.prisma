@@ -53,9 +53,24 @@ enum WorldEntityPermissionScope {
   ARCHITECT_GM_PLAYER
 }
 
+enum LocationStatus {
+  ACTIVE
+  INACTIVE
+}
+
 enum EntityFieldType {
   TEXT
   TEXTAREA
+  BOOLEAN
+  CHOICE
+  ENTITY_REFERENCE
+  LOCATION_REFERENCE
+}
+
+enum LocationFieldType {
+  TEXT
+  TEXTAREA
+  NUMBER
   BOOLEAN
   CHOICE
   ENTITY_REFERENCE
@@ -105,6 +120,7 @@ model User {
   characters         Character[]
   createdEntityTypes EntityType[]        @relation("EntityTypeCreator")
   createdEntities    Entity[]            @relation("EntityCreator")
+  createdLocations   Location[]          @relation("LocationCreator")
   systemRoles        SystemUserRole[]
   systemPreferences  SystemUserPreference[]
   listViewPreferences UserListViewPreference[]
@@ -142,6 +158,8 @@ model World {
   characters        Character[]
   entityTypes       EntityType[]
   entities          Entity[]
+  locationTypes     LocationType[]
+  locations         Location[]
 
   @@index([primaryArchitectId])
 }
@@ -193,6 +211,82 @@ model EntityType {
 
   @@index([worldId])
   @@index([createdById])
+}
+
+model LocationType {
+  id          String   @id @default(uuid())
+  worldId     String
+  name        String
+  description String?
+  icon        String?
+  colour      String?
+  menu        Boolean  @default(false)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  world       World              @relation(fields: [worldId], references: [id])
+  fields      LocationTypeField[]
+  parentRules LocationTypeRule[] @relation("LocationTypeParentRule")
+  childRules  LocationTypeRule[] @relation("LocationTypeChildRule")
+  locations   Location[]
+
+  @@index([worldId])
+}
+
+model LocationTypeField {
+  id             String           @id @default(uuid())
+  locationTypeId String
+  fieldKey       String
+  fieldLabel     String
+  fieldType      LocationFieldType
+  required       Boolean          @default(false)
+  defaultValue   Json?
+  validationRules Json?
+  listOrder      Int              @default(0)
+  formOrder      Int              @default(0)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  locationType LocationType              @relation(fields: [locationTypeId], references: [id])
+  choices      LocationTypeFieldChoice[]
+  values       LocationFieldValue[]
+
+  @@unique([locationTypeId, fieldKey])
+  @@index([locationTypeId])
+}
+
+model LocationTypeFieldChoice {
+  id                 String   @id @default(uuid())
+  locationTypeFieldId String
+  value              String
+  label              String
+  sortOrder          Int?
+  pillColor          String?
+  textColor          String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  field LocationTypeField @relation(fields: [locationTypeFieldId], references: [id])
+
+  @@unique([locationTypeFieldId, value])
+  @@index([locationTypeFieldId])
+}
+
+model LocationTypeRule {
+  id           String   @id @default(uuid())
+  parentTypeId String
+  childTypeId  String
+  allowed      Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  parentType LocationType @relation("LocationTypeParentRule", fields: [parentTypeId], references: [id])
+  childType  LocationType @relation("LocationTypeChildRule", fields: [childTypeId], references: [id])
+
+  @@unique([parentTypeId, childTypeId])
+  @@index([parentTypeId])
+  @@index([childTypeId])
 }
 
 model EntityField {
@@ -290,6 +384,7 @@ model Entity {
   id           String   @id @default(uuid())
   worldId      String
   entityTypeId String
+  currentLocationId String
   name         String
   description  String?
   createdById  String
@@ -298,6 +393,7 @@ model Entity {
 
   world      World             @relation(fields: [worldId], references: [id])
   entityType EntityType        @relation(fields: [entityTypeId], references: [id])
+  currentLocation Location     @relation("EntityCurrentLocation", fields: [currentLocationId], references: [id])
   createdBy  User              @relation("EntityCreator", fields: [createdById], references: [id])
   values     EntityFieldValue[]
   access     EntityAccess[]
@@ -305,6 +401,36 @@ model Entity {
 
   @@index([worldId])
   @@index([entityTypeId])
+  @@index([currentLocationId])
+  @@index([createdById])
+}
+
+model Location {
+  id              String         @id @default(uuid())
+  worldId         String
+  name            String
+  description     String?
+  locationTypeId  String
+  parentLocationId String?
+  status          LocationStatus @default(ACTIVE)
+  metadata        Json?
+  createdById     String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  world          World      @relation(fields: [worldId], references: [id])
+  locationType   LocationType @relation(fields: [locationTypeId], references: [id])
+  parentLocation Location?  @relation("LocationParent", fields: [parentLocationId], references: [id])
+  childLocations Location[] @relation("LocationParent")
+  createdBy      User       @relation("LocationCreator", fields: [createdById], references: [id])
+  currentEntities Entity[]  @relation("EntityCurrentLocation")
+  access         LocationAccess[]
+  fieldValues    LocationFieldValue[]
+  notes          Note[]
+
+  @@index([worldId])
+  @@index([locationTypeId])
+  @@index([parentLocationId])
   @@index([createdById])
 }
 
@@ -328,6 +454,26 @@ model EntityFieldValue {
   @@index([fieldId])
 }
 
+model LocationFieldValue {
+  id           String   @id @default(uuid())
+  locationId   String
+  fieldId      String
+  valueString  String?
+  valueText    String?
+  valueBoolean Boolean?
+  valueNumber  Float?
+  valueJson    Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  location Location         @relation(fields: [locationId], references: [id])
+  field    LocationTypeField @relation(fields: [fieldId], references: [id])
+
+  @@unique([locationId, fieldId])
+  @@index([locationId])
+  @@index([fieldId])
+}
+
 model EntityAccess {
   id         String           @id @default(uuid())
   entityId   String
@@ -340,6 +486,21 @@ model EntityAccess {
   entity Entity @relation(fields: [entityId], references: [id])
 
   @@index([entityId])
+  @@index([scopeType, scopeId])
+}
+
+model LocationAccess {
+  id         String           @id @default(uuid())
+  locationId String
+  accessType EntityAccessType
+  scopeType  EntityAccessScope
+  scopeId    String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@index([locationId])
   @@index([scopeType, scopeId])
 }
 
@@ -675,7 +836,8 @@ model SystemAudit {
 
 model Note {
   id          String         @id @default(uuid())
-  entityId    String
+  entityId    String?
+  locationId  String?
   authorId    String
   campaignId  String?
   characterId String?
@@ -685,7 +847,8 @@ model Note {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
-  entity    Entity    @relation(fields: [entityId], references: [id])
+  entity    Entity?   @relation(fields: [entityId], references: [id])
+  location  Location? @relation(fields: [locationId], references: [id])
   author    User      @relation("NoteAuthor", fields: [authorId], references: [id])
   campaign  Campaign? @relation(fields: [campaignId], references: [id])
   character Character? @relation(fields: [characterId], references: [id])
@@ -693,6 +856,7 @@ model Note {
   shares    NoteShare[]
 
   @@index([entityId])
+  @@index([locationId])
   @@index([authorId])
   @@index([campaignId])
   @@index([characterId])

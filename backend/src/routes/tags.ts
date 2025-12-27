@@ -1,0 +1,85 @@
+import express from "express";
+import { Prisma } from "@prisma/client";
+import { prisma, requireAuth, buildLocationAccessFilter, buildEntityAccessFilter } from "../lib/helpers";
+import type { AuthRequest } from "../lib/helpers";
+
+export const registerTagsRoutes = (app: express.Express) => {
+    app.get("/api/entity-tags", requireAuth, async (req, res) => {
+      const user = (req as AuthRequest).user;
+      if (!user) {
+        res.status(401).json({ error: "Unauthorized." });
+        return;
+      }
+  
+      const query = typeof req.query.query === "string" ? req.query.query : undefined;
+      const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+      const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+      const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+  
+      if (!worldId) {
+        res.status(400).json({ error: "worldId is required." });
+        return;
+      }
+  
+      const accessFilter = await buildEntityAccessFilter(user, worldId, campaignId, characterId);
+      const where: Prisma.EntityWhereInput = {
+        ...accessFilter
+      };
+  
+      if (query && query.trim() !== "") {
+        where.name = { contains: query.trim(), mode: Prisma.QueryMode.insensitive };
+      }
+  
+      const entities = await prisma.entity.findMany({
+        where,
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+        take: 25
+      });
+  
+      res.json(entities.map((entity) => ({ id: entity.id, label: entity.name })));
+    });
+
+    app.get("/api/location-tags", requireAuth, async (req, res) => {
+      const user = (req as AuthRequest).user;
+      if (!user) {
+        res.status(401).json({ error: "Unauthorized." });
+        return;
+      }
+  
+      const query = typeof req.query.query === "string" ? req.query.query : undefined;
+      const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+      const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+      const characterId =
+        typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+  
+      if (!worldId) {
+        res.status(400).json({ error: "worldId is required." });
+        return;
+      }
+  
+      const accessFilter = await buildLocationAccessFilter(
+        user,
+        worldId,
+        campaignId,
+        characterId
+      );
+      const where: Prisma.LocationWhereInput = {
+        ...accessFilter
+      };
+  
+      if (query && query.trim() !== "") {
+        where.name = { contains: query.trim(), mode: Prisma.QueryMode.insensitive };
+      }
+  
+      const locations = await prisma.location.findMany({
+        where,
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+        take: 25
+      });
+  
+      res.json(locations.map((location) => ({ id: location.id, label: location.name })));
+    });
+
+};

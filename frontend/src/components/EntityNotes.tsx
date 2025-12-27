@@ -23,15 +23,22 @@ type NoteEntry = {
   tags: NoteTag[];
 };
 
+type MentionEntry = NoteEntry & {
+  entity?: { id: string; name: string } | null;
+  location?: { id: string; name: string } | null;
+};
+
 type EntityNotesProps = {
   token: string;
-  entityId: string;
+  recordId: string;
+  recordType: "entity" | "location";
   worldId?: string;
   contextCampaignId?: string;
   contextCharacterId?: string;
   currentUserId?: string;
   currentUserRole?: "ADMIN" | "USER";
   onOpenEntity: (entityId: string) => void;
+  onOpenLocation: (locationId: string) => void;
   onDirtyChange?: (dirty: boolean) => void;
   discardVersion?: number;
 };
@@ -93,19 +100,25 @@ const renderNoteBody = (
 
 export default function EntityNotes({
   token,
-  entityId,
+  recordId,
+  recordType,
   worldId,
   contextCampaignId,
   contextCharacterId,
   currentUserId,
   currentUserRole,
   onOpenEntity,
+  onOpenLocation,
   onDirtyChange,
   discardVersion
 }: EntityNotesProps) {
+  const [activeTab, setActiveTab] = useState<"notes" | "mentions">("notes");
   const [notes, setNotes] = useState<NoteEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mentions, setMentions] = useState<MentionEntry[]>([]);
+  const [mentionsLoading, setMentionsLoading] = useState(false);
+  const [mentionsError, setMentionsError] = useState<string | null>(null);
   const [body, setBody] = useState("");
   const [visibility, setVisibility] = useState<"PRIVATE" | "SHARED" | "GM">("SHARED");
   const [posting, setPosting] = useState(false);
@@ -134,7 +147,8 @@ export default function EntityNotes({
   const canShare = Boolean(contextCampaignId);
   const canWriteWithoutCampaign = isAdmin || isWorldArchitect;
   const canAttemptPost = Boolean(currentUserRole) && (canShare || canWriteWithoutCampaign);
-  const composerDisabled = !canAttemptPost || entityId === "new";
+  const composerDisabled = !canAttemptPost || recordId === "new";
+  const recordPath = recordType === "location" ? "locations" : "entities";
 
   const resetComposer = () => {
     setBody("");
@@ -168,7 +182,7 @@ export default function EntityNotes({
   };
 
   const loadNotes = useCallback(async () => {
-    if (!entityId || entityId === "new") return;
+    if (!recordId || recordId === "new") return;
     setLoading(true);
     setError(null);
     try {
@@ -176,7 +190,7 @@ export default function EntityNotes({
       if (contextCampaignId) params.set("campaignId", contextCampaignId);
       if (contextCharacterId) params.set("characterId", contextCharacterId);
       const response = await fetch(
-        `/api/entities/${entityId}/notes?${params.toString()}`,
+        `/api/${recordPath}/${recordId}/notes?${params.toString()}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (response.status === 401) {
@@ -193,11 +207,44 @@ export default function EntityNotes({
     } finally {
       setLoading(false);
     }
-  }, [entityId, token, contextCampaignId, contextCharacterId]);
+  }, [recordId, recordPath, token, contextCampaignId, contextCharacterId]);
 
   useEffect(() => {
     void loadNotes();
   }, [loadNotes]);
+
+  const loadMentions = useCallback(async () => {
+    if (!recordId || recordId === "new") return;
+    setMentionsLoading(true);
+    setMentionsError(null);
+    try {
+      const params = new URLSearchParams();
+      if (contextCampaignId) params.set("campaignId", contextCampaignId);
+      if (contextCharacterId) params.set("characterId", contextCharacterId);
+      const response = await fetch(
+        `/api/${recordPath}/${recordId}/mentions?${params.toString()}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (response.status === 401) {
+        dispatchUnauthorized();
+        return;
+      }
+      if (!response.ok) {
+        throw new Error("Unable to load mentions.");
+      }
+      const data = (await response.json()) as MentionEntry[];
+      setMentions(data);
+    } catch (err) {
+      setMentionsError(err instanceof Error ? err.message : "Unable to load mentions.");
+    } finally {
+      setMentionsLoading(false);
+    }
+  }, [recordId, recordPath, token, contextCampaignId, contextCharacterId]);
+
+  useEffect(() => {
+    if (activeTab !== "mentions") return;
+    void loadMentions();
+  }, [activeTab, loadMentions]);
 
   useEffect(() => {
     if (canShare) {
@@ -278,7 +325,11 @@ export default function EntityNotes({
   useEffect(() => {
     resetComposer();
     cancelEdit();
-  }, [entityId]);
+    setActiveTab("notes");
+    setMentions([]);
+    setMentionsError(null);
+    setMentionsLoading(false);
+  }, [recordId, recordType]);
 
   useEffect(() => {
     if (discardVersion === undefined) return;
@@ -329,18 +380,21 @@ export default function EntityNotes({
   ]);
 
   const handleTagClick = (noteId: string, tag: NoteTag) => {
-    if (tag.tagType !== "ENTITY") {
-      setNotice({ noteId, message: "Locations are not available yet." });
-      return;
-    }
     if (!tag.canAccess) {
       setNotice({
         noteId,
-        message: "You can see this tag, but you do not have access to the entity."
+        message:
+          tag.tagType === "LOCATION"
+            ? "You can see this tag, but you do not have access to the location."
+            : "You can see this tag, but you do not have access to the entity."
       });
       return;
     }
     setNotice(null);
+    if (tag.tagType === "LOCATION") {
+      onOpenLocation(tag.targetId);
+      return;
+    }
     onOpenEntity(tag.targetId);
   };
 
@@ -354,27 +408,41 @@ export default function EntityNotes({
       if (contextCampaignId) params.set("campaignId", contextCampaignId);
       if (contextCharacterId) params.set("characterId", contextCharacterId);
       if (query.trim() !== "") params.set("query", query);
-      const response = await fetch(`/api/entity-tags?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (response.status === 401) {
-        dispatchUnauthorized();
+      try {
+        const [entityResponse, locationResponse] = await Promise.all([
+          fetch(`/api/entity-tags?${params.toString()}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          }),
+          fetch(`/api/location-tags?${params.toString()}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+        ]);
+        if (entityResponse.status === 401 || locationResponse.status === 401) {
+          dispatchUnauthorized();
+          callback([]);
+          return;
+        }
+        const entityData = entityResponse.ok
+          ? ((await entityResponse.json()) as Array<{ id: string; label: string }>)
+          : [];
+        const locationData = locationResponse.ok
+          ? ((await locationResponse.json()) as Array<{ id: string; label: string }>)
+          : [];
+        const options = [
+          ...entityData.map((item) => ({ id: `entity:${item.id}`, display: item.label })),
+          ...locationData.map((item) => ({ id: `location:${item.id}`, display: item.label }))
+        ].sort((a, b) => a.display.localeCompare(b.display));
+        callback(options);
+      } catch {
         callback([]);
-        return;
       }
-      if (!response.ok) {
-        callback([]);
-        return;
-      }
-      const data = (await response.json()) as Array<{ id: string; label: string }>;
-      callback(data.map((item) => ({ id: item.id, display: item.label })));
     },
     [token, worldId, contextCampaignId, contextCharacterId]
   );
 
   const handlePost = async () => {
     if (!body.trim()) return;
-    if (entityId === "new") return;
+    if (recordId === "new") return;
     if (!canAttemptPost) return;
     if (visibility === "GM" && !isCampaignGm) {
       setError("GM notes require campaign GM access.");
@@ -383,7 +451,7 @@ export default function EntityNotes({
     setPosting(true);
     setError(null);
     try {
-      const response = await fetch(`/api/entities/${entityId}/notes`, {
+      const response = await fetch(`/api/${recordPath}/${recordId}/notes`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -482,287 +550,412 @@ export default function EntityNotes({
 
   return (
     <div className="entity-notes">
-      <div className="entity-notes__composer">
-        <div className="entity-notes__composer-header">
-          <div>
-            <h2>Notes</h2>
-            <p>Post updates and tag entities with @ to keep the party aligned.</p>
-          </div>
-          <div className="note-visibility">
-            <label>
-              Visibility
-              <select
-                value={visibility}
-                onChange={(event) =>
-                  setVisibility(event.target.value as "PRIVATE" | "SHARED" | "GM")
-                }
-                disabled={!canShare && !canWriteWithoutCampaign}
-              >
-                <option value="PRIVATE">Private</option>
-                {canShare ? <option value="SHARED">Shared</option> : null}
-                {isCampaignGm && canShare ? <option value="GM">GM Notes</option> : null}
-              </select>
-            </label>
-            {!canShare && !canWriteWithoutCampaign ? (
-              <span className="note-visibility__hint">
-                Campaign context required unless you are a world architect.
-              </span>
-            ) : null}
-          </div>
+      <div className="entity-notes__header">
+        <div>
+          <h2>{activeTab === "notes" ? "Notes" : "Mentions"}</h2>
+          <p>
+            {activeTab === "notes"
+              ? "Post updates and tag entities or locations with @ to keep the party aligned."
+              : "Notes from other records that mention this one."}
+          </p>
         </div>
-
-        <div className="note-editor">
-          <MentionsInput
-            className="mentions"
-            value={body}
-            onChange={(_, nextValue) => setBody(nextValue)}
-            placeholder="Write a note and type @ to tag an entity."
-            allowSuggestionsAboveCursor
-            disabled={composerDisabled}
-          >
-            <Mention
-              trigger="@"
-              data={fetchTagSuggestions}
-              markup="@[__display__](entity:__id__)"
-              displayTransform={(id, display) => `@${display}`}
-            />
-          </MentionsInput>
-        </div>
-
-        {visibility === "GM" ? (
-          <div className="note-gm-share">
-            <label className="note-gm-share__option">
-              <input
-                type="checkbox"
-                checked={shareWithArchitect}
-                onChange={(event) => setShareWithArchitect(event.target.checked)}
-                disabled={composerDisabled}
-              />
-              Share with Architect
-            </label>
-            <div className="note-gm-share__players">
-              <div className="note-gm-share__label">Share with players</div>
-              {characterOptions.length === 0 ? (
-                <div className="note-gm-share__empty">No campaign characters found.</div>
-              ) : (
-                characterOptions.map((option) => (
-                  <label key={option.value} className="note-gm-share__option">
-                    <input
-                      type="checkbox"
-                      checked={shareCharacterIds.includes(option.value)}
-                      onChange={(event) => {
-                        const checked = event.target.checked;
-                        setShareCharacterIds((current) =>
-                          checked
-                            ? [...current, option.value]
-                            : current.filter((id) => id !== option.value)
-                        );
-                      }}
-                      disabled={composerDisabled}
-                    />
-                    {option.label}
-                  </label>
-                ))
-              )}
-            </div>
-          </div>
-        ) : null}
-
-        <div className="entity-notes__composer-actions">
+        <div className="entity-notes__tabs form-view__tabs" role="tablist">
           <button
             type="button"
-            className="primary-button"
-            onClick={handlePost}
-            disabled={posting || !body.trim() || entityId === "new" || !canAttemptPost}
+            className={`form-view__tab ${activeTab === "notes" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("notes")}
+            aria-selected={activeTab === "notes"}
+            role="tab"
           >
-            {posting ? "Posting..." : "Post note"}
+            Notes
           </button>
-          <button type="button" className="ghost-button" onClick={resetComposer}>
-            Clear
+          <button
+            type="button"
+            className={`form-view__tab ${activeTab === "mentions" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("mentions")}
+            aria-selected={activeTab === "mentions"}
+            role="tab"
+          >
+            Mentions
           </button>
-          {entityId === "new" ? (
-            <span className="note-visibility__hint">Save the entity to add notes.</span>
-          ) : null}
         </div>
       </div>
 
+      {activeTab === "notes" ? (
+        <div className="entity-notes__composer">
+          <div className="entity-notes__composer-header">
+            <div>
+              <h3>New note</h3>
+              <p>Post updates and tag entities or locations with @ to keep the party aligned.</p>
+            </div>
+            <div className="note-visibility">
+              <label>
+                Visibility
+                <select
+                  value={visibility}
+                  onChange={(event) =>
+                    setVisibility(event.target.value as "PRIVATE" | "SHARED" | "GM")
+                  }
+                  disabled={!canShare && !canWriteWithoutCampaign}
+                >
+                  <option value="PRIVATE">Private</option>
+                  {canShare ? <option value="SHARED">Shared</option> : null}
+                  {isCampaignGm && canShare ? <option value="GM">GM Notes</option> : null}
+                </select>
+              </label>
+              {!canShare && !canWriteWithoutCampaign ? (
+                <span className="note-visibility__hint">
+                  Campaign context required unless you are a world architect.
+                </span>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="note-editor">
+            <MentionsInput
+              className="mentions"
+              value={body}
+              onChange={(_, nextValue) => setBody(nextValue)}
+              placeholder="Write a note and type @ to tag an entity or location."
+              allowSuggestionsAboveCursor
+              disabled={composerDisabled}
+            >
+              <Mention
+                trigger="@"
+                data={fetchTagSuggestions}
+                markup="@[__display__](__id__)"
+                displayTransform={(id, display) => `@${display}`}
+              />
+            </MentionsInput>
+          </div>
+
+          {visibility === "GM" ? (
+            <div className="note-gm-share">
+              <label className="note-gm-share__option">
+                <input
+                  type="checkbox"
+                  checked={shareWithArchitect}
+                  onChange={(event) => setShareWithArchitect(event.target.checked)}
+                  disabled={composerDisabled}
+                />
+                Share with Architect
+              </label>
+              <div className="note-gm-share__players">
+                <div className="note-gm-share__label">Share with players</div>
+                {characterOptions.length === 0 ? (
+                  <div className="note-gm-share__empty">No campaign characters found.</div>
+                ) : (
+                  characterOptions.map((option) => (
+                    <label key={option.value} className="note-gm-share__option">
+                      <input
+                        type="checkbox"
+                        checked={shareCharacterIds.includes(option.value)}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setShareCharacterIds((current) =>
+                            checked
+                              ? [...current, option.value]
+                              : current.filter((id) => id !== option.value)
+                          );
+                        }}
+                        disabled={composerDisabled}
+                      />
+                      {option.label}
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="entity-notes__composer-actions">
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handlePost}
+              disabled={posting || !body.trim() || recordId === "new" || !canAttemptPost}
+            >
+              {posting ? "Posting..." : "Post note"}
+            </button>
+            <button type="button" className="ghost-button" onClick={resetComposer}>
+              Clear
+            </button>
+            {recordId === "new" ? (
+              <span className="note-visibility__hint">Save the record to add notes.</span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       <div className="entity-notes__feed">
-        {loading ? <div className="entity-notes__state">Loading notes...</div> : null}
-        {error ? <div className="entity-notes__state">{error}</div> : null}
-        {!loading && !error && notes.length === 0 ? (
-          <div className="entity-notes__state">No notes yet.</div>
-        ) : null}
-        {!loading && !error
-          ? notes.map((note) => {
-              const noteTagMap = new Map<string, NoteTag>();
-              note.tags.forEach((tag) => {
-                noteTagMap.set(`${tag.tagType}:${tag.targetId}`, tag);
-              });
-              return (
-                <div className="note-card" key={note.id}>
-                  <div className="note-card__meta">
-                    <div className="note-card__author">
-                      {note.authorLabel ?? note.author.name ?? note.author.email}
-                    </div>
-                    <div className="note-card__timestamp">
-                      {formatTimestamp(note.createdAt)}
-                    </div>
-                    {note.authorRoleLabel ? (
-                      <span className="note-card__role">{note.authorRoleLabel}</span>
-                    ) : null}
-                    <span
-                      className={`note-card__visibility ${
-                        note.visibility === "PRIVATE"
-                          ? "note-card__visibility--private"
-                          : note.visibility === "GM"
-                            ? "note-card__visibility--gm"
-                            : "note-card__visibility--shared"
-                      }`}
-                    >
-                      {note.visibility === "PRIVATE"
-                        ? "Private"
-                        : note.visibility === "GM"
-                          ? "GM"
-                          : "Shared"}
-                    </span>
-                    {currentUserId && note.author.id === currentUserId ? (
-                      <div className="note-card__actions">
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          onClick={() => startEdit(note)}
+        {activeTab === "notes" ? (
+          <>
+            {loading ? <div className="entity-notes__state">Loading notes...</div> : null}
+            {error ? <div className="entity-notes__state">{error}</div> : null}
+            {!loading && !error && notes.length === 0 ? (
+              <div className="entity-notes__state">No notes yet.</div>
+            ) : null}
+            {!loading && !error
+              ? notes.map((note) => {
+                  const noteTagMap = new Map<string, NoteTag>();
+                  note.tags.forEach((tag) => {
+                    noteTagMap.set(`${tag.tagType}:${tag.targetId}`, tag);
+                  });
+                  return (
+                    <div className="note-card" key={note.id}>
+                      <div className="note-card__meta">
+                        <div className="note-card__author">
+                          {note.authorLabel ?? note.author.name ?? note.author.email}
+                        </div>
+                        <div className="note-card__timestamp">
+                          {formatTimestamp(note.createdAt)}
+                        </div>
+                        {note.authorRoleLabel ? (
+                          <span className="note-card__role">{note.authorRoleLabel}</span>
+                        ) : null}
+                        <span
+                          className={`note-card__visibility ${
+                            note.visibility === "PRIVATE"
+                              ? "note-card__visibility--private"
+                              : note.visibility === "GM"
+                                ? "note-card__visibility--gm"
+                                : "note-card__visibility--shared"
+                          }`}
                         >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          onClick={() => handleDelete(note.id)}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                  {editNoteId === note.id ? (
-                    <div className="note-card__edit">
-                      <MentionsInput
-                        className="mentions"
-                        value={editBody}
-                        onChange={(_, nextValue) => setEditBody(nextValue)}
-                        placeholder="Update your note..."
-                        allowSuggestionsAboveCursor
-                      >
-                        <Mention
-                          trigger="@"
-                          data={fetchTagSuggestions}
-                          markup="@[__display__](entity:__id__)"
-                          displayTransform={(id, display) => `@${display}`}
-                        />
-                      </MentionsInput>
-                      <div className="note-card__edit-actions">
-                        <label>
-                          Visibility
-                          <select
-                            value={editVisibility}
-                            onChange={(event) =>
-                              setEditVisibility(event.target.value as "PRIVATE" | "SHARED" | "GM")
-                            }
-                            disabled={!canShare && !canWriteWithoutCampaign}
-                          >
-                            <option value="PRIVATE">Private</option>
-                            {canShare ? <option value="SHARED">Shared</option> : null}
-                            {isCampaignGm && canShare ? (
-                              <option value="GM">GM Notes</option>
-                            ) : null}
-                          </select>
-                        </label>
-                        {editVisibility === "GM" ? (
-                          <div className="note-gm-share">
-                            <label className="note-gm-share__option">
-                              <input
-                                type="checkbox"
-                                checked={editShareWithArchitect}
-                                onChange={(event) =>
-                                  setEditShareWithArchitect(event.target.checked)
-                                }
-                                disabled={editSaving}
-                              />
-                              Share with Architect
-                            </label>
-                            <div className="note-gm-share__players">
-                              <div className="note-gm-share__label">Share with players</div>
-                              {characterOptions.length === 0 ? (
-                                <div className="note-gm-share__empty">
-                                  No campaign characters found.
-                                </div>
-                              ) : (
-                                characterOptions.map((option) => (
-                                  <label key={option.value} className="note-gm-share__option">
-                                    <input
-                                      type="checkbox"
-                                      checked={editShareCharacterIds.includes(option.value)}
-                                      onChange={(event) => {
-                                        const checked = event.target.checked;
-                                        setEditShareCharacterIds((current) =>
-                                          checked
-                                            ? [...current, option.value]
-                                            : current.filter((id) => id !== option.value)
-                                        );
-                                      }}
-                                      disabled={editSaving}
-                                    />
-                                    {option.label}
-                                  </label>
-                                ))
-                              )}
-                            </div>
+                          {note.visibility === "PRIVATE"
+                            ? "Private"
+                            : note.visibility === "GM"
+                              ? "GM"
+                              : "Shared"}
+                        </span>
+                        {currentUserId && note.author.id === currentUserId ? (
+                          <div className="note-card__actions">
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={() => startEdit(note)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={() => handleDelete(note.id)}
+                            >
+                              Delete
+                            </button>
                           </div>
                         ) : null}
-                        <div className="note-card__edit-buttons">
+                      </div>
+                      {editNoteId === note.id ? (
+                        <div className="note-card__edit">
+                          <MentionsInput
+                            className="mentions"
+                            value={editBody}
+                            onChange={(_, nextValue) => setEditBody(nextValue)}
+                            placeholder="Update your note..."
+                            allowSuggestionsAboveCursor
+                          >
+                            <Mention
+                              trigger="@"
+                              data={fetchTagSuggestions}
+                              markup="@[__display__](__id__)"
+                              displayTransform={(id, display) => `@${display}`}
+                            />
+                          </MentionsInput>
+                          <div className="note-card__edit-actions">
+                            <label>
+                              Visibility
+                              <select
+                                value={editVisibility}
+                                onChange={(event) =>
+                                  setEditVisibility(
+                                    event.target.value as "PRIVATE" | "SHARED" | "GM"
+                                  )
+                                }
+                                disabled={!canShare && !canWriteWithoutCampaign}
+                              >
+                                <option value="PRIVATE">Private</option>
+                                {canShare ? <option value="SHARED">Shared</option> : null}
+                                {isCampaignGm && canShare ? (
+                                  <option value="GM">GM Notes</option>
+                                ) : null}
+                              </select>
+                            </label>
+                            {editVisibility === "GM" ? (
+                              <div className="note-gm-share">
+                                <label className="note-gm-share__option">
+                                  <input
+                                    type="checkbox"
+                                    checked={editShareWithArchitect}
+                                    onChange={(event) =>
+                                      setEditShareWithArchitect(event.target.checked)
+                                    }
+                                    disabled={editSaving}
+                                  />
+                                  Share with Architect
+                                </label>
+                                <div className="note-gm-share__players">
+                                  <div className="note-gm-share__label">
+                                    Share with players
+                                  </div>
+                                  {characterOptions.length === 0 ? (
+                                    <div className="note-gm-share__empty">
+                                      No campaign characters found.
+                                    </div>
+                                  ) : (
+                                    characterOptions.map((option) => (
+                                      <label
+                                        key={option.value}
+                                        className="note-gm-share__option"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={editShareCharacterIds.includes(option.value)}
+                                          onChange={(event) => {
+                                            const checked = event.target.checked;
+                                            setEditShareCharacterIds((current) =>
+                                              checked
+                                                ? [...current, option.value]
+                                                : current.filter((id) => id !== option.value)
+                                            );
+                                          }}
+                                          disabled={editSaving}
+                                        />
+                                        {option.label}
+                                      </label>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+                            ) : null}
+                            <div className="note-card__edit-buttons">
+                              <button
+                                type="button"
+                                className="ghost-button"
+                                onClick={cancelEdit}
+                                disabled={editSaving}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                className="primary-button"
+                                onClick={handleEditSave}
+                                disabled={editSaving || !editBody.trim()}
+                              >
+                                {editSaving ? "Saving..." : "Save"}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="note-card__body">
+                          {renderNoteBody(note.body, noteTagMap, (tag) =>
+                            handleTagClick(note.id, tag)
+                          )}
+                        </div>
+                      )}
+                      {notice && notice.noteId === note.id ? (
+                        <div className="note-card__notice">
+                          <span>{notice.message}</span>
                           <button
                             type="button"
-                            className="ghost-button"
-                            onClick={cancelEdit}
-                            disabled={editSaving}
+                            className="note-card__notice-close"
+                            onClick={() => setNotice(null)}
+                            aria-label="Dismiss notice"
                           >
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            className="primary-button"
-                            onClick={handleEditSave}
-                            disabled={editSaving || !editBody.trim()}
-                          >
-                            {editSaving ? "Saving..." : "Save"}
+                            A-
                           </button>
                         </div>
+                      ) : null}
+                    </div>
+                  );
+                })
+              : null}
+          </>
+        ) : (
+          <>
+            {mentionsLoading ? (
+              <div className="entity-notes__state">Loading mentions...</div>
+            ) : null}
+            {mentionsError ? <div className="entity-notes__state">{mentionsError}</div> : null}
+            {!mentionsLoading && !mentionsError && mentions.length === 0 ? (
+              <div className="entity-notes__state">No mentions yet.</div>
+            ) : null}
+            {!mentionsLoading && !mentionsError
+              ? mentions.map((note) => {
+                  const noteTagMap = new Map<string, NoteTag>();
+                  note.tags.forEach((tag) => {
+                    noteTagMap.set(`${tag.tagType}:${tag.targetId}`, tag);
+                  });
+                  return (
+                    <div className="note-card" key={note.id}>
+                      <div className="note-card__meta">
+                        {note.entity || note.location ? (
+                          <button
+                            type="button"
+                            className="note-card__source"
+                            onClick={() => {
+                              if (note.entity) {
+                                onOpenEntity(note.entity.id);
+                              } else if (note.location) {
+                                onOpenLocation(note.location.id);
+                              }
+                            }}
+                          >
+                            From {(note.entity ?? note.location)?.name}
+                          </button>
+                        ) : null}
+                        <div className="note-card__author">
+                          {note.authorLabel ?? note.author.name ?? note.author.email}
+                        </div>
+                        <div className="note-card__timestamp">
+                          {formatTimestamp(note.createdAt)}
+                        </div>
+                        {note.authorRoleLabel ? (
+                          <span className="note-card__role">{note.authorRoleLabel}</span>
+                        ) : null}
+                        <span
+                          className={`note-card__visibility ${
+                            note.visibility === "PRIVATE"
+                              ? "note-card__visibility--private"
+                              : note.visibility === "GM"
+                                ? "note-card__visibility--gm"
+                                : "note-card__visibility--shared"
+                          }`}
+                        >
+                          {note.visibility === "PRIVATE"
+                            ? "Private"
+                            : note.visibility === "GM"
+                              ? "GM"
+                              : "Shared"}
+                        </span>
                       </div>
+                      <div className="note-card__body">
+                        {renderNoteBody(note.body, noteTagMap, (tag) =>
+                          handleTagClick(note.id, tag)
+                        )}
+                      </div>
+                      {notice && notice.noteId === note.id ? (
+                        <div className="note-card__notice">
+                          <span>{notice.message}</span>
+                          <button
+                            type="button"
+                            className="note-card__notice-close"
+                            onClick={() => setNotice(null)}
+                            aria-label="Dismiss notice"
+                          >
+                            A-
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
-                  ) : (
-                    <div className="note-card__body">
-                      {renderNoteBody(note.body, noteTagMap, (tag) =>
-                        handleTagClick(note.id, tag)
-                      )}
-                    </div>
-                  )}
-                  {notice && notice.noteId === note.id ? (
-                    <div className="note-card__notice">
-                      <span>{notice.message}</span>
-                      <button
-                        type="button"
-                        className="note-card__notice-close"
-                        onClick={() => setNotice(null)}
-                        aria-label="Dismiss notice"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })
-          : null}
+                  );
+                })
+              : null}
+          </>
+        )}
       </div>
     </div>
   );

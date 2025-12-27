@@ -189,12 +189,21 @@ async function main() {
     { listKey: "world_entity_permission", value: "ARCHITECT", label: "Architects only", sortOrder: 1 },
     { listKey: "world_entity_permission", value: "ARCHITECT_GM", label: "Architects and GMs", sortOrder: 2 },
     { listKey: "world_entity_permission", value: "ARCHITECT_GM_PLAYER", label: "Architects, GMs, and Players", sortOrder: 3 },
+    { listKey: "location_status", value: "ACTIVE", label: "Active", sortOrder: 1 },
+    { listKey: "location_status", value: "INACTIVE", label: "Inactive", sortOrder: 2 },
     { listKey: "entity_field_type", value: "TEXT", label: "Single line text", sortOrder: 1 },
     { listKey: "entity_field_type", value: "TEXTAREA", label: "Multi line text", sortOrder: 2 },
     { listKey: "entity_field_type", value: "BOOLEAN", label: "Boolean", sortOrder: 3 },
     { listKey: "entity_field_type", value: "CHOICE", label: "Choice", sortOrder: 4 },
     { listKey: "entity_field_type", value: "ENTITY_REFERENCE", label: "Reference (Entity)", sortOrder: 5 },
-    { listKey: "entity_field_type", value: "LOCATION_REFERENCE", label: "Reference (Location)", sortOrder: 6 }
+    { listKey: "entity_field_type", value: "LOCATION_REFERENCE", label: "Reference (Location)", sortOrder: 6 },
+    { listKey: "location_field_type", value: "TEXT", label: "Single line text", sortOrder: 1 },
+    { listKey: "location_field_type", value: "TEXTAREA", label: "Multi line text", sortOrder: 2 },
+    { listKey: "location_field_type", value: "NUMBER", label: "Number", sortOrder: 3 },
+    { listKey: "location_field_type", value: "BOOLEAN", label: "Boolean", sortOrder: 4 },
+    { listKey: "location_field_type", value: "CHOICE", label: "Choice", sortOrder: 5 },
+    { listKey: "location_field_type", value: "ENTITY_REFERENCE", label: "Reference (Entity)", sortOrder: 6 },
+    { listKey: "location_field_type", value: "LOCATION_REFERENCE", label: "Reference (Location)", sortOrder: 7 }
   ];
 
   for (const choice of choiceData) {
@@ -246,8 +255,12 @@ async function main() {
     { entityKey: "campaigns", fieldKey: "name", label: "Campaign Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "characters", fieldKey: "name", label: "Character Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "entities", fieldKey: "name", label: "Entity Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "locations", fieldKey: "name", label: "Location Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "location_types", fieldKey: "name", label: "Location Type Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "entity_types", fieldKey: "name", label: "Entity Type Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "entity_fields", fieldKey: "label", label: "Field Label", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "location_type_fields", fieldKey: "fieldLabel", label: "Field Label", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "location_type_field_choices", fieldKey: "label", label: "Field Choice Label", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "users", fieldKey: "name", label: "User Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "users", fieldKey: "email", label: "Email", fieldType: SystemFieldType.EMAIL, referenceEntityKey: null, isLabel: false }
   ];
@@ -443,7 +456,7 @@ async function main() {
       { fieldKey: "listOrder", label: "List Order", fieldType: SystemFieldType.NUMBER, listOrder: 6, formOrder: 6 },
       { fieldKey: "formOrder", label: "Form Order", fieldType: SystemFieldType.NUMBER, listOrder: 7, formOrder: 7 },
       { fieldKey: "referenceEntityTypeId", label: "Reference Entity Type", fieldType: SystemFieldType.REFERENCE, listOrder: 8, formOrder: 8, referenceEntityKey: "entity_types" },
-      { fieldKey: "referenceLocationTypeKey", label: "Reference Location Type", fieldType: SystemFieldType.TEXT, listOrder: 9, formOrder: 9 },
+      { fieldKey: "referenceLocationTypeKey", label: "Reference Location Type", fieldType: SystemFieldType.REFERENCE, listOrder: 9, formOrder: 9, referenceEntityKey: "location_types", referenceScope: "location_type" },
       { fieldKey: "conditions", label: "Visibility Conditions", fieldType: SystemFieldType.TEXTAREA, listOrder: 10, formOrder: 10 }
     ]
   },
@@ -485,7 +498,8 @@ async function main() {
     fields: [
       { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
       { fieldKey: "entityTypeId", label: "Type", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "entity_types" },
-      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, referenceEntityKey: "worlds" }
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, referenceEntityKey: "worlds" },
+      { fieldKey: "currentLocationId", label: "Location", fieldType: SystemFieldType.REFERENCE, listOrder: 4, formOrder: 4, referenceEntityKey: "locations", referenceScope: "location_reference" }
     ]
   },
   {
@@ -499,7 +513,156 @@ async function main() {
       { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
       { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, required: true, referenceEntityKey: "worlds" },
       { fieldKey: "entityTypeId", label: "Type", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, required: true, referenceEntityKey: "entity_types", referenceScope: "entity_type" },
-      { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 4, formOrder: 4 }
+      { fieldKey: "currentLocationId", label: "Location", fieldType: SystemFieldType.REFERENCE, listOrder: 4, formOrder: 4, required: true, referenceEntityKey: "locations", referenceScope: "location_reference" },
+      { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 5, formOrder: 5 }
+    ]
+  },
+  {
+    key: "location_types.list",
+    title: "Location Types",
+    entityKey: "location_types",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/location-types",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "worlds" },
+      { fieldKey: "icon", label: "Icon", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
+      { fieldKey: "menu", label: "Menu", fieldType: SystemFieldType.BOOLEAN, listOrder: 4, formOrder: 4 }
+    ]
+  },
+  {
+    key: "location_types.form",
+    title: "Location Type",
+    entityKey: "location_types",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/location-types",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, required: true, referenceEntityKey: "worlds" },
+      { fieldKey: "icon", label: "Icon", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
+      { fieldKey: "colour", label: "Colour", fieldType: SystemFieldType.TEXT, listOrder: 4, formOrder: 4 },
+      { fieldKey: "menu", label: "Menu", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 },
+      { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 6, formOrder: 6 }
+    ]
+  },
+  {
+    key: "location_type_fields.list",
+    title: "Location Type Fields",
+    entityKey: "location_type_fields",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/location-type-fields",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "locationTypeId", label: "Location Type", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "location_types", referenceScope: "location_type" },
+      { fieldKey: "fieldKey", label: "Field Key", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2 },
+      { fieldKey: "fieldLabel", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
+      { fieldKey: "fieldType", label: "Type", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 4, optionsListKey: "location_field_type" },
+      { fieldKey: "required", label: "Required", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 }
+    ]
+  },
+  {
+    key: "location_type_fields.form",
+    title: "Location Type Field",
+    entityKey: "location_type_fields",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/location-type-fields",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "locationTypeId", label: "Location Type", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "location_types", referenceScope: "location_type" },
+      { fieldKey: "fieldKey", label: "Field Key", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2, required: true },
+      { fieldKey: "fieldLabel", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true },
+      { fieldKey: "fieldType", label: "Field Type", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 4, required: true, optionsListKey: "location_field_type" },
+      { fieldKey: "required", label: "Required", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 },
+      { fieldKey: "listOrder", label: "List Order", fieldType: SystemFieldType.NUMBER, listOrder: 6, formOrder: 6 },
+      { fieldKey: "formOrder", label: "Form Order", fieldType: SystemFieldType.NUMBER, listOrder: 7, formOrder: 7 },
+      { fieldKey: "defaultValue", label: "Default Value", fieldType: SystemFieldType.TEXTAREA, listOrder: 8, formOrder: 8 },
+      { fieldKey: "validationRules", label: "Validation Rules", fieldType: SystemFieldType.TEXTAREA, listOrder: 9, formOrder: 9 }
+    ]
+  },
+  {
+    key: "location_type_field_choices.list",
+    title: "Location Field Choices",
+    entityKey: "location_type_field_choices",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/location-type-field-choices",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "locationTypeFieldId", label: "Field", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "location_type_fields" },
+      { fieldKey: "value", label: "Value", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2 },
+      { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
+      { fieldKey: "sortOrder", label: "Sort", fieldType: SystemFieldType.NUMBER, listOrder: 4, formOrder: 4 }
+    ]
+  },
+  {
+    key: "location_type_field_choices.form",
+    title: "Location Field Choice",
+    entityKey: "location_type_field_choices",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/location-type-field-choices",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "locationTypeFieldId", label: "Field", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "location_type_fields" },
+      { fieldKey: "value", label: "Value", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2, required: true },
+      { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true },
+      { fieldKey: "sortOrder", label: "Sort", fieldType: SystemFieldType.NUMBER, listOrder: 4, formOrder: 4 }
+    ]
+  },
+  {
+    key: "location_type_rules.list",
+    title: "Location Type Rules",
+    entityKey: "location_type_rules",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/location-type-rules",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "parentTypeId", label: "Parent Type", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "location_types", referenceScope: "location_type" },
+      { fieldKey: "childTypeId", label: "Child Type", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "location_types", referenceScope: "location_type" },
+      { fieldKey: "allowed", label: "Allowed", fieldType: SystemFieldType.BOOLEAN, listOrder: 3, formOrder: 3 }
+    ]
+  },
+  {
+    key: "location_type_rules.form",
+    title: "Location Type Rule",
+    entityKey: "location_type_rules",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/location-type-rules",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "parentTypeId", label: "Parent Type", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "location_types", referenceScope: "location_type" },
+      { fieldKey: "childTypeId", label: "Child Type", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, required: true, referenceEntityKey: "location_types", referenceScope: "location_type" },
+      { fieldKey: "allowed", label: "Allowed", fieldType: SystemFieldType.BOOLEAN, listOrder: 3, formOrder: 3 }
+    ]
+  },
+  {
+    key: "locations.list",
+    title: "Locations",
+    entityKey: "locations",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/locations",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
+      { fieldKey: "locationTypeId", label: "Type", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "location_types", referenceScope: "location_type" },
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, referenceEntityKey: "worlds" },
+      { fieldKey: "status", label: "Status", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 4, optionsListKey: "location_status" }
+    ]
+  },
+  {
+    key: "locations.form",
+    title: "Location",
+    entityKey: "locations",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/locations",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, required: true, referenceEntityKey: "worlds" },
+      { fieldKey: "locationTypeId", label: "Type", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, required: true, referenceEntityKey: "location_types", referenceScope: "location_type" },
+      { fieldKey: "parentLocationId", label: "Parent Location", fieldType: SystemFieldType.REFERENCE, listOrder: 4, formOrder: 4, referenceEntityKey: "locations", referenceScope: "location_parent" },
+      { fieldKey: "status", label: "Status", fieldType: SystemFieldType.SELECT, listOrder: 5, formOrder: 5, optionsListKey: "location_status" },
+      { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 6, formOrder: 6 }
     ]
   },
   {

@@ -1,0 +1,30 @@
+import express from "express";
+import { registerAuthRoutes } from "./auth";
+import { registerCampaignsRoutes } from "./campaigns";
+import { registerCharactersRoutes } from "./characters";
+import { registerCoreRoutes } from "./core";
+import { registerEntitiesRoutes } from "./entities";
+import { registerEntityTypesRoutes } from "./entityTypes";
+import { registerLocationsRoutes } from "./locations";
+import { registerLocationTypesRoutes } from "./locationTypes";
+import { registerNotesRoutes } from "./notes";
+import { registerSystemRoutes } from "./system";
+import { registerTagsRoutes } from "./tags";
+import { registerUserPreferencesRoutes } from "./userPreferences";
+import { registerWorldsRoutes } from "./worlds";
+
+export const registerRoutes = (app: express.Express) => {
+  registerAuthRoutes(app);
+  registerCoreRoutes(app);
+  registerSystemRoutes(app);
+  registerUserPreferencesRoutes(app);
+  registerWorldsRoutes(app);
+  registerCampaignsRoutes(app);
+  registerCharactersRoutes(app);
+  registerEntityTypesRoutes(app);
+  registerLocationTypesRoutes(app);
+  registerLocationsRoutes(app);
+  registerEntitiesRoutes(app);
+  registerNotesRoutes(app);
+  registerTagsRoutes(app);
+};

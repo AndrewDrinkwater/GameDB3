@@ -296,6 +296,12 @@ export default function FormView({
       (typeof formData.sourceTypeId === "string" ? formData.sourceTypeId : undefined),
     entityFieldId:
       typeof formData.entityFieldId === "string" ? formData.entityFieldId : undefined,
+    locationTypeId:
+      typeof formData.locationTypeId === "string" ? formData.locationTypeId : undefined,
+    locationTypeFieldId:
+      typeof formData.locationTypeFieldId === "string"
+        ? formData.locationTypeFieldId
+        : undefined,
     isTemplate: Boolean(formData.isTemplate),
     enabled: Boolean(view?.entityKey)
   });
@@ -337,7 +343,9 @@ export default function FormView({
       formData,
       entityValues,
       entityAccess:
-        view?.entityKey === "entities" && !entityAccessAllowed ? null : entityAccess
+        (view?.entityKey === "entities" || view?.entityKey === "locations") && !entityAccessAllowed
+          ? null
+          : entityAccess
     });
   const ensureSnapshotReady = () => {
     if (hasSnapshotRef.current) return;
@@ -467,16 +475,19 @@ export default function FormView({
           const record = (await recordResponse.json()) as Record<string, unknown>;
           if (!ignore) {
             setFormData(record);
-            if (viewData.entityKey === "entities" && record.fieldValues) {
+            if (
+              (viewData.entityKey === "entities" || viewData.entityKey === "locations") &&
+              record.fieldValues
+            ) {
               setEntityValues(record.fieldValues as Record<string, unknown>);
             }
-            if (viewData.entityKey === "entities") {
+            if (viewData.entityKey === "entities" || viewData.entityKey === "locations") {
               const accessAllowed = (record as { accessAllowed?: boolean }).accessAllowed;
               const auditAllowed = (record as { auditAllowed?: boolean }).auditAllowed;
               if (typeof accessAllowed === "boolean") {
                 setEntityAccessAllowed(accessAllowed);
                 if (!accessAllowed) {
-                  setEntityAccessWarning("Access controls are unavailable for this entity.");
+                  setEntityAccessWarning("Access controls are unavailable for this record.");
                 }
               }
               if (typeof auditAllowed === "boolean") {
@@ -560,7 +571,12 @@ export default function FormView({
 
   useEffect(() => {
     if (loading || !view) return;
-    if (view.entityKey === "entities" && entityAccessAllowed && entityAccess === null) return;
+    if (
+      (view.entityKey === "entities" || view.entityKey === "locations") &&
+      entityAccessAllowed &&
+      entityAccess === null
+    )
+      return;
     const key = `${viewKey}:${recordId}`;
     if (loadedKeyRef.current !== key) return;
     if (snapshotKeyRef.current === key) return;
@@ -588,7 +604,7 @@ export default function FormView({
   }, [noteDirty]);
 
   useEffect(() => {
-    if (!view || view.entityKey !== "entities") return;
+    if (!view || (view.entityKey !== "entities" && view.entityKey !== "locations")) return;
     if (entityAccessAllowed) return;
     if (!hasSnapshotRef.current) return;
     initialSnapshotRef.current = buildSnapshot();
@@ -612,10 +628,28 @@ export default function FormView({
           const value = formData[field.fieldKey];
           if (!value) return;
           const entityKey = field.referenceEntityKey as string;
-          const response = await fetch(
-            `/api/references?entityKey=${entityKey}&ids=${String(value)}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
+          const params = new URLSearchParams({
+            entityKey,
+            ids: String(value)
+          });
+          const worldId =
+            (typeof formData.worldId === "string" ? formData.worldId : undefined) ??
+            contextWorldId;
+          if (
+            worldId &&
+            (entityKey === "locations" ||
+              entityKey === "location_types" ||
+              entityKey === "location_type_fields")
+          ) {
+            params.set("worldId", worldId);
+          }
+          if (entityKey === "locations") {
+            if (contextCampaignId) params.set("campaignId", contextCampaignId);
+            if (contextCharacterId) params.set("characterId", contextCharacterId);
+          }
+          const response = await fetch(`/api/references?${params.toString()}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
           if (handleUnauthorized(response)) return;
           if (!response.ok) return;
           const data = (await response.json()) as Array<{ id: string; label: string }>;
@@ -642,12 +676,15 @@ export default function FormView({
     return () => {
       ignore = true;
     };
-  }, [view, formData, token]);
+  }, [view, formData, token, contextWorldId, contextCampaignId, contextCharacterId]);
 
   useEffect(() => {
     let ignore = false;
-    if (!view || view.entityKey !== "entities") return;
-    const refFields = entityFields.filter((field) => field.fieldType === "ENTITY_REFERENCE");
+    if (!view || (view.entityKey !== "entities" && view.entityKey !== "locations")) return;
+    const refFields = entityFields.filter(
+      (field) =>
+        field.fieldType === "ENTITY_REFERENCE" || field.fieldType === "LOCATION_REFERENCE"
+    );
     if (refFields.length === 0) return;
 
       const loadLabels = async () => {
@@ -656,14 +693,19 @@ export default function FormView({
           refFields.map(async (field) => {
             const value = entityValues[field.fieldKey];
             if (!value || entityReferenceLabels[field.fieldKey]) return;
+            const referenceEntityKey =
+              field.fieldType === "LOCATION_REFERENCE" ? "locations" : "entities";
             const params = new URLSearchParams({
-              entityKey: "entities",
+              entityKey: referenceEntityKey,
               ids: String(value)
             });
             const worldId = (formData.worldId as string | undefined) ?? contextWorldId;
             if (worldId) params.set("worldId", worldId);
             if (contextCampaignId) params.set("campaignId", contextCampaignId);
             if (contextCharacterId) params.set("characterId", contextCharacterId);
+            if (referenceEntityKey === "entities" && field.referenceEntityTypeId) {
+              params.set("entityTypeId", field.referenceEntityTypeId);
+            }
             const response = await fetch(`/api/references?${params.toString()}`, {
               headers: { Authorization: `Bearer ${token}` }
             });
@@ -700,25 +742,35 @@ export default function FormView({
 
   useEffect(() => {
     let ignore = false;
-    if (!view || view.entityKey !== "entities") return;
+    if (!view || (view.entityKey !== "entities" && view.entityKey !== "locations")) return;
 
-    const entityTypeId = formData.entityTypeId as string | undefined;
-    if (!entityTypeId) {
+    const typeId =
+      view.entityKey === "entities"
+        ? (formData.entityTypeId as string | undefined)
+        : (formData.locationTypeId as string | undefined);
+    if (!typeId) {
       setEntityFields([]);
       return;
     }
 
     const loadEntityFields = async () => {
-      const response = await fetch(`/api/entity-fields?entityTypeId=${entityTypeId}`, {
+      const endpoint =
+        view.entityKey === "entities"
+          ? `/api/entity-fields?entityTypeId=${typeId}`
+          : `/api/location-type-fields?locationTypeId=${typeId}`;
+      const response = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (handleUnauthorized(response)) return;
       if (!response.ok) return;
-      const data = (await response.json()) as EntityFieldDefinition[];
+      const data = (await response.json()) as Array<
+        EntityFieldDefinition & { fieldLabel?: string }
+      >;
       if (!ignore) {
         const sorted = [...data]
           .map((field) => ({
             ...field,
+            label: field.label ?? field.fieldLabel ?? field.fieldKey,
             choices: field.choices
               ? [...field.choices].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
               : field.choices
@@ -733,7 +785,7 @@ export default function FormView({
     return () => {
       ignore = true;
     };
-  }, [view, formData.entityTypeId, token]);
+  }, [view, formData.entityTypeId, formData.locationTypeId, token]);
 
   useEffect(() => {
     let ignore = false;
@@ -764,15 +816,17 @@ export default function FormView({
   }, [view, formData.entityTypeId, token]);
 
   useEffect(() => {
-    if (!view || view.entityKey !== "entities") return;
+    if (!view || (view.entityKey !== "entities" && view.entityKey !== "locations")) return;
     if (recordId !== "new") return;
     setEntityValues({});
     setEntityReferenceLabels({});
-  }, [view, recordId, formData.entityTypeId]);
+  }, [view, recordId, formData.entityTypeId, formData.locationTypeId]);
 
   useEffect(() => {
     let ignore = false;
-    if (!view || view.entityKey !== "entity_fields") return;
+    if (!view || (view.entityKey !== "entity_fields" && view.entityKey !== "location_type_fields")) {
+      return;
+    }
     if (recordId === "new" || formData.fieldType !== "CHOICE") {
       setFieldChoices([]);
       setFieldChoicesError(null);
@@ -784,7 +838,11 @@ export default function FormView({
       setFieldChoicesLoading(true);
       setFieldChoicesError(null);
       try {
-        const response = await fetch(`/api/entity-field-choices?entityFieldId=${recordId}`, {
+        const endpoint =
+          view.entityKey === "location_type_fields"
+            ? `/api/location-type-field-choices?locationTypeFieldId=${recordId}`
+            : `/api/entity-field-choices?entityFieldId=${recordId}`;
+        const response = await fetch(endpoint, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (handleUnauthorized(response)) return;
@@ -816,7 +874,7 @@ export default function FormView({
 
   useEffect(() => {
     let ignore = false;
-    if (!view || view.entityKey !== "entities") return;
+    if (!view || (view.entityKey !== "entities" && view.entityKey !== "locations")) return;
 
     const resolveLabels = async (entityKey: string, ids: string[]) => {
       if (ids.length === 0) return [];
@@ -830,6 +888,7 @@ export default function FormView({
     };
 
     const loadAccess = async () => {
+      if (loading) return;
       const key = `${viewKey}:${recordId}`;
       if (recordId !== "new" && loadedKeyRef.current !== key) return;
       if (recordId === "new") {
@@ -868,19 +927,20 @@ export default function FormView({
   if ((formData as { accessAllowed?: boolean }).accessAllowed === false) {
     if (!ignore) {
       setEntityAccessAllowed(false);
-      setEntityAccessWarning("Access controls are unavailable for this entity.");
+      setEntityAccessWarning("Access controls are unavailable for this record.");
     }
     return;
   }
 
-  const response = await fetch(`/api/entities/${recordId}/access`, {
+  const accessEntityKey = view.entityKey === "locations" ? "locations" : "entities";
+  const response = await fetch(`/api/${accessEntityKey}/${recordId}/access`, {
     headers: { Authorization: `Bearer ${token}` }
   });
   if (handleUnauthorized(response)) return;
   if (response.status === 403) {
     if (!ignore) {
       setEntityAccessAllowed(false);
-      setEntityAccessWarning("Access controls are unavailable for this entity.");
+      setEntityAccessWarning("Access controls are unavailable for this record.");
     }
     return;
   }
@@ -917,7 +977,7 @@ export default function FormView({
     return () => {
       ignore = true;
     };
-    }, [view, recordId, token, contextCampaignId]);
+    }, [view, recordId, token, contextCampaignId, contextCharacterId, viewKey, loading]);
 
   useEffect(() => {
     let ignore = false;
@@ -1045,7 +1105,11 @@ export default function FormView({
 
   useEffect(() => {
     let ignore = false;
-    if (!view || view.entityKey !== "entities" || recordId === "new") {
+    if (
+      !view ||
+      (view.entityKey !== "entities" && view.entityKey !== "locations") ||
+      recordId === "new"
+    ) {
       setEntityAudit(null);
       setEntityAuditAllowed(false);
       setEntityAuditLoading(false);
@@ -1054,6 +1118,7 @@ export default function FormView({
     }
 
     const loadAudit = async () => {
+      if (loading) return;
       const key = `${viewKey}:${recordId}`;
       if (loadedKeyRef.current !== key) return;
       if ((formData as { auditAllowed?: boolean }).auditAllowed === false) {
@@ -1067,7 +1132,8 @@ export default function FormView({
       setEntityAuditError(null);
       setOpenAuditEntryId(null);
       try {
-        const response = await fetch(`/api/entities/${recordId}/audit`, {
+        const auditEntityKey = view.entityKey === "locations" ? "locations" : "entities";
+        const response = await fetch(`/api/${auditEntityKey}/${recordId}/audit`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (handleUnauthorized(response)) return;
@@ -1101,7 +1167,7 @@ export default function FormView({
     return () => {
       ignore = true;
     };
-  }, [view, recordId, token]);
+  }, [view, recordId, token, viewKey, loading]);
 
   useEffect(() => {
     let ignore = false;
@@ -1164,7 +1230,7 @@ export default function FormView({
   }, [view, formData.fieldType]);
 
   const visibleEntityFields = useMemo(() => {
-    if (!view || view.entityKey !== "entities") return [];
+    if (!view || (view.entityKey !== "entities" && view.entityKey !== "locations")) return [];
     const values = { ...formData, ...entityValues };
     return entityFields.filter((field) => {
       if (!field.conditions) return true;
@@ -1208,7 +1274,11 @@ export default function FormView({
       );
     }
 
-      if (field.fieldType === "ENTITY_REFERENCE") {
+      if (
+        field.fieldType === "ENTITY_REFERENCE" ||
+        field.fieldType === "LOCATION_REFERENCE"
+      ) {
+        const isLocationReference = field.fieldType === "LOCATION_REFERENCE";
         const options = entityReferenceOptions[field.fieldKey] ?? [];
         const labelValue = entityReferenceLabels[field.fieldKey] ?? "";
         const isOpen = entityReferenceOpen[field.fieldKey];
@@ -1232,7 +1302,7 @@ export default function FormView({
                 <input
                   type="text"
                   value={labelValue}
-                  placeholder="Search entities..."
+                  placeholder={isLocationReference ? "Search locations..." : "Search entities..."}
                   onClick={() => {
                     if (isDisabled) return;
                     setEntityReferenceOpen((current) => ({ ...current, [field.fieldKey]: true }));
@@ -1252,7 +1322,7 @@ export default function FormView({
                   }}
                   disabled={isDisabled}
                 />
-                {renderEntityInfoButton(entityRefId)}
+                {isLocationReference ? null : renderEntityInfoButton(entityRefId)}
               </div>
               {isOpen && options.length > 0 ? (
                 <div className="reference-field__options">
@@ -1313,6 +1383,18 @@ export default function FormView({
               </option>
             ))}
           </select>
+        ) : field.fieldType === "NUMBER" ? (
+          <input
+            type="number"
+            value={value ?? ""}
+            onChange={(event) =>
+              handleEntityValueChange(
+                field.fieldKey,
+                event.target.value === "" ? "" : Number(event.target.value)
+              )
+            }
+            disabled={isDisabled}
+          />
         ) : (
           <input
             type="text"
@@ -1335,6 +1417,9 @@ export default function FormView({
           ? ((formData.worldId as string | undefined) ?? contextWorldId)
           : undefined;
       const gmWorldParam = gmWorldId ? `&worldId=${gmWorldId}` : "";
+      const worldParamValue =
+        (typeof formData.worldId === "string" ? formData.worldId : undefined) ??
+        contextWorldId;
       const contextParams =
         effectiveScope === "entity_type"
           ? formData.worldId
@@ -1347,8 +1432,28 @@ export default function FormView({
           : field.referenceEntityKey === "entity_fields" && contextWorldId
             ? `&worldId=${contextWorldId}`
             : "";
+      const locationScopeParams =
+        effectiveScope === "location_parent"
+          ? `${formData.locationTypeId ? `&locationTypeId=${formData.locationTypeId}` : ""}${
+              worldParamValue ? `&worldId=${worldParamValue}` : ""
+            }`
+          : effectiveScope === "location_reference" ||
+              effectiveScope === "location_type" ||
+              field.referenceEntityKey === "locations"
+            ? worldParamValue
+              ? `&worldId=${worldParamValue}`
+              : ""
+            : field.referenceEntityKey === "location_type_fields" && worldParamValue
+              ? `&worldId=${worldParamValue}`
+              : "";
+      const locationAccessParams =
+        field.referenceEntityKey === "locations"
+          ? `${contextCampaignId ? `&campaignId=${contextCampaignId}` : ""}${
+              contextCharacterId ? `&characterId=${contextCharacterId}` : ""
+            }`
+          : "";
     const response = await fetch(
-      `/api/references?entityKey=${field.referenceEntityKey}&query=${encodeURIComponent(query)}${scopeParam}${contextParams}${gmWorldParam}`,
+      `/api/references?entityKey=${field.referenceEntityKey}&query=${encodeURIComponent(query)}${scopeParam}${contextParams}${gmWorldParam}${locationScopeParams}${locationAccessParams}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     if (handleUnauthorized(response)) return;
@@ -1358,7 +1463,9 @@ export default function FormView({
     setReferenceOptions((current) => ({ ...current, [field.fieldKey]: options }));
   };
 
-  const isChoiceField = view?.entityKey === "entity_fields" && formData.fieldType === "CHOICE";
+  const isChoiceField =
+    (view?.entityKey === "entity_fields" || view?.entityKey === "location_type_fields") &&
+    formData.fieldType === "CHOICE";
 
   const updateChoice = (choiceId: string, updates: Partial<EntityFieldChoice>) => {
     setFieldChoices((current) =>
@@ -1368,7 +1475,11 @@ export default function FormView({
 
   const saveChoice = async (choice: EntityFieldChoice) => {
     try {
-      const response = await fetch(`/api/entity-field-choices/${choice.id}`, {
+      const endpoint =
+        view?.entityKey === "location_type_fields"
+          ? `/api/location-type-field-choices/${choice.id}`
+          : `/api/entity-field-choices/${choice.id}`;
+      const response = await fetch(endpoint, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -1400,7 +1511,11 @@ export default function FormView({
 
   const deleteChoice = async (choiceId: string) => {
     try {
-      const response = await fetch(`/api/entity-field-choices/${choiceId}`, {
+      const endpoint =
+        view?.entityKey === "location_type_fields"
+          ? `/api/location-type-field-choices/${choiceId}`
+          : `/api/entity-field-choices/${choiceId}`;
+      const response = await fetch(endpoint, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1422,14 +1537,20 @@ export default function FormView({
       return;
     }
     try {
-      const response = await fetch("/api/entity-field-choices", {
+      const endpoint =
+        view?.entityKey === "location_type_fields"
+          ? "/api/location-type-field-choices"
+          : "/api/entity-field-choices";
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
-          entityFieldId: recordId,
+          ...(view?.entityKey === "location_type_fields"
+            ? { locationTypeFieldId: recordId }
+            : { entityFieldId: recordId }),
           value: newChoice.value.trim(),
           label: newChoice.label.trim(),
           sortOrder: newChoice.sortOrder ? Number(newChoice.sortOrder) : undefined,
@@ -1454,15 +1575,19 @@ export default function FormView({
   };
 
     const handleEntityReferenceSearch = async (field: EntityFieldDefinition, query: string) => {
+      const referenceEntityKey =
+        field.fieldType === "LOCATION_REFERENCE" ? "locations" : "entities";
       const params = new URLSearchParams({
-        entityKey: "entities",
+        entityKey: referenceEntityKey,
         query
       });
       const worldId = (formData.worldId as string | undefined) ?? contextWorldId;
       if (worldId) params.set("worldId", worldId);
       if (contextCampaignId) params.set("campaignId", contextCampaignId);
       if (contextCharacterId) params.set("characterId", contextCharacterId);
-      if (field.referenceEntityTypeId) params.set("entityTypeId", field.referenceEntityTypeId);
+      if (referenceEntityKey === "entities" && field.referenceEntityTypeId) {
+        params.set("entityTypeId", field.referenceEntityTypeId);
+      }
 
       const response = await fetch(`/api/references?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -1591,7 +1716,7 @@ export default function FormView({
       }
     });
 
-    if (view.entityKey === "entities") {
+    if (view.entityKey === "entities" || view.entityKey === "locations") {
       payload.fieldValues = entityValues;
       if (contextCampaignId) {
         payload.contextCampaignId = contextCampaignId;
@@ -1652,8 +1777,14 @@ export default function FormView({
         }
       }
 
-      if (!isNew && view.entityKey === "entities" && entityAccessAllowed && entityAccess) {
-        const accessResponse = await fetch(`/api/entities/${savedId}/access`, {
+      if (
+        !isNew &&
+        (view.entityKey === "entities" || view.entityKey === "locations") &&
+        entityAccessAllowed &&
+        entityAccess
+      ) {
+        const accessEntityKey = view.entityKey === "locations" ? "locations" : "entities";
+        const accessResponse = await fetch(`/api/${accessEntityKey}/${savedId}/access`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -1683,6 +1814,12 @@ export default function FormView({
 
       if (view.entityKey === "entities") {
         window.dispatchEvent(new Event("ttrpg:entities-updated"));
+      }
+      if (view.entityKey === "locations") {
+        window.dispatchEvent(new Event("ttrpg:locations-updated"));
+      }
+      if (view.entityKey === "location_types") {
+        window.dispatchEvent(new Event("ttrpg:location-types-updated"));
       }
 
       if (
@@ -1724,6 +1861,17 @@ export default function FormView({
         );
         window.location.hash = `/form/entities/${savedId}`;
       }
+      if (isNew && view.entityKey === "locations" && savedId && savedId !== recordId) {
+        hasSnapshotRef.current = false;
+        snapshotKeyRef.current = "";
+        initialSnapshotRef.current = "";
+        suppressDirtyRef.current = true;
+        setIsDirty(false);
+        window.dispatchEvent(
+          new CustomEvent("ttrpg:form-dirty", { detail: { dirty: false } })
+        );
+        window.location.hash = `/form/locations/${savedId}`;
+      }
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed.");
@@ -1762,6 +1910,13 @@ export default function FormView({
       });
     };
 
+    const openLocationRecord = (id: string) => {
+      handleNavigateAway(() => {
+        setEntityPanelId(null);
+        window.location.hash = `/form/locations/${id}`;
+      });
+    };
+
   const handleDelete = async () => {
     if (!view || isNew) return;
     if (!window.confirm("Delete this record?")) return;
@@ -1782,6 +1937,9 @@ export default function FormView({
 
       if (view.entityKey === "entities") {
         window.dispatchEvent(new Event("ttrpg:entities-updated"));
+      }
+      if (view.entityKey === "location_types") {
+        window.dispatchEvent(new Event("ttrpg:location-types-updated"));
       }
 
       onBack();
@@ -1827,7 +1985,9 @@ export default function FormView({
   }
 
   const isEntityView = view.entityKey === "entities";
+  const isLocationView = view.entityKey === "locations";
   const isEntityTypeView = view.entityKey === "entity_types";
+  const isRecordView = isEntityView || isLocationView;
   const templateFieldKeys = new Set(["isTemplate", "sourceTypeId"]);
   const entityTypeFields =
     view.entityKey === "entity_types"
@@ -1887,9 +2047,10 @@ export default function FormView({
       ? infoFields.filter((field) => !customRowFieldKeys.has(field.fieldKey))
       : infoFields;
     const shouldLockEntityField = (field: ViewField) =>
-      isEntityView &&
       !isNew &&
-      (field.fieldKey === "worldId" || field.fieldKey === "entityTypeId");
+      ((isEntityView && (field.fieldKey === "worldId" || field.fieldKey === "entityTypeId")) ||
+        (isLocationView &&
+          (field.fieldKey === "worldId" || field.fieldKey === "locationTypeId")));
     const getEntityReferenceId = (value: unknown) => {
       if (Array.isArray(value)) {
         return value.length > 0 ? String(value[0]) : null;
@@ -2151,7 +2312,7 @@ export default function FormView({
     };
 
   const formTitle =
-    isEntityView && !isNew && formData.name ? String(formData.name) : view.title;
+    isRecordView && !isNew && formData.name ? String(formData.name) : view.title;
 
   return (
     <div className="form-view">
@@ -2177,7 +2338,7 @@ export default function FormView({
       {error ? <div className="form-view__error">{error}</div> : null}
 
         <form className="form-view__form" onSubmit={handleSubmit}>
-          {isEntityView ? (
+          {isRecordView ? (
             <div className="form-view__tabs" role="tablist">
               <button
                 type="button"
@@ -2254,7 +2415,7 @@ export default function FormView({
             </button>
           </div>
         ) : null}
-          {!isEntityView || entityTab === "info" ? (
+          {!isRecordView || entityTab === "info" ? (
             <>
               {entityTypeTab === "designer" && isEntityTypeView ? null : (
                 <>
@@ -2417,7 +2578,7 @@ export default function FormView({
                 )}
               </div>
             ) : null}
-            {isEntityView ? (
+            {isRecordView ? (
               <div className="form-view__section">
                 <h2>Fields</h2>
                 {visibleEntityFields.length > 0 ? (
@@ -2482,7 +2643,9 @@ export default function FormView({
                     visibleEntityFields.map((field) => renderEntityField(field))
                   )
                 ) : (
-                  <div className="form-view__hint">Select an entity type to see fields.</div>
+                  <div className="form-view__hint">
+                    {isLocationView ? "Select a location type to see fields." : "Select an entity type to see fields."}
+                  </div>
                 )}
               </div>
             ) : null}
@@ -2686,7 +2849,7 @@ export default function FormView({
             ) : null}
           </div>
         ) : null}
-        {isEntityView && entityTab === "access" ? (
+        {isRecordView && entityTab === "access" ? (
           <div className="form-view__section">
             <h2>Access</h2>
             {entityAccessWarning ? (
@@ -2704,23 +2867,25 @@ export default function FormView({
             )}
           </div>
         ) : null}
-        {isEntityView && entityTab === "notes" ? (
+        {isRecordView && entityTab === "notes" ? (
           <div className="form-view__section">
             <EntityNotes
               token={token}
-              entityId={recordId}
+              recordId={recordId}
+              recordType={isLocationView ? "location" : "entity"}
               worldId={(formData.worldId as string | undefined) ?? contextWorldId}
               contextCampaignId={contextCampaignId}
               contextCharacterId={contextCharacterId}
               currentUserId={currentUserId}
               currentUserRole={currentUserRole as "ADMIN" | "USER" | undefined}
               onOpenEntity={(entityId) => setEntityPanelId(entityId)}
+              onOpenLocation={openLocationRecord}
               onDirtyChange={setNoteDirty}
               discardVersion={noteDiscardVersion}
             />
           </div>
         ) : null}
-        {isEntityView && entityTab === "audit" ? (
+        {isRecordView && entityTab === "audit" ? (
           <div className="form-view__section">
             <h2>Audit</h2>
             {entityAuditLoading ? (

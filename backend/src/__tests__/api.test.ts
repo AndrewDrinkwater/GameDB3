@@ -24,9 +24,15 @@ type TestContext = {
   entityIdOne: string;
   entityIdTwo: string;
   noteEntityId: string;
+  mentionTargetEntityId: string;
+  mentionSourceGlobalEntityId: string;
+  mentionSourceCharacterEntityId: string;
+  mentionRestrictedTargetEntityId: string;
   personaEntityTypeId: string;
   personaEntityFieldId: string;
   personaChoiceId: string;
+  locationTypeId: string;
+  locationId: string;
 };
 
 const prisma = new PrismaClient();
@@ -180,6 +186,26 @@ beforeAll(async () => {
     }
   });
   context.entityFieldId = entityField.id;
+
+  const locationType = await prisma.locationType.create({
+    data: {
+      worldId: world.id,
+      name: "Test Location Type",
+      description: "Test location type"
+    }
+  });
+  context.locationTypeId = locationType.id;
+
+  const location = await prisma.location.create({
+    data: {
+      worldId: world.id,
+      locationTypeId: locationType.id,
+      name: "Test Location",
+      description: "Test location",
+      createdById: admin.id
+    }
+  });
+  context.locationId = location.id;
 });
 
 afterAll(async () => {
@@ -206,34 +232,41 @@ afterAll(async () => {
     });
     await prisma.character.delete({ where: { id: context.viewerCharacterId } }).catch(() => undefined);
   }
-  if (context.noteEntityId) {
+  const entityCleanupIds = [
+    context.entityIdOne,
+    context.entityIdTwo,
+    context.noteEntityId,
+    context.mentionTargetEntityId,
+    context.mentionSourceGlobalEntityId,
+    context.mentionSourceCharacterEntityId,
+    context.mentionRestrictedTargetEntityId
+  ].filter(Boolean) as string[];
+
+  if (entityCleanupIds.length > 0) {
     await prisma.noteTag.deleteMany({
-      where: { note: { entityId: context.noteEntityId } }
+      where: { note: { entityId: { in: entityCleanupIds } } }
     });
-    await prisma.note.deleteMany({ where: { entityId: context.noteEntityId } });
+    await prisma.note.deleteMany({ where: { entityId: { in: entityCleanupIds } } });
   }
-  if (context.entityIdOne || context.entityIdTwo || context.noteEntityId) {
+  if (entityCleanupIds.length > 0) {
     await prisma.entityAccess.deleteMany({
       where: {
         entityId: {
-          in: [context.entityIdOne, context.entityIdTwo, context.noteEntityId]
-            .filter(Boolean) as string[]
+          in: entityCleanupIds
         }
       }
     });
     await prisma.entityFieldValue.deleteMany({
       where: {
         entityId: {
-          in: [context.entityIdOne, context.entityIdTwo, context.noteEntityId]
-            .filter(Boolean) as string[]
+          in: entityCleanupIds
         }
       }
     });
     await prisma.entity.deleteMany({
       where: {
         id: {
-          in: [context.entityIdOne, context.entityIdTwo, context.noteEntityId]
-            .filter(Boolean) as string[]
+          in: entityCleanupIds
         }
       }
     });
@@ -246,6 +279,28 @@ afterAll(async () => {
   }
   if (context.personaEntityTypeId) {
     await prisma.entityType.delete({ where: { id: context.personaEntityTypeId } }).catch(() => undefined);
+  }
+
+  if (context.locationId) {
+    await prisma.locationAccess.deleteMany({ where: { locationId: context.locationId } });
+    await prisma.locationFieldValue.deleteMany({ where: { locationId: context.locationId } });
+    await prisma.location.delete({ where: { id: context.locationId } }).catch(() => undefined);
+  }
+
+  if (context.locationTypeId) {
+    await prisma.locationTypeRule.deleteMany({
+      where: {
+        OR: [
+          { parentTypeId: context.locationTypeId },
+          { childTypeId: context.locationTypeId }
+        ]
+      }
+    });
+    await prisma.locationTypeFieldChoice.deleteMany({
+      where: { field: { locationTypeId: context.locationTypeId } }
+    });
+    await prisma.locationTypeField.deleteMany({ where: { locationTypeId: context.locationTypeId } });
+    await prisma.locationType.delete({ where: { id: context.locationTypeId } }).catch(() => undefined);
   }
 
   if (context.worldId && context.adminId) {
@@ -603,6 +658,7 @@ describe("Entity list filters", () => {
       data: {
         worldId: context.worldId as string,
         entityTypeId: context.entityTypeId as string,
+        currentLocationId: context.locationId as string,
         name: "Goblin Scout",
         description: "Test entry one",
         createdById: context.adminId as string
@@ -612,6 +668,7 @@ describe("Entity list filters", () => {
       data: {
         worldId: context.worldId as string,
         entityTypeId: context.entityTypeId as string,
+        currentLocationId: context.locationId as string,
         name: "Forest Sprite",
         description: "Goblin ally",
         createdById: context.adminId as string
@@ -815,6 +872,7 @@ describe("Notes access", () => {
       .send({
         worldId: context.worldId,
         entityTypeId: context.entityTypeId,
+        currentLocationId: context.locationId,
         name: `Notes Entity ${Date.now()}`,
         access: {
           read: { global: true },
@@ -924,5 +982,434 @@ describe("Notes access", () => {
     expect(ids).toContain(sharedNoteId);
     expect(ids).toContain(playerPrivateNoteId);
     expect(ids).not.toContain(gmPrivateNoteId);
+  });
+});
+
+describe("Mentions access", () => {
+  let mentionNoteGlobalId: string;
+  let mentionNoteCharacterId: string;
+
+  beforeAll(async () => {
+    if (!context.viewerCharacterId) {
+      const viewerCharacter = await prisma.character.create({
+        data: {
+          name: `Viewer Character ${Date.now()}`,
+          worldId: context.worldId as string,
+          playerId: context.viewerId as string
+        }
+      });
+      context.viewerCharacterId = viewerCharacter.id;
+
+      await prisma.characterCampaign.upsert({
+        where: {
+          characterId_campaignId: {
+            characterId: viewerCharacter.id,
+            campaignId: context.campaignId as string
+          }
+        },
+        update: {},
+        create: {
+          characterId: viewerCharacter.id,
+          campaignId: context.campaignId as string,
+          status: "ACTIVE"
+        }
+      });
+    }
+
+    const targetResponse = await request(app)
+      .post("/api/entities")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        worldId: context.worldId,
+        entityTypeId: context.entityTypeId,
+        currentLocationId: context.locationId,
+        name: `Mention Target ${Date.now()}`,
+        access: {
+          read: { global: true },
+          write: { global: true }
+        }
+      });
+    expect(targetResponse.status).toBe(201);
+    context.mentionTargetEntityId = targetResponse.body.id;
+
+    const sourceGlobalResponse = await request(app)
+      .post("/api/entities")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        worldId: context.worldId,
+        entityTypeId: context.entityTypeId,
+        currentLocationId: context.locationId,
+        name: `Mention Source Global ${Date.now()}`,
+        access: {
+          read: { global: true },
+          write: { global: true }
+        }
+      });
+    expect(sourceGlobalResponse.status).toBe(201);
+    context.mentionSourceGlobalEntityId = sourceGlobalResponse.body.id;
+
+    const sourceCharacterResponse = await request(app)
+      .post("/api/entities")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        worldId: context.worldId,
+        entityTypeId: context.entityTypeId,
+        currentLocationId: context.locationId,
+        name: `Mention Source Character ${Date.now()}`,
+        access: {
+          read: { characters: [context.viewerCharacterId] },
+          write: { global: true }
+        }
+      });
+    expect(sourceCharacterResponse.status).toBe(201);
+    context.mentionSourceCharacterEntityId = sourceCharacterResponse.body.id;
+
+    const restrictedTargetResponse = await request(app)
+      .post("/api/entities")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        worldId: context.worldId,
+        entityTypeId: context.entityTypeId,
+        currentLocationId: context.locationId,
+        name: `Mention Target Restricted ${Date.now()}`,
+        access: {
+          read: { characters: [context.viewerCharacterId] },
+          write: { global: true }
+        }
+      });
+    expect(restrictedTargetResponse.status).toBe(201);
+    context.mentionRestrictedTargetEntityId = restrictedTargetResponse.body.id;
+
+    const globalMentionResponse = await request(app)
+      .post(`/api/entities/${context.mentionSourceGlobalEntityId}/notes`)
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        body: `Global mention @[Target](entity:${context.mentionTargetEntityId})`,
+        visibility: "SHARED",
+        campaignId: context.campaignId
+      });
+    expect(globalMentionResponse.status).toBe(201);
+    mentionNoteGlobalId = globalMentionResponse.body.id;
+
+    const characterMentionResponse = await request(app)
+      .post(`/api/entities/${context.mentionSourceCharacterEntityId}/notes`)
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        body: `Character mention @[Target](entity:${context.mentionTargetEntityId})`,
+        visibility: "SHARED",
+        campaignId: context.campaignId
+      });
+    expect(characterMentionResponse.status).toBe(201);
+    mentionNoteCharacterId = characterMentionResponse.body.id;
+  });
+
+  it("returns mentions from accessible entities", async () => {
+    const response = await request(app)
+      .get(
+        `/api/entities/${context.mentionTargetEntityId}/mentions?campaignId=${context.campaignId}&characterId=${context.viewerCharacterId}`
+      )
+      .set("Authorization", `Bearer ${context.viewerToken}`);
+
+    expect(response.status).toBe(200);
+    const ids = response.body.map((item: { id: string }) => item.id);
+    expect(ids).toEqual(expect.arrayContaining([mentionNoteGlobalId, mentionNoteCharacterId]));
+  });
+
+  it("hides mentions from character-scoped entities without character context", async () => {
+    const response = await request(app)
+      .get(`/api/entities/${context.mentionTargetEntityId}/mentions?campaignId=${context.campaignId}`)
+      .set("Authorization", `Bearer ${context.outsiderToken}`);
+
+    expect(response.status).toBe(200);
+    const ids = response.body.map((item: { id: string }) => item.id);
+    expect(ids).toContain(mentionNoteGlobalId);
+    expect(ids).not.toContain(mentionNoteCharacterId);
+  });
+
+  it("blocks mentions when the target entity is not readable", async () => {
+    const response = await request(app)
+      .get(
+        `/api/entities/${context.mentionRestrictedTargetEntityId}/mentions?campaignId=${context.campaignId}`
+      )
+      .set("Authorization", `Bearer ${context.outsiderToken}`);
+
+    expect(response.status).toBe(403);
+  });
+});
+
+describe("Location types, fields, and rules", () => {
+  const createdLocationIds: string[] = [];
+  const createdLocationTypeIds: string[] = [];
+  const createdRuleIds: string[] = [];
+  const createdFieldIds: string[] = [];
+
+  const trackLocationType = (id: string) => {
+    createdLocationTypeIds.push(id);
+    return id;
+  };
+  const trackLocation = (id: string) => {
+    createdLocationIds.push(id);
+    return id;
+  };
+  const trackRule = (id: string) => {
+    createdRuleIds.push(id);
+    return id;
+  };
+  const trackField = (id: string) => {
+    createdFieldIds.push(id);
+    return id;
+  };
+
+  afterAll(async () => {
+    if (createdLocationIds.length > 0) {
+      await prisma.locationAccess.deleteMany({
+        where: { locationId: { in: createdLocationIds } }
+      });
+      await prisma.locationFieldValue.deleteMany({
+        where: { locationId: { in: createdLocationIds } }
+      });
+      await prisma.location.deleteMany({
+        where: { id: { in: createdLocationIds } }
+      });
+    }
+
+    if (createdRuleIds.length > 0) {
+      await prisma.locationTypeRule.deleteMany({
+        where: { id: { in: createdRuleIds } }
+      });
+    }
+
+    if (createdFieldIds.length > 0) {
+      await prisma.locationTypeFieldChoice.deleteMany({
+        where: { locationTypeFieldId: { in: createdFieldIds } }
+      });
+      await prisma.locationTypeField.deleteMany({
+        where: { id: { in: createdFieldIds } }
+      });
+    }
+
+    if (createdLocationTypeIds.length > 0) {
+      await prisma.locationType.deleteMany({
+        where: { id: { in: createdLocationTypeIds } }
+      });
+    }
+  });
+
+  it("allows architects to create location types and fields", async () => {
+    const typeResponse = await request(app)
+      .post("/api/location-types")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({
+        worldId: context.worldId,
+        name: `Fielded Type ${Date.now()}`
+      });
+
+    expect(typeResponse.status).toBe(201);
+    const locationTypeId = trackLocationType(typeResponse.body.id);
+
+    const fieldResponse = await request(app)
+      .post("/api/location-type-fields")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({
+        locationTypeId,
+        fieldKey: `field_${Date.now()}`,
+        fieldLabel: "Detail",
+        fieldType: "TEXT",
+        listOrder: 1,
+        formOrder: 1
+      });
+
+    expect(fieldResponse.status).toBe(201);
+    trackField(fieldResponse.body.id);
+  });
+
+  it("blocks viewers from creating location types", async () => {
+    const response = await request(app)
+      .post("/api/location-types")
+      .set("Authorization", `Bearer ${context.viewerToken}`)
+      .send({
+        worldId: context.worldId,
+        name: `Viewer Location Type ${Date.now()}`
+      });
+
+    expect(response.status).toBe(403);
+  });
+
+  it("enforces location type rules for parent selection and deny overrides", async () => {
+    const worldId = context.worldId as string;
+    const parentTypeResponse = await request(app)
+      .post("/api/location-types")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({ worldId, name: `Region ${Date.now()}` });
+    expect(parentTypeResponse.status).toBe(201);
+    const parentTypeId = trackLocationType(parentTypeResponse.body.id);
+
+    const midTypeResponse = await request(app)
+      .post("/api/location-types")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({ worldId, name: `City ${Date.now()}` });
+    expect(midTypeResponse.status).toBe(201);
+    const midTypeId = trackLocationType(midTypeResponse.body.id);
+
+    const childTypeResponse = await request(app)
+      .post("/api/location-types")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({ worldId, name: `District ${Date.now()}` });
+    expect(childTypeResponse.status).toBe(201);
+    const childTypeId = trackLocationType(childTypeResponse.body.id);
+
+    const ruleOne = await request(app)
+      .post("/api/location-type-rules")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({ parentTypeId, childTypeId: midTypeId, allowed: true });
+    expect(ruleOne.status).toBe(201);
+    trackRule(ruleOne.body.id);
+
+    const ruleTwo = await request(app)
+      .post("/api/location-type-rules")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({ parentTypeId: midTypeId, childTypeId, allowed: true });
+    expect(ruleTwo.status).toBe(201);
+    trackRule(ruleTwo.body.id);
+
+    const parentLocationResponse = await request(app)
+      .post("/api/locations")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        worldId,
+        locationTypeId: parentTypeId,
+        name: `Region Location ${Date.now()}`
+      });
+    expect(parentLocationResponse.status).toBe(201);
+    const parentLocationId = trackLocation(parentLocationResponse.body.id);
+
+    const childAllowedResponse = await request(app)
+      .post("/api/locations")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        worldId,
+        locationTypeId: childTypeId,
+        parentLocationId,
+        name: `District Allowed ${Date.now()}`
+      });
+    expect(childAllowedResponse.status).toBe(201);
+    trackLocation(childAllowedResponse.body.id);
+
+    const denyRule = await request(app)
+      .post("/api/location-type-rules")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({ parentTypeId, childTypeId, allowed: false });
+    expect(denyRule.status).toBe(201);
+    trackRule(denyRule.body.id);
+
+    const deniedResponse = await request(app)
+      .post("/api/locations")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        worldId,
+        locationTypeId: childTypeId,
+        parentLocationId,
+        name: `District Denied ${Date.now()}`
+      });
+    expect(deniedResponse.status).toBe(400);
+  });
+
+  it("prevents location cycles when reparenting", async () => {
+    const worldId = context.worldId as string;
+    const typeResponse = await request(app)
+      .post("/api/location-types")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({ worldId, name: `Node ${Date.now()}` });
+    expect(typeResponse.status).toBe(201);
+    const nodeTypeId = trackLocationType(typeResponse.body.id);
+
+    const ruleResponse = await request(app)
+      .post("/api/location-type-rules")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({ parentTypeId: nodeTypeId, childTypeId: nodeTypeId, allowed: true });
+    expect(ruleResponse.status).toBe(201);
+    trackRule(ruleResponse.body.id);
+
+    const rootResponse = await request(app)
+      .post("/api/locations")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        worldId,
+        locationTypeId: nodeTypeId,
+        name: `Root ${Date.now()}`
+      });
+    expect(rootResponse.status).toBe(201);
+    const rootId = trackLocation(rootResponse.body.id);
+
+    const childResponse = await request(app)
+      .post("/api/locations")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        worldId,
+        locationTypeId: nodeTypeId,
+        parentLocationId: rootId,
+        name: `Child ${Date.now()}`
+      });
+    expect(childResponse.status).toBe(201);
+    const childId = trackLocation(childResponse.body.id);
+
+    const cycleResponse = await request(app)
+      .put(`/api/locations/${rootId}`)
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({ parentLocationId: childId });
+
+    expect(cycleResponse.status).toBe(400);
+  });
+
+  it("returns location field values in list view when requested", async () => {
+    const worldId = context.worldId as string;
+    const typeResponse = await request(app)
+      .post("/api/location-types")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({ worldId, name: `Fielded ${Date.now()}` });
+    expect(typeResponse.status).toBe(201);
+    const fieldedTypeId = trackLocationType(typeResponse.body.id);
+
+    const fieldKey = `alias_${Date.now()}`;
+    const fieldResponse = await request(app)
+      .post("/api/location-type-fields")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({
+        locationTypeId: fieldedTypeId,
+        fieldKey,
+        fieldLabel: "Alias",
+        fieldType: "TEXT",
+        listOrder: 1,
+        formOrder: 1
+      });
+    expect(fieldResponse.status).toBe(201);
+    trackField(fieldResponse.body.id);
+
+    const locationResponse = await request(app)
+      .post("/api/locations")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        worldId,
+        locationTypeId: fieldedTypeId,
+        name: `Fielded Location ${Date.now()}`,
+        fieldValues: {
+          [fieldKey]: "Hidden Hollow"
+        }
+      });
+    expect(locationResponse.status).toBe(201);
+    const locationId = trackLocation(locationResponse.body.id);
+
+    const listResponse = await request(app)
+      .get(
+        `/api/locations?worldId=${worldId}&locationTypeId=${fieldedTypeId}&fieldKeys=${fieldKey}`
+      )
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(listResponse.status).toBe(200);
+    const entry = listResponse.body.find(
+      (item: { id: string; fieldValues?: Record<string, string | null> }) => item.id === locationId
+    );
+    expect(entry).toBeTruthy();
+    expect(entry?.fieldValues?.[fieldKey]).toBe("Hidden Hollow");
   });
 });

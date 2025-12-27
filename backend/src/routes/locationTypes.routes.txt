@@ -1,0 +1,843 @@
+  app.get("/api/location-types", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+
+    if (!isAdmin(user) && worldId && !(await canAccessWorld(user.id, worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    if (!isAdmin(user) && !worldId) {
+      res.json([]);
+      return;
+    }
+
+    const locationTypes = await prisma.locationType.findMany({
+      where: worldId ? { worldId } : {},
+      orderBy: { name: "asc" }
+    });
+
+    res.json(locationTypes);
+  });
+
+  app.post("/api/location-types", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { worldId, name, description, icon, colour, menu, metadata } = req.body as {
+      worldId?: string;
+      name?: string;
+      description?: string;
+      icon?: string | null;
+      colour?: string | null;
+      menu?: boolean;
+      metadata?: Prisma.InputJsonValue;
+    };
+
+    if (!worldId || !name) {
+      res.status(400).json({ error: "worldId and name are required." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await isWorldArchitect(user.id, worldId))) {
+      res.status(403).json({ error: "Only world architects can create location types." });
+      return;
+    }
+
+    const locationType = await prisma.locationType.create({
+      data: {
+        worldId,
+        name,
+        description,
+        icon,
+        colour,
+        menu: menu ?? false,
+        metadata: metadata ?? undefined
+      }
+    });
+
+    res.status(201).json(locationType);
+  });
+
+  app.get("/api/location-types/:id", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const locationType = await prisma.locationType.findUnique({
+      where: { id }
+    });
+    if (!locationType) {
+      res.status(404).json({ error: "Location type not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await canAccessWorld(user.id, locationType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    res.json(locationType);
+  });
+
+  app.put("/api/location-types/:id", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const locationType = await prisma.locationType.findUnique({
+      where: { id },
+      select: { worldId: true }
+    });
+    if (!locationType) {
+      res.status(404).json({ error: "Location type not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await isWorldArchitect(user.id, locationType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const { name, description, icon, colour, menu, metadata } = req.body as {
+      name?: string;
+      description?: string;
+      icon?: string | null;
+      colour?: string | null;
+      menu?: boolean;
+      metadata?: Prisma.InputJsonValue;
+    };
+
+    const updated = await prisma.locationType.update({
+      where: { id },
+      data: {
+        name,
+        description,
+        icon,
+        colour,
+        menu,
+        metadata: metadata ?? undefined
+      }
+    });
+
+    res.json(updated);
+  });
+
+  app.delete("/api/location-types/:id", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const locationType = await prisma.locationType.findUnique({
+      where: { id },
+      select: { worldId: true }
+    });
+    if (!locationType) {
+      res.status(404).json({ error: "Location type not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await isWorldArchitect(user.id, locationType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const locationCount = await prisma.location.count({ where: { locationTypeId: id } });
+    if (locationCount > 0) {
+      res.status(400).json({ error: "Location type is in use." });
+      return;
+    }
+
+    await prisma.locationType.delete({ where: { id } });
+    res.json({ ok: true });
+  });
+
+  app.get("/api/location-type-stats", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+    const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+    const characterId =
+      typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+
+    if (!worldId) {
+      res.json([]);
+      return;
+    }
+
+    if (!isAdmin(user) && !(await canAccessWorld(user.id, worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const types = await prisma.locationType.findMany({
+      where: { worldId, menu: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true }
+    });
+
+    if (types.length === 0) {
+      res.json([]);
+      return;
+    }
+
+    const accessFilter = isAdmin(user)
+      ? { worldId }
+      : await buildLocationAccessFilter(user, worldId, campaignId, characterId);
+
+    const grouped = await prisma.location.groupBy({
+      by: ["locationTypeId"],
+      where: accessFilter,
+      _count: { _all: true }
+    });
+
+    const countMap = new Map(grouped.map((entry) => [entry.locationTypeId, entry._count._all]));
+
+    res.json(
+      types.map((type) => ({
+        id: type.id,
+        name: type.name,
+        count: countMap.get(type.id) ?? 0
+      }))
+    );
+  });
+
+  app.get("/api/location-type-fields", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const locationTypeId =
+      typeof req.query.locationTypeId === "string" ? req.query.locationTypeId : undefined;
+    const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+    if (!locationTypeId) {
+      if (worldId && !isAdmin(user) && !(await isWorldArchitect(user.id, worldId))) {
+        res.status(403).json({ error: "Forbidden." });
+        return;
+      }
+
+      const fields = await prisma.locationTypeField.findMany({
+        where: {
+          ...(worldId ? { locationType: { worldId } } : {}),
+          ...(isAdmin(user) || worldId
+            ? {}
+            : {
+                locationType: {
+                  world: {
+                    OR: [
+                      { primaryArchitectId: user.id },
+                      { architects: { some: { userId: user.id } } }
+                    ]
+                  }
+                }
+              })
+        },
+        include: { choices: true },
+        orderBy: { formOrder: "asc" }
+      });
+      res.json(fields);
+      return;
+    }
+
+    const locationType = await prisma.locationType.findUnique({
+      where: { id: locationTypeId },
+      select: { worldId: true }
+    });
+    if (!locationType) {
+      res.status(404).json({ error: "Location type not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await canAccessWorld(user.id, locationType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const fields = await prisma.locationTypeField.findMany({
+      where: { locationTypeId },
+      include: { choices: true },
+      orderBy: { formOrder: "asc" }
+    });
+
+    res.json(fields);
+  });
+
+  app.get("/api/location-type-fields/:id", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const field = await prisma.locationTypeField.findUnique({
+      where: { id },
+      include: { locationType: { select: { worldId: true } } }
+    });
+    if (!field) {
+      res.status(404).json({ error: "Location field not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await canAccessWorld(user.id, field.locationType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const { locationType, ...fieldData } = field;
+    res.json(fieldData);
+  });
+
+  app.post("/api/location-type-fields", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const {
+      locationTypeId,
+      fieldKey,
+      fieldLabel,
+      fieldType,
+      required,
+      defaultValue,
+      validationRules,
+      listOrder,
+      formOrder
+    } = req.body as {
+      locationTypeId?: string;
+      fieldKey?: string;
+      fieldLabel?: string;
+      fieldType?: LocationFieldType;
+      required?: boolean;
+      defaultValue?: Prisma.InputJsonValue;
+      validationRules?: Prisma.InputJsonValue;
+      listOrder?: number;
+      formOrder?: number;
+    };
+
+    if (!locationTypeId || !fieldKey || !fieldLabel || !fieldType) {
+      res.status(400).json({ error: "locationTypeId, fieldKey, fieldLabel, and fieldType are required." });
+      return;
+    }
+
+    const locationType = await prisma.locationType.findUnique({
+      where: { id: locationTypeId },
+      select: { worldId: true }
+    });
+    if (!locationType) {
+      res.status(404).json({ error: "Location type not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await isWorldArchitect(user.id, locationType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    try {
+      const field = await prisma.locationTypeField.create({
+        data: {
+          locationTypeId,
+          fieldKey,
+          fieldLabel,
+          fieldType,
+          required: Boolean(required),
+          defaultValue: defaultValue ?? undefined,
+          validationRules: validationRules ?? undefined,
+          listOrder: listOrder ?? 0,
+          formOrder: formOrder ?? 0
+        }
+      });
+      res.status(201).json(field);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        res.status(409).json({ error: "Field key already exists for this location type." });
+        return;
+      }
+      throw error;
+    }
+  });
+
+  app.put("/api/location-type-fields/:id", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const existing = await prisma.locationTypeField.findUnique({
+      where: { id },
+      select: { locationType: { select: { worldId: true } } }
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Location field not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await isWorldArchitect(user.id, existing.locationType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const {
+      fieldKey,
+      fieldLabel,
+      fieldType,
+      required,
+      defaultValue,
+      validationRules,
+      listOrder,
+      formOrder
+    } = req.body as {
+      fieldKey?: string;
+      fieldLabel?: string;
+      fieldType?: LocationFieldType;
+      required?: boolean;
+      defaultValue?: Prisma.InputJsonValue;
+      validationRules?: Prisma.InputJsonValue;
+      listOrder?: number;
+      formOrder?: number;
+    };
+
+    const field = await prisma.locationTypeField.update({
+      where: { id },
+      data: {
+        fieldKey,
+        fieldLabel,
+        fieldType,
+        required,
+        defaultValue: defaultValue ?? undefined,
+        validationRules: validationRules ?? undefined,
+        listOrder,
+        formOrder
+      }
+    });
+
+    res.json(field);
+  });
+
+  app.delete("/api/location-type-fields/:id", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const existing = await prisma.locationTypeField.findUnique({
+      where: { id },
+      select: { locationType: { select: { worldId: true } } }
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Location field not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await isWorldArchitect(user.id, existing.locationType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    await prisma.locationTypeField.delete({ where: { id } });
+    res.json({ ok: true });
+  });
+
+  app.get("/api/location-type-field-choices", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const locationTypeFieldId =
+      typeof req.query.locationTypeFieldId === "string" ? req.query.locationTypeFieldId : undefined;
+    const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+    if (!locationTypeFieldId) {
+      if (worldId && !isAdmin(user) && !(await isWorldArchitect(user.id, worldId))) {
+        res.status(403).json({ error: "Forbidden." });
+        return;
+      }
+
+      const choices = await prisma.locationTypeFieldChoice.findMany({
+        where: {
+          ...(worldId ? { field: { locationType: { worldId } } } : {}),
+          ...(isAdmin(user) || worldId
+            ? {}
+            : {
+                field: {
+                  locationType: {
+                    world: {
+                      OR: [
+                        { primaryArchitectId: user.id },
+                        { architects: { some: { userId: user.id } } }
+                      ]
+                    }
+                  }
+                }
+              })
+        },
+        orderBy: { sortOrder: "asc" }
+      });
+      res.json(choices);
+      return;
+    }
+
+    const field = await prisma.locationTypeField.findUnique({
+      where: { id: locationTypeFieldId },
+      select: { locationType: { select: { worldId: true } } }
+    });
+    if (!field) {
+      res.status(404).json({ error: "Field not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await canAccessWorld(user.id, field.locationType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const choices = await prisma.locationTypeFieldChoice.findMany({
+      where: { locationTypeFieldId },
+      orderBy: { sortOrder: "asc" }
+    });
+    res.json(choices);
+  });
+
+  app.get("/api/location-type-field-choices/:id", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const choice = await prisma.locationTypeFieldChoice.findUnique({
+      where: { id },
+      include: { field: { select: { locationType: { select: { worldId: true } } } } }
+    });
+    if (!choice) {
+      res.status(404).json({ error: "Choice not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await canAccessWorld(user.id, choice.field.locationType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const { field, ...choiceData } = choice;
+    res.json(choiceData);
+  });
+
+  app.post("/api/location-type-field-choices", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { locationTypeFieldId, value, label, sortOrder, pillColor, textColor } = req.body as {
+      locationTypeFieldId?: string;
+      value?: string;
+      label?: string;
+      sortOrder?: number;
+      pillColor?: string | null;
+      textColor?: string | null;
+    };
+
+    if (!locationTypeFieldId || !value || !label) {
+      res.status(400).json({ error: "locationTypeFieldId, value, and label are required." });
+      return;
+    }
+
+    const field = await prisma.locationTypeField.findUnique({
+      where: { id: locationTypeFieldId },
+      select: { locationType: { select: { worldId: true } } }
+    });
+    if (!field) {
+      res.status(404).json({ error: "Field not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await isWorldArchitect(user.id, field.locationType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    try {
+      const choice = await prisma.locationTypeFieldChoice.create({
+        data: {
+          locationTypeFieldId,
+          value,
+          label,
+          sortOrder,
+          pillColor,
+          textColor
+        }
+      });
+
+      res.status(201).json(choice);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        res.status(409).json({ error: "Choice value already exists for this field." });
+        return;
+      }
+      throw error;
+    }
+  });
+
+  app.put("/api/location-type-field-choices/:id", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const existing = await prisma.locationTypeFieldChoice.findUnique({
+      where: { id },
+      select: { field: { select: { locationType: { select: { worldId: true } } } } }
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Choice not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await isWorldArchitect(user.id, existing.field.locationType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const { value, label, sortOrder, pillColor, textColor } = req.body as {
+      value?: string;
+      label?: string;
+      sortOrder?: number;
+      pillColor?: string | null;
+      textColor?: string | null;
+    };
+
+    const choice = await prisma.locationTypeFieldChoice.update({
+      where: { id },
+      data: { value, label, sortOrder, pillColor, textColor }
+    });
+
+    res.json(choice);
+  });
+
+  app.delete("/api/location-type-field-choices/:id", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const existing = await prisma.locationTypeFieldChoice.findUnique({
+      where: { id },
+      select: { field: { select: { locationType: { select: { worldId: true } } } } }
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Choice not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await isWorldArchitect(user.id, existing.field.locationType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    await prisma.locationTypeFieldChoice.delete({ where: { id } });
+    res.json({ ok: true });
+  });
+
+  app.get("/api/location-type-rules", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+    if (!isAdmin(user) && worldId && !(await isWorldArchitect(user.id, worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    if (!isAdmin(user) && !worldId) {
+      res.json([]);
+      return;
+    }
+
+    const rules = await prisma.locationTypeRule.findMany({
+      where: worldId ? { parentType: { worldId } } : {},
+      orderBy: { createdAt: "desc" }
+    });
+    res.json(rules);
+  });
+
+  app.get("/api/location-type-rules/:id", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const rule = await prisma.locationTypeRule.findUnique({
+      where: { id },
+      include: { parentType: { select: { worldId: true } } }
+    });
+    if (!rule) {
+      res.status(404).json({ error: "Location type rule not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await isWorldArchitect(user.id, rule.parentType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const { parentType, ...ruleData } = rule;
+    res.json(ruleData);
+  });
+
+  app.post("/api/location-type-rules", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { parentTypeId, childTypeId, allowed } = req.body as {
+      parentTypeId?: string;
+      childTypeId?: string;
+      allowed?: boolean;
+    };
+
+    if (!parentTypeId || !childTypeId) {
+      res.status(400).json({ error: "parentTypeId and childTypeId are required." });
+      return;
+    }
+
+    const parentType = await prisma.locationType.findUnique({
+      where: { id: parentTypeId },
+      select: { worldId: true }
+    });
+    const childType = await prisma.locationType.findUnique({
+      where: { id: childTypeId },
+      select: { worldId: true }
+    });
+    if (!parentType || !childType) {
+      res.status(404).json({ error: "Location type not found." });
+      return;
+    }
+    if (parentType.worldId !== childType.worldId) {
+      res.status(400).json({ error: "Location types must belong to the same world." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await isWorldArchitect(user.id, parentType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    try {
+      const rule = await prisma.locationTypeRule.create({
+        data: {
+          parentTypeId,
+          childTypeId,
+          allowed: allowed ?? true
+        }
+      });
+      res.status(201).json(rule);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        res.status(409).json({ error: "Rule already exists for this type pair." });
+        return;
+      }
+      throw error;
+    }
+  });
+
+  app.put("/api/location-type-rules/:id", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const existing = await prisma.locationTypeRule.findUnique({
+      where: { id },
+      select: { parentType: { select: { worldId: true } } }
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Location type rule not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await isWorldArchitect(user.id, existing.parentType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const { allowed } = req.body as { allowed?: boolean };
+    const rule = await prisma.locationTypeRule.update({
+      where: { id },
+      data: { allowed: allowed ?? undefined }
+    });
+
+    res.json(rule);
+  });
+
+  app.delete("/api/location-type-rules/:id", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const existing = await prisma.locationTypeRule.findUnique({
+      where: { id },
+      select: { parentType: { select: { worldId: true } } }
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Location type rule not found." });
+      return;
+    }
+
+    if (!isAdmin(user) && !(await isWorldArchitect(user.id, existing.parentType.worldId))) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    await prisma.locationTypeRule.delete({ where: { id } });
+    res.json({ ok: true });
+  });

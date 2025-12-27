@@ -151,7 +151,9 @@ export default function ListView({
   const filtersKey = JSON.stringify({ logic: filterLogic, rules: filters });
   const listColumnsKey = JSON.stringify(listColumns);
   const entityTypeId = extraParams?.entityTypeId;
+  const locationTypeId = extraParams?.locationTypeId;
   const isEntityTypeList = view?.entityKey === "entities" && Boolean(entityTypeId);
+  const isLocationTypeList = view?.entityKey === "locations" && Boolean(locationTypeId);
   const { permissions } = usePermissions({
     token,
     entityKey: view?.entityKey,
@@ -159,6 +161,7 @@ export default function ListView({
     campaignId: contextCampaignId,
     characterId: contextCharacterId,
     entityTypeId,
+    locationTypeId,
     enabled: Boolean(view?.entityKey)
   });
   const canCreate = permissions.canCreate;
@@ -277,6 +280,18 @@ export default function ListView({
         if (view.entityKey === "entity_field_choices" && contextWorldId) {
           params.set("worldId", contextWorldId);
         }
+        if (view.entityKey === "location_types" && contextWorldId) {
+          params.set("worldId", contextWorldId);
+        }
+        if (view.entityKey === "location_type_fields" && contextWorldId) {
+          params.set("worldId", contextWorldId);
+        }
+        if (view.entityKey === "location_type_field_choices" && contextWorldId) {
+          params.set("worldId", contextWorldId);
+        }
+        if (view.entityKey === "location_type_rules" && contextWorldId) {
+          params.set("worldId", contextWorldId);
+        }
         if (view.entityKey === "campaigns") {
           if (contextWorldId) params.set("worldId", contextWorldId);
           if (contextCampaignId) params.set("campaignId", contextCampaignId);
@@ -299,6 +314,27 @@ export default function ListView({
               .map((filter) => filter.fieldKey)
               .filter((key) => entityFieldKeys.includes(key));
             const columnFieldKeys = listColumns.filter((key) => entityFieldKeys.includes(key));
+            const fieldKeys = Array.from(new Set([...filterFieldKeys, ...columnFieldKeys]));
+            if (fieldKeys.length > 0) {
+              params.set("fieldKeys", fieldKeys.join(","));
+            }
+            if (filters.length > 0) {
+              params.set("filters", JSON.stringify({ logic: filterLogic, rules: filters }));
+            }
+          }
+        }
+        if (view.entityKey === "locations") {
+          if (contextWorldId) params.set("worldId", contextWorldId);
+          if (contextCampaignId) params.set("campaignId", contextCampaignId);
+          if (contextCharacterId) params.set("characterId", contextCharacterId);
+          if (locationTypeId) {
+            const customFieldKeys = availableFields
+              .filter((field) => field.source === "entity")
+              .map((field) => field.fieldKey);
+            const filterFieldKeys = filters
+              .map((filter) => filter.fieldKey)
+              .filter((key) => customFieldKeys.includes(key));
+            const columnFieldKeys = listColumns.filter((key) => customFieldKeys.includes(key));
             const fieldKeys = Array.from(new Set([...filterFieldKeys, ...columnFieldKeys]));
             if (fieldKeys.length > 0) {
               params.set("fieldKeys", fieldKeys.join(","));
@@ -412,7 +448,11 @@ export default function ListView({
                 textColor: choice.textColor ?? null
               })),
               referenceEntityKey:
-                field.fieldType === "ENTITY_REFERENCE" ? "entities" : undefined,
+                field.fieldType === "ENTITY_REFERENCE"
+                  ? "entities"
+                  : field.fieldType === "LOCATION_REFERENCE"
+                    ? "locations"
+                    : undefined,
               referenceEntityTypeId: field.referenceEntityTypeId ?? null
             }))
           ];
@@ -420,6 +460,76 @@ export default function ListView({
           fields = baseFields;
           if (response.status !== 403) {
             setPrefsError("Unable to load entity fields.");
+          }
+        }
+      } else if (view.entityKey === "locations" && locationTypeId) {
+        const baseFields: ListField[] = [
+          {
+            fieldKey: "name",
+            label: "Name",
+            fieldType: "TEXT",
+            listOrder: 0,
+            source: "system"
+          },
+          {
+            fieldKey: "description",
+            label: "Description",
+            fieldType: "TEXTAREA",
+            listOrder: 1,
+            source: "system"
+          },
+          {
+            fieldKey: "status",
+            label: "Status",
+            fieldType: "SELECT",
+            listOrder: 2,
+            source: "system"
+          }
+        ];
+        const response = await fetch(
+          `/api/location-type-fields?locationTypeId=${locationTypeId}`,
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+        if (response.status === 401) {
+          dispatchUnauthorized();
+          return;
+        }
+        if (response.ok) {
+          const data = (await response.json()) as Array<{
+            fieldKey: string;
+            fieldLabel: string;
+            fieldType: string;
+            listOrder: number;
+            choices?: Choice[];
+          }>;
+          fields = [
+            ...baseFields,
+            ...data.map((field) => ({
+              fieldKey: field.fieldKey,
+              label: field.fieldLabel ?? field.fieldKey,
+              fieldType: field.fieldType,
+              listOrder: field.listOrder ?? 0,
+              source: "entity" as const,
+              choices: field.choices?.map((choice) => ({
+                value: choice.value,
+                label: choice.label,
+                pillColor: choice.pillColor ?? null,
+                textColor: choice.textColor ?? null
+              })),
+              referenceEntityKey:
+                field.fieldType === "ENTITY_REFERENCE"
+                  ? "entities"
+                  : field.fieldType === "LOCATION_REFERENCE"
+                    ? "locations"
+                    : undefined
+            }))
+          ];
+        } else {
+          fields = baseFields;
+          if (response.status !== 403) {
+            setPrefsError("Unable to load location fields.");
           }
         }
       } else {
@@ -474,24 +584,26 @@ export default function ListView({
       const userFilters = normalizeFilterGroup(userFiltersPayload);
       const defaultFilters = normalizeFilterGroup(defaultFiltersPayload);
 
-      const fallbackColumns =
-        view.entityKey === "entities" && entityTypeId
-          ? [
-              "name",
-              "description",
-              ...fields
-                .filter((field) => field.source === "entity")
-                .sort(fieldSorter)
-                .slice(0, 3)
-                .map((field) => field.fieldKey)
-            ]
-          : fields
-              .filter((field) => {
-                const original = view.fields.find((item) => item.fieldKey === field.fieldKey);
-                return original?.listVisible ?? true;
-              })
+      const usesCustomFields =
+        (view.entityKey === "entities" && entityTypeId) ||
+        (view.entityKey === "locations" && locationTypeId);
+      const fallbackColumns = usesCustomFields
+        ? [
+            "name",
+            "description",
+            ...fields
+              .filter((field) => field.source === "entity")
               .sort(fieldSorter)
-              .map((field) => field.fieldKey);
+              .slice(0, 3)
+              .map((field) => field.fieldKey)
+          ]
+        : fields
+            .filter((field) => {
+              const original = view.fields.find((item) => item.fieldKey === field.fieldKey);
+              return original?.listVisible ?? true;
+            })
+            .sort(fieldSorter)
+            .map((field) => field.fieldKey);
 
       const nextColumns = (userColumns ?? defaultColumns ?? fallbackColumns).filter((key) =>
         availableKeys.has(key)
@@ -513,7 +625,7 @@ export default function ListView({
     return () => {
       ignore = true;
     };
-  }, [view, token, viewKey, entityTypeId, prefsVersion]);
+  }, [view, token, viewKey, entityTypeId, locationTypeId, prefsVersion]);
 
   const listFields = useMemo(() => {
     if (!view) return [];
@@ -575,6 +687,17 @@ export default function ListView({
               if (contextWorldId) params.set("worldId", contextWorldId);
               if (contextCampaignId) params.set("campaignId", contextCampaignId);
               if (contextCharacterId) params.set("characterId", contextCharacterId);
+            }
+            if (entityKey === "locations") {
+              if (contextWorldId) params.set("worldId", contextWorldId);
+              if (contextCampaignId) params.set("campaignId", contextCampaignId);
+              if (contextCharacterId) params.set("characterId", contextCharacterId);
+            }
+            if (
+              entityKey === "location_types" ||
+              entityKey === "location_type_fields"
+            ) {
+              if (contextWorldId) params.set("worldId", contextWorldId);
             }
             if (entityTypePart && entityTypePart !== "any") {
               params.set("entityTypeId", entityTypePart);
@@ -675,7 +798,7 @@ export default function ListView({
   );
   const secondaryFields = listFields.filter((field) => field !== primaryField);
   const canConfigureList = availableFields.length > 0;
-  const showEntityFilters = Boolean(isEntityTypeList);
+  const showEntityFilters = Boolean(isEntityTypeList || isLocationTypeList);
   const isAdmin = currentUserRole === "ADMIN";
 
     const updateFilter = (index: number, next: Partial<ListFilterRule>) => {

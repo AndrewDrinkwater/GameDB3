@@ -10,6 +10,8 @@ export type PermissionQuery = {
   characterId?: string;
   entityTypeId?: string;
   entityFieldId?: string;
+  locationTypeId?: string;
+  locationTypeFieldId?: string;
   isTemplate?: boolean;
   enabled?: boolean;
 };
@@ -40,6 +42,8 @@ export const usePermissions = (query: PermissionQuery) => {
     if (query.characterId) params.set("characterId", query.characterId);
     if (query.entityTypeId) params.set("entityTypeId", query.entityTypeId);
     if (query.entityFieldId) params.set("entityFieldId", query.entityFieldId);
+    if (query.locationTypeId) params.set("locationTypeId", query.locationTypeId);
+    if (query.locationTypeFieldId) params.set("locationTypeFieldId", query.locationTypeFieldId);
     if (query.isTemplate) params.set("isTemplate", "true");
     return params.toString();
   }, [
@@ -50,6 +54,8 @@ export const usePermissions = (query: PermissionQuery) => {
     query.characterId,
     query.entityTypeId,
     query.entityFieldId,
+    query.locationTypeId,
+    query.locationTypeFieldId,
     query.isTemplate
   ]);
 

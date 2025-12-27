@@ -47,7 +47,28 @@ const viewRegistry: Record<string, ViewConfig> = {
     formKey: "entity_field_choices.form",
     label: "Entity Field Choices"
   },
-  entities: { listKey: "entities.list", formKey: "entities.form", label: "Entities" }
+  entities: { listKey: "entities.list", formKey: "entities.form", label: "Entities" },
+  location_types: {
+    listKey: "location_types.list",
+    formKey: "location_types.form",
+    label: "Location Types"
+  },
+  location_type_fields: {
+    listKey: "location_type_fields.list",
+    formKey: "location_type_fields.form",
+    label: "Location Fields"
+  },
+  location_type_field_choices: {
+    listKey: "location_type_field_choices.list",
+    formKey: "location_type_field_choices.form",
+    label: "Location Field Choices"
+  },
+  location_type_rules: {
+    listKey: "location_type_rules.list",
+    formKey: "location_type_rules.form",
+    label: "Location Rules"
+  },
+  locations: { listKey: "locations.list", formKey: "locations.form", label: "Locations" }
 };
 
 const adminViewRegistry: Record<string, ViewConfig> = {
@@ -113,6 +134,10 @@ function AppShell() {
       Array<{ id: string; name: string; count: number }>
     >([]);
   const [entityTypeStatsVersion, setEntityTypeStatsVersion] = useState(0);
+  const [locationMenuTypes, setLocationMenuTypes] = useState<
+    Array<{ id: string; name: string; count: number }>
+  >([]);
+  const [locationMenuVersion, setLocationMenuVersion] = useState(0);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastEntitiesListRoute, setLastEntitiesListRoute] = useState<string | null>(null);
   const refreshInFlightRef = useRef<Promise<boolean> | null>(null);
@@ -500,6 +525,60 @@ function AppShell() {
   }, []);
 
   useEffect(() => {
+    let ignore = false;
+    if (!token || !context.worldId) {
+      setLocationMenuTypes([]);
+      return;
+    }
+
+    const loadLocationMenuTypes = async () => {
+      const params = new URLSearchParams({ worldId: context.worldId as string });
+      if (context.campaignId) params.set("campaignId", context.campaignId);
+      if (context.characterId) params.set("characterId", context.characterId);
+      const response = await fetch(`/api/location-type-stats?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (handleUnauthorized(response)) return;
+      if (!response.ok) {
+        if (!ignore) setLocationMenuTypes([]);
+        return;
+      }
+      const data = (await response.json()) as Array<{
+        id: string;
+        name: string;
+        count: number;
+      }>;
+      if (!ignore) {
+        setLocationMenuTypes(data);
+      }
+    };
+
+    void loadLocationMenuTypes();
+
+    return () => {
+      ignore = true;
+    };
+  }, [
+    token,
+    context.worldId,
+    context.campaignId,
+    context.characterId,
+    locationMenuVersion
+  ]);
+
+  useEffect(() => {
+    const handleLocationTypeUpdate = () => {
+      setLocationMenuVersion((current) => current + 1);
+    };
+    window.addEventListener("ttrpg:location-types-updated", handleLocationTypeUpdate);
+    window.addEventListener("ttrpg:locations-updated", handleLocationTypeUpdate);
+    return () => {
+      window.removeEventListener("ttrpg:location-types-updated", handleLocationTypeUpdate);
+      window.removeEventListener("ttrpg:locations-updated", handleLocationTypeUpdate);
+    };
+  }, []);
+
+  useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
@@ -850,6 +929,7 @@ function AppShell() {
   const routeParts = routePath.split("/").filter(Boolean);
   const routeParams = new URLSearchParams(routeSearch);
   const entityTypeIdParam = routeParams.get("entityTypeId") ?? undefined;
+  const locationTypeIdParam = routeParams.get("locationTypeId") ?? undefined;
 
   useEffect(() => {
     if (routeParts[0] === "list" && routeParts[1] === "entities") {
@@ -1004,7 +1084,9 @@ function AppShell() {
         const extraParams =
           routeParts[1] === "entities" && entityTypeIdParam
             ? { entityTypeId: entityTypeIdParam }
-            : undefined;
+            : routeParts[1] === "locations" && locationTypeIdParam
+              ? { locationTypeId: locationTypeIdParam }
+              : undefined;
         const titleOverride =
           routeParts[1] === "entities" && selectedEntityType
             ? selectedEntityType.name
@@ -1027,6 +1109,12 @@ function AppShell() {
               onOpenForm={(id) => {
                 if (routeParts[1] === "entities" && id === "new" && entityTypeIdParam) {
                   navigateWithGuard(`/form/entities/new?entityTypeId=${entityTypeIdParam}`);
+                } else if (
+                  routeParts[1] === "locations" &&
+                  id === "new" &&
+                  locationTypeIdParam
+                ) {
+                  navigateWithGuard(`/form/locations/new?locationTypeId=${locationTypeIdParam}`);
                 } else {
                   navigateWithGuard(`/form/${routeParts[1]}/${id}`);
                 }
@@ -1057,10 +1145,23 @@ function AppShell() {
                         ...(entityTypeIdParam ? { entityTypeId: entityTypeIdParam } : {})
                       }
                     : undefined
+                  : routeParts[1] === "locations"
+                    ? context.worldId || locationTypeIdParam
+                      ? {
+                          ...(context.worldId ? { worldId: context.worldId } : {}),
+                          ...(locationTypeIdParam
+                            ? { locationTypeId: locationTypeIdParam }
+                            : {})
+                        }
+                      : undefined
                   : routeParts[1] === "entity_types"
                     ? context.worldId
                       ? { worldId: context.worldId }
                       : undefined
+                    : routeParts[1] === "location_types"
+                      ? context.worldId
+                        ? { worldId: context.worldId }
+                        : undefined
                 : undefined
             : undefined;
         const initialLabels =
@@ -1379,6 +1480,37 @@ function AppShell() {
                         </div>
                       )
                     ) : null}
+                    {context.worldId ? (
+                      <div className="sidebar__section">
+                        <span className="sidebar__section-title">Locations</span>
+                        <div className="sidebar__section-body sidebar__entity-list">
+                          <button
+                            type="button"
+                            className="sidebar__entity-item"
+                            onClick={() => {
+                              navigateWithGuard("/list/locations");
+                              handleSidebarSelect();
+                            }}
+                          >
+                            <span>All Locations</span>
+                          </button>
+                          {locationMenuTypes.map((type) => (
+                            <button
+                              key={type.id}
+                              type="button"
+                              className="sidebar__entity-item"
+                              onClick={() => {
+                                navigateWithGuard(`/list/locations?locationTypeId=${type.id}`);
+                                handleSidebarSelect();
+                              }}
+                            >
+                              <span>{type.name}</span>
+                              <span className="sidebar__entity-count">{type.count}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     {worldAdminAllowed ? (
                       <div className="sidebar__section">
                         <button
@@ -1393,34 +1525,80 @@ function AppShell() {
                           />
                         </button>
                         {worldAdminExpanded ? (
-                          <div className="sidebar__section-body">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigateWithGuard("/list/entity_types");
-                                handleSidebarSelect();
-                              }}
-                            >
-                              Entity Types
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigateWithGuard("/list/entity_fields");
-                                handleSidebarSelect();
-                              }}
-                            >
-                              Entity Fields
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigateWithGuard("/list/entity_field_choices");
-                                handleSidebarSelect();
-                              }}
-                            >
-                              Field Choices
-                            </button>
+                          <div className="sidebar__section-body sidebar__subsections">
+                            <div className="sidebar__subsection">
+                              <span className="sidebar__subsection-title">Entity Admin</span>
+                              <div className="sidebar__subsection-body">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/list/entity_types");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Entity Types
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/list/entity_fields");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Entity Fields
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/list/entity_field_choices");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Field Choices
+                                </button>
+                              </div>
+                            </div>
+                            <div className="sidebar__subsection">
+                              <span className="sidebar__subsection-title">Location Admin</span>
+                              <div className="sidebar__subsection-body">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/list/location_types");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Location Types
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/list/location_type_fields");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Location Fields
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/list/location_type_field_choices");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Location Field Choices
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/list/location_type_rules");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Location Rules
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         ) : null}
                       </div>
