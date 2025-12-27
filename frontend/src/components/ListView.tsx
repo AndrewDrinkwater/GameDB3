@@ -1213,7 +1213,20 @@ export default function ListView({
     };
 
   if (viewLoading || dataLoading) {
-    return <div className="view-state">Loading view...</div>;
+    return (
+      <div className="view-state view-state--skeleton">
+        <div className="view-skeleton">
+          <div className="view-skeleton__title"></div>
+          <div className="view-skeleton__line"></div>
+          <div className="view-skeleton__line view-skeleton__line--short"></div>
+          <div className="view-skeleton__row"></div>
+          <div className="view-skeleton__row"></div>
+          <div className="view-skeleton__row"></div>
+          <div className="view-skeleton__row"></div>
+          <div className="view-skeleton__row"></div>
+        </div>
+      </div>
+    );
   }
 
   if (error || !view) {

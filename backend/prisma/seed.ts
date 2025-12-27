@@ -730,7 +730,7 @@ async function main() {
     endpoint: "/api/system/user-preferences",
     adminOnly: true,
     fields: [
-      { fieldKey: "userId", label: "User", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
+      { fieldKey: "userId", label: "User", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "users" },
       { fieldKey: "key", label: "Key", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2 },
       { fieldKey: "valueType", label: "Type", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
       { fieldKey: "value", label: "Value", fieldType: SystemFieldType.TEXT, listOrder: 4, formOrder: 4 }
@@ -744,7 +744,7 @@ async function main() {
     endpoint: "/api/system/user-preferences",
     adminOnly: true,
     fields: [
-      { fieldKey: "userId", label: "User ID", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
+      { fieldKey: "userId", label: "User", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "users" },
       { fieldKey: "key", label: "Key", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2, required: true },
       { fieldKey: "valueType", label: "Type", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true },
       { fieldKey: "value", label: "Value", fieldType: SystemFieldType.TEXT, listOrder: 4, formOrder: 4, required: true }

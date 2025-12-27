@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { dispatchUnauthorized } from "./utils/auth";
 import ListView from "./components/ListView";
 import FormView from "./components/FormView";
@@ -22,6 +23,8 @@ type ViewConfig = {
 
 const tokenStorageKey = "ttrpg.token";
 const sidebarStorageKey = "ttrpg.sidebar";
+const defaultSidebarWidth = 240;
+const maxSidebarWidth = Math.round(defaultSidebarWidth * 1.5);
 
 type Theme = "light" | "dark";
 type SidebarMode = "menu" | "favorites" | "collapsed";
@@ -119,6 +122,8 @@ function AppShell() {
   const [theme, setTheme] = useState<Theme>("light");
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>("collapsed");
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(defaultSidebarWidth);
+  const [isSidebarResizing, setIsSidebarResizing] = useState(false);
   const [adminExpanded, setAdminExpanded] = useState(true);
   const [route, setRoute] = useState("/home");
   const [homepage, setHomepage] = useState("/home");
@@ -141,6 +146,13 @@ function AppShell() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastEntitiesListRoute, setLastEntitiesListRoute] = useState<string | null>(null);
   const refreshInFlightRef = useRef<Promise<boolean> | null>(null);
+  const sidebarRef = useRef<HTMLElement | null>(null);
+  const sidebarWidthRef = useRef(defaultSidebarWidth);
+  const resizeStateRef = useRef({
+    left: 0,
+    startWidth: defaultSidebarWidth,
+    lastWidth: defaultSidebarWidth
+  });
 
     const contextStorageKey = "ttrpg.context";
     const contextPanelRef = useRef<HTMLDivElement | null>(null);
@@ -643,6 +655,10 @@ function AppShell() {
       const defaultTheme = defaults.find((pref) => pref.key === "theme")?.value;
       const userPinned = userPrefs.find((pref) => pref.key === "sidebarPinned")?.value;
       const defaultPinned = defaults.find((pref) => pref.key === "sidebarPinned")?.value;
+      const userSidebarWidth = userPrefs.find((pref) => pref.key === "sidebarWidth")?.value;
+      const defaultSidebarWidthValue = defaults.find(
+        (pref) => pref.key === "sidebarWidth"
+      )?.value;
       const useDefaultContext = userPrefs.find((pref) => pref.key === "contextUseDefault")?.value;
       const defaultWorldId = userPrefs.find((pref) => pref.key === "contextWorldId")?.value || undefined;
       const defaultCampaignId = userPrefs.find((pref) => pref.key === "contextCampaignId")?.value || undefined;
@@ -663,6 +679,14 @@ function AppShell() {
           : defaultPinned === "true";
       setIsSidebarPinned(pinned);
       setSidebarMode(resolveSidebarMode(pinned));
+      const parsedSidebarWidth = Number.parseInt(
+        userSidebarWidth ?? defaultSidebarWidthValue ?? String(defaultSidebarWidth),
+        10
+      );
+      const resolvedSidebarWidth = Number.isFinite(parsedSidebarWidth)
+        ? Math.min(maxSidebarWidth, Math.max(defaultSidebarWidth, parsedSidebarWidth))
+        : defaultSidebarWidth;
+      setSidebarWidth(resolvedSidebarWidth);
 
       const defaultsValue: ContextDefaults = {
         enabled: useDefaultContext === "true",
@@ -677,6 +701,7 @@ function AppShell() {
       setTheme("light");
       setIsSidebarPinned(true);
       setSidebarMode(resolveSidebarMode(true));
+      setSidebarWidth(defaultSidebarWidth);
       setContextDefaults(fallbackDefaults);
       return { defaults: fallbackDefaults, homepage: fallbackHomepage };
     }
@@ -731,6 +756,7 @@ function AppShell() {
     setHomepage("/home");
     setTheme("light");
     setIsSidebarPinned(true);
+    setSidebarWidth(defaultSidebarWidth);
     setContext({});
     setContextDefaults({ enabled: false });
     sessionStorage.removeItem(contextStorageKey);
@@ -770,6 +796,78 @@ function AppShell() {
       },
       body: JSON.stringify({ valueType: "BOOLEAN", value: String(nextPinned) })
     });
+  };
+
+  const setSidebarWidthPreference = async (nextWidth: number) => {
+    const clampedWidth = Math.min(maxSidebarWidth, Math.max(defaultSidebarWidth, nextWidth));
+    setSidebarWidth(clampedWidth);
+
+    const tokenValue = localStorage.getItem(tokenStorageKey);
+    if (!tokenValue) return;
+
+    await fetch("/api/user/preferences/sidebarWidth", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${tokenValue}`
+      },
+      body: JSON.stringify({ valueType: "INTEGER", value: String(clampedWidth) })
+    });
+  };
+
+  useEffect(() => {
+    sidebarWidthRef.current = sidebarWidth;
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    if (!isSidebarResizing) return;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    return () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [isSidebarResizing]);
+
+  useEffect(() => {
+    if (!isSidebarResizing) return;
+    const handleMove = (event: PointerEvent) => {
+      const nextWidth = Math.min(
+        maxSidebarWidth,
+        Math.max(defaultSidebarWidth, Math.round(event.clientX - resizeStateRef.current.left))
+      );
+      resizeStateRef.current.lastWidth = nextWidth;
+      setSidebarWidth(nextWidth);
+    };
+    const handleStop = () => {
+      setIsSidebarResizing(false);
+      if (resizeStateRef.current.startWidth !== resizeStateRef.current.lastWidth) {
+        void setSidebarWidthPreference(resizeStateRef.current.lastWidth);
+      }
+    };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleStop);
+    window.addEventListener("pointercancel", handleStop);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleStop);
+      window.removeEventListener("pointercancel", handleStop);
+    };
+  }, [isSidebarResizing]);
+
+  const handleSidebarResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isSidebarOpen) return;
+    const rect = sidebarRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    resizeStateRef.current = {
+      left: rect.left,
+      startWidth: sidebarWidthRef.current,
+      lastWidth: sidebarWidthRef.current
+    };
+    setIsSidebarResizing(true);
+    event.preventDefault();
   };
 
   const toggleSidebar = (mode: SidebarMode) => {
@@ -924,6 +1022,14 @@ function AppShell() {
     if (sidebarMode === "favorites") return "Favorites";
     return "Navigation";
   }, [sidebarMode]);
+
+  const sidebarStyle = useMemo(
+    () =>
+      ({
+        "--sidebar-width": `${sidebarWidth}px`
+      }) as CSSProperties,
+    [sidebarWidth]
+  );
 
   const [routePath, routeSearch = ""] = route.replace(/^#/, "").split("?");
   const routeParts = routePath.split("/").filter(Boolean);
@@ -1384,7 +1490,11 @@ function AppShell() {
             {isSidebarOpen && !isSidebarPinned ? (
               <div className="sidebar__overlay" onClick={handleSidebarClose} />
             ) : null}
-            <aside className={`sidebar ${isSidebarOpen ? "sidebar--open" : ""}`}>
+            <aside
+              className={`sidebar ${isSidebarOpen ? "sidebar--open" : ""}`}
+              style={sidebarStyle}
+              ref={sidebarRef}
+            >
               <div className="sidebar__panel">
                 <div className="sidebar__header">
                   <div className="sidebar__title">{sidebarTitle}</div>
@@ -1696,6 +1806,15 @@ function AppShell() {
                   <div className="sidebar__empty">Select Menu or Favorites.</div>
                 ) : null}
               </div>
+              {isSidebarOpen ? (
+                <div
+                  className={`sidebar__resizer ${isSidebarResizing ? "is-resizing" : ""}`}
+                  onPointerDown={handleSidebarResizeStart}
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize sidebar"
+                />
+              ) : null}
             </aside>
 
             <main className="app__main">
