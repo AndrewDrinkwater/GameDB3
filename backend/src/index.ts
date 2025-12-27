@@ -2245,30 +2245,50 @@ app.get("/api/references", requireAuth, async (req, res) => {
     return;
   }
 
-  if (entityKey === "characters") {
-    const labelField = await getLabelFieldForEntity(entityKey);
-    const baseClause: Prisma.CharacterWhereInput = ids
-      ? { id: { in: ids } }
-      : queryValue
-        ? { name: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
-        : {};
+    if (entityKey === "characters") {
+      const labelField = await getLabelFieldForEntity(entityKey);
+      const baseClause: Prisma.CharacterWhereInput = ids
+        ? { id: { in: ids } }
+        : queryValue
+          ? { name: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
+          : {};
 
-    const filters: Prisma.CharacterWhereInput[] = [baseClause];
-    if (worldId) filters.push({ worldId });
-    if (campaignId) {
-      filters.push({ campaigns: { some: { campaignId } } });
-    }
+      const campaign =
+        campaignId
+          ? await prisma.campaign.findUnique({
+              where: { id: campaignId },
+              select: { worldId: true, gmUserId: true }
+            })
+          : null;
+      const isCampaignGm = Boolean(campaign && campaign.gmUserId === user.id);
+      const isCampaignWorldArchitect =
+        Boolean(campaign && (await isWorldArchitect(user.id, campaign.worldId)));
+      const expandCampaignScope = Boolean(
+        campaign && (isAdmin(user) || isCampaignGm || isCampaignWorldArchitect)
+      );
 
-    if (user && !isAdmin(user)) {
-      filters.push({
-        OR: [
+      const filters: Prisma.CharacterWhereInput[] = [baseClause];
+      if (expandCampaignScope && campaign) {
+        filters.push({ worldId: campaign.worldId });
+      } else {
+        if (worldId) filters.push({ worldId });
+        if (campaignId) {
+          filters.push({ campaigns: { some: { campaignId } } });
+        }
+      }
+
+      if (user && !isAdmin(user)) {
+        const orFilters: Prisma.CharacterWhereInput[] = [
           { playerId: user.id },
           { world: { primaryArchitectId: user.id } },
           { world: { architects: { some: { userId: user.id } } } },
           { campaigns: { some: { campaign: { gmUserId: user.id } } } }
-        ]
-      });
-    }
+        ];
+        if (isCampaignGm && campaign) {
+          orFilters.push({ worldId: campaign.worldId });
+        }
+        filters.push({ OR: orFilters });
+      }
 
     const whereClause: Prisma.CharacterWhereInput =
       filters.length > 1 ? { AND: filters } : baseClause;
@@ -2284,13 +2304,14 @@ app.get("/api/references", requireAuth, async (req, res) => {
       take: 25
     });
 
-    const results = characters.map((character) => {
-      const labelValue = (character as Record<string, unknown>)[labelField];
-      const canSeeOwner =
-        isAdmin(user) ||
-        character.world.primaryArchitectId === user.id ||
-        character.world.architects.some((entry) => entry.userId === user.id) ||
-        character.campaigns.some((entry) => entry.campaign.gmUserId === user.id);
+      const results = characters.map((character) => {
+        const labelValue = (character as Record<string, unknown>)[labelField];
+        const canSeeOwner =
+          isAdmin(user) ||
+          isCampaignGm ||
+          character.world.primaryArchitectId === user.id ||
+          character.world.architects.some((entry) => entry.userId === user.id) ||
+          character.campaigns.some((entry) => entry.campaign.gmUserId === user.id);
       const ownerLabel = canSeeOwner
         ? character.player.name ?? character.player.email ?? character.player.id
         : undefined;
@@ -2610,6 +2631,190 @@ app.get("/api/context/summary", requireAuth, async (req, res) => {
   }
 
   res.json({ worldRole, campaignRole, characterOwnerLabel });
+});
+
+app.get("/api/permissions", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const entityKey = typeof req.query.entityKey === "string" ? req.query.entityKey : undefined;
+  const recordId = typeof req.query.recordId === "string" ? req.query.recordId : undefined;
+  const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+  const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+  const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+  const entityTypeId =
+    typeof req.query.entityTypeId === "string" ? req.query.entityTypeId : undefined;
+  const entityFieldId =
+    typeof req.query.entityFieldId === "string" ? req.query.entityFieldId : undefined;
+  const isTemplate = req.query.isTemplate === "true";
+
+  if (!entityKey) {
+    res.status(400).json({ error: "entityKey is required." });
+    return;
+  }
+
+  const admin = isAdmin(user);
+  let canCreate = false;
+  let canEdit = false;
+  let canDelete = false;
+
+  switch (entityKey) {
+    case "worlds": {
+      canCreate = true;
+      if (recordId) {
+        const isArchitect = await isWorldArchitect(user.id, recordId);
+        canEdit = admin || isArchitect;
+        canDelete = canEdit;
+      }
+      break;
+    }
+    case "campaigns": {
+      if (worldId) {
+        canCreate = admin || (await canCreateCampaign(user.id, worldId));
+      }
+      if (recordId) {
+        const canManage = admin || (await canManageCampaign(user.id, recordId));
+        canEdit = canManage;
+        canDelete = canManage;
+      }
+      break;
+    }
+    case "characters": {
+      if (campaignId) {
+        canCreate = admin || (await canCreateCharacterInCampaign(user.id, campaignId));
+      } else if (worldId) {
+        canCreate = admin || (await canCreateCharacterInWorld(user.id, worldId));
+      }
+      if (recordId) {
+        const character = await prisma.character.findUnique({
+          where: { id: recordId },
+          select: { playerId: true, worldId: true }
+        });
+        if (!character) {
+          res.status(404).json({ error: "Character not found." });
+          return;
+        }
+        const isArchitect = await isWorldArchitect(user.id, character.worldId);
+        const canManage = admin || isArchitect || character.playerId === user.id;
+        canEdit = canManage;
+        canDelete = canManage;
+      }
+      break;
+    }
+    case "entity_types": {
+      if (recordId) {
+        const entityType = await prisma.entityType.findUnique({
+          where: { id: recordId },
+          select: { worldId: true, isTemplate: true }
+        });
+        if (!entityType) {
+          res.status(404).json({ error: "Entity type not found." });
+          return;
+        }
+        if (entityType.isTemplate) {
+          canEdit = admin;
+          canDelete = admin;
+        } else if (entityType.worldId) {
+          const isArchitect = await isWorldArchitect(user.id, entityType.worldId);
+          canEdit = admin || isArchitect;
+          canDelete = canEdit;
+        }
+      }
+      if (isTemplate) {
+        canCreate = admin;
+      } else if (worldId) {
+        canCreate = admin || (await isWorldArchitect(user.id, worldId));
+      }
+      break;
+    }
+    case "entity_fields": {
+      let resolvedEntityTypeId = entityTypeId;
+      if (recordId) {
+        const field = await prisma.entityField.findUnique({
+          where: { id: recordId },
+          select: { entityTypeId: true }
+        });
+        if (!field) {
+          res.status(404).json({ error: "Entity field not found." });
+          return;
+        }
+        resolvedEntityTypeId = field.entityTypeId;
+      }
+      if (resolvedEntityTypeId) {
+        const canManage = admin || (await canManageEntityType(user.id, resolvedEntityTypeId));
+        canCreate = canManage;
+        if (recordId) {
+          canEdit = canManage;
+          canDelete = canManage;
+        }
+      }
+      break;
+    }
+    case "entity_field_choices": {
+      let resolvedEntityFieldId = entityFieldId;
+      if (recordId) {
+        const choice = await prisma.entityFieldChoice.findUnique({
+          where: { id: recordId },
+          select: { entityFieldId: true }
+        });
+        if (!choice) {
+          res.status(404).json({ error: "Choice not found." });
+          return;
+        }
+        resolvedEntityFieldId = choice.entityFieldId;
+      }
+      if (resolvedEntityFieldId) {
+        const field = await prisma.entityField.findUnique({
+          where: { id: resolvedEntityFieldId },
+          select: { entityTypeId: true }
+        });
+        if (!field) {
+          res.status(404).json({ error: "Entity field not found." });
+          return;
+        }
+        const canManage = admin || (await canManageEntityType(user.id, field.entityTypeId));
+        canCreate = canManage;
+        if (recordId) {
+          canEdit = canManage;
+          canDelete = canManage;
+        }
+      }
+      break;
+    }
+    case "entities": {
+      if (worldId) {
+        canCreate = admin || (await canCreateEntityInWorld(user.id, worldId));
+      }
+      if (recordId) {
+        const entity = await prisma.entity.findUnique({
+          where: { id: recordId },
+          select: { worldId: true }
+        });
+        if (!entity) {
+          res.status(404).json({ error: "Entity not found." });
+          return;
+        }
+        canEdit = admin || (await canWriteEntity(user, recordId, campaignId, characterId));
+        const isArchitect = await isWorldArchitect(user.id, entity.worldId);
+        const isGm =
+          (await isWorldGameMaster(user.id, entity.worldId)) ||
+          (await isWorldGm(user.id, entity.worldId));
+        canDelete = admin || isArchitect || isGm;
+      }
+      break;
+    }
+    default: {
+      canCreate = admin;
+      canEdit = admin;
+      canDelete = admin;
+      break;
+    }
+  }
+
+  res.json({ canCreate, canEdit, canDelete });
 });
 
 app.post("/api/views", requireAuth, requireSystemAdmin, async (req, res) => {
@@ -5824,6 +6029,8 @@ app.get("/api/entities/:id", requireAuth, async (req, res) => {
     return;
   }
 
+    let accessAllowed = false;
+    let auditAllowed = false;
     if (!isAdmin(user)) {
       if (!(await canAccessWorld(user.id, entity.worldId))) {
         res.status(403).json({ error: "Forbidden." });
@@ -5833,28 +6040,64 @@ app.get("/api/entities/:id", requireAuth, async (req, res) => {
       const accessFilters: Prisma.EntityAccessWhereInput[] = [
         { scopeType: EntityAccessScope.GLOBAL }
       ];
-    if (campaignId) {
-      accessFilters.push({ scopeType: EntityAccessScope.CAMPAIGN, scopeId: campaignId });
-    }
-    if (characterId) {
-      accessFilters.push({ scopeType: EntityAccessScope.CHARACTER, scopeId: characterId });
-    }
+      if (campaignId) {
+        accessFilters.push({ scopeType: EntityAccessScope.CAMPAIGN, scopeId: campaignId });
+      }
+      if (characterId) {
+        accessFilters.push({ scopeType: EntityAccessScope.CHARACTER, scopeId: characterId });
+      }
 
-    const canRead =
-      (await isWorldArchitect(user.id, entity.worldId)) ||
-      (await prisma.entityAccess.findFirst({
-        where: {
-          entityId: entity.id,
-          accessType: EntityAccessType.READ,
-          OR: accessFilters
-        }
-      }));
+      const isArchitect = await isWorldArchitect(user.id, entity.worldId);
+      const isGm =
+        (await isWorldGameMaster(user.id, entity.worldId)) ||
+        (await isWorldGm(user.id, entity.worldId));
+      accessAllowed = isArchitect || isGm;
+      auditAllowed = accessAllowed;
 
-    if (!canRead) {
-      res.status(403).json({ error: "Forbidden." });
+      const canRead =
+        isArchitect ||
+        (await prisma.entityAccess.findFirst({
+          where: {
+            entityId: entity.id,
+            accessType: EntityAccessType.READ,
+            OR: accessFilters
+          }
+        }));
+
+      if (!canRead) {
+        res.status(403).json({ error: "Forbidden." });
+        return;
+      }
+
+      res.json({
+        id: entity.id,
+        worldId: entity.worldId,
+        entityTypeId: entity.entityTypeId,
+        name: entity.name,
+        description: entity.description,
+        createdById: entity.createdById,
+        createdAt: entity.createdAt,
+        updatedAt: entity.updatedAt,
+        accessAllowed,
+        auditAllowed,
+        fieldValues: entity.values.reduce<Record<string, unknown>>((acc, value) => {
+          const fieldKey = value.field.fieldKey;
+          if (value.valueString !== null && value.valueString !== undefined) {
+            acc[fieldKey] = value.valueString;
+          } else if (value.valueText !== null && value.valueText !== undefined) {
+            acc[fieldKey] = value.valueText;
+          } else if (value.valueBoolean !== null && value.valueBoolean !== undefined) {
+            acc[fieldKey] = value.valueBoolean;
+          } else if (value.valueNumber !== null && value.valueNumber !== undefined) {
+            acc[fieldKey] = value.valueNumber;
+          } else if (value.valueJson !== null && value.valueJson !== undefined) {
+            acc[fieldKey] = value.valueJson;
+          }
+          return acc;
+        }, {})
+      });
       return;
     }
-  }
 
   const fieldValues: Record<string, unknown> = {};
   entity.values.forEach((value) => {
@@ -6584,38 +6827,59 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
       return;
     }
 
+    const isAdminUser = isAdmin(user);
     const isArchitect = await isWorldArchitect(user.id, entity.worldId);
     const isWorldGmFlag = await isWorldGameMaster(user.id, entity.worldId);
     const isContextCampaignGm = campaignId ? await isCampaignGm(user.id, campaignId) : false;
-    const canSeeAll = isAdmin(user) || isArchitect || isWorldGmFlag;
 
-    const visibilityFilters: Prisma.NoteWhereInput[] = [
-      { authorId: user.id },
-      {
-        visibility: NoteVisibility.SHARED,
-        OR: campaignId ? [{ campaignId }, { campaignId: null }] : [{ campaignId: null }]
-      }
-    ];
-    if (isContextCampaignGm && campaignId) {
-      visibilityFilters.push({ visibility: NoteVisibility.PRIVATE, campaignId });
-    }
+    const baseWhere: Prisma.NoteWhereInput = {
+      entityId: id,
+      campaignId: campaignId ?? null
+    };
 
     const notes = await prisma.note.findMany({
-      where: canSeeAll ? { entityId: id } : { entityId: id, OR: visibilityFilters },
+      where: baseWhere,
       include: {
         author: { select: { id: true, name: true, email: true } },
         character: { select: { id: true, name: true } },
-        tags: true
+        tags: true,
+        shares: { select: { characterId: true } }
       },
       orderBy: { createdAt: "desc" }
+    });
+
+    const playerCharacterIds = campaignId
+      ? await prisma.characterCampaign.findMany({
+          where: { campaignId, character: { playerId: user.id } },
+          select: { characterId: true }
+        })
+      : [];
+    const playerCharacterIdSet = new Set(playerCharacterIds.map((entry) => entry.characterId));
+
+    const canSeePrivate = isAdminUser || isArchitect || isWorldGmFlag;
+    const visibleNotes = notes.filter((note) => {
+      if (isAdminUser) return true;
+      if (note.visibility === NoteVisibility.GM) {
+        if (!campaignId) return false;
+        if (isContextCampaignGm) return true;
+        if (note.shareWithArchitect && isArchitect) return true;
+        if (note.shares.some((share) => playerCharacterIdSet.has(share.characterId))) {
+          return true;
+        }
+        return false;
+      }
+      if (note.visibility === NoteVisibility.SHARED) return true;
+      if (note.authorId === user.id) return true;
+      if (campaignId && isContextCampaignGm) return true;
+      if (canSeePrivate) return true;
+      return false;
     });
 
     const world = await prisma.world.findUnique({
       where: { id: entity.worldId },
       select: {
         primaryArchitectId: true,
-        architects: { select: { userId: true } },
-        gameMasters: { select: { userId: true } }
+        architects: { select: { userId: true } }
       }
     });
     const architectIds = new Set<string>(
@@ -6623,11 +6887,8 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
         ? [world.primaryArchitectId, ...world.architects.map((entry) => entry.userId)]
         : []
     );
-    const worldGmIds = new Set<string>(
-      world ? world.gameMasters.map((entry) => entry.userId) : []
-    );
     const campaignIds = Array.from(
-      new Set(notes.map((note) => note.campaignId).filter(Boolean))
+      new Set(visibleNotes.map((note) => note.campaignId).filter(Boolean))
     ) as string[];
     const campaigns = campaignIds.length
       ? await prisma.campaign.findMany({
@@ -6639,7 +6900,7 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
 
     const entityTagIds = Array.from(
       new Set(
-        notes
+        visibleNotes
           .flatMap((note) => note.tags)
           .filter((tag) => tag.tagType === NoteTagType.ENTITY)
           .map((tag) => tag.targetId)
@@ -6662,28 +6923,32 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
     }
 
     res.json(
-      notes.map((note) => {
+      visibleNotes.map((note) => {
         const authorBase = note.author.name ?? note.author.email;
         const authorLabel = note.character?.name
           ? `${note.character.name} played by ${authorBase}`
           : authorBase;
         const isArchitectAuthor = architectIds.has(note.authorId);
-        const isGmAuthor =
-          worldGmIds.has(note.authorId) ||
-          (note.campaignId ? campaignGmMap.get(note.campaignId) === note.authorId : false);
+        const isGmAuthor = note.campaignId
+          ? campaignGmMap.get(note.campaignId) === note.authorId
+          : false;
         const authorRoleLabel =
-          note.visibility === NoteVisibility.SHARED
-            ? isArchitectAuthor
-              ? "Architect"
-              : isGmAuthor
-                ? "GM"
-                : null
-            : null;
+          note.visibility === NoteVisibility.GM
+            ? "GM"
+            : note.visibility === NoteVisibility.SHARED
+              ? isArchitectAuthor
+                ? "Architect"
+                : isGmAuthor
+                  ? "GM"
+                  : null
+              : null;
 
         return {
           id: note.id,
           body: note.body,
           visibility: note.visibility,
+          shareWithArchitect: note.shareWithArchitect,
+          shareCharacterIds: note.shares.map((share) => share.characterId),
           createdAt: note.createdAt,
           author: note.author,
           authorLabel,
@@ -6708,11 +6973,14 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
     }
 
     const { id } = req.params;
-    const { body, visibility, campaignId, characterId } = req.body as {
+    const { body, visibility, campaignId, characterId, shareWithArchitect, shareCharacterIds } =
+      req.body as {
       body?: string;
       visibility?: string;
       campaignId?: string | null;
       characterId?: string | null;
+      shareWithArchitect?: boolean;
+      shareCharacterIds?: string[];
     };
 
     if (!body || body.trim() === "") {
@@ -6745,12 +7013,16 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
     }
 
     const resolvedVisibility =
-      visibility === "PRIVATE" || visibility === "SHARED"
+      visibility === "PRIVATE" || visibility === "SHARED" || visibility === "GM"
         ? (visibility as NoteVisibility)
         : NoteVisibility.SHARED;
 
     if (resolvedVisibility === NoteVisibility.SHARED && !campaignId) {
       res.status(400).json({ error: "Shared notes require a campaign context." });
+      return;
+    }
+    if (resolvedVisibility === NoteVisibility.GM && !campaignId) {
+      res.status(400).json({ error: "GM notes require a campaign context." });
       return;
     }
 
@@ -6799,9 +7071,42 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
     const isCampaignGmFlag = campaignId ? campaign?.gmUserId === user.id : false;
     const canAuthor = isAdmin(user) || isArchitect || isWorldGmFlag || isCampaignGmFlag;
 
+    if (!campaignId && !isAdmin(user) && !isArchitect) {
+      res.status(403).json({ error: "Campaign context required." });
+      return;
+    }
+
     if (!canAuthor) {
       if (!character || !campaignId || character.playerId !== user.id) {
         res.status(403).json({ error: "Player context required." });
+        return;
+      }
+    }
+
+    if (resolvedVisibility === NoteVisibility.GM && !isCampaignGmFlag) {
+      res.status(403).json({ error: "Only the campaign GM can write GM notes." });
+      return;
+    }
+
+    const shareCharacterIdList = Array.isArray(shareCharacterIds)
+      ? shareCharacterIds.filter(Boolean)
+      : [];
+    if (resolvedVisibility !== NoteVisibility.GM) {
+      if (shareCharacterIdList.length > 0) {
+        res.status(400).json({ error: "GM note sharing is not available for this note." });
+        return;
+      }
+    }
+
+    if (resolvedVisibility === NoteVisibility.GM && shareCharacterIdList.length > 0) {
+      const campaignCharacters = await prisma.characterCampaign.findMany({
+        where: { campaignId: campaignId as string, characterId: { in: shareCharacterIdList } },
+        select: { characterId: true }
+      });
+      const allowed = new Set(campaignCharacters.map((entry) => entry.characterId));
+      const missing = shareCharacterIdList.filter((id) => !allowed.has(id));
+      if (missing.length > 0) {
+        res.status(400).json({ error: "One or more shared characters are not in the campaign." });
         return;
       }
     }
@@ -6838,6 +7143,8 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
           campaignId: campaignId ?? null,
           characterId: characterId ?? null,
           visibility: resolvedVisibility,
+          shareWithArchitect:
+            resolvedVisibility === NoteVisibility.GM ? Boolean(shareWithArchitect) : false,
           body
         },
         include: {
@@ -6857,28 +7164,46 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
         });
       }
 
+      if (resolvedVisibility === NoteVisibility.GM && shareCharacterIdList.length > 0) {
+        await tx.noteShare.createMany({
+          data: shareCharacterIdList.map((characterId) => ({
+            noteId: note.id,
+            characterId
+          })),
+          skipDuplicates: true
+        });
+      }
+
       return note;
     });
 
     const noteTags = await prisma.noteTag.findMany({ where: { noteId: created.id } });
+    const noteShares = await prisma.noteShare.findMany({
+      where: { noteId: created.id },
+      select: { characterId: true }
+    });
 
     const authorBase = created.author.name ?? created.author.email;
     const authorLabel = created.character?.name
       ? `${created.character.name} played by ${authorBase}`
       : authorBase;
     const authorRoleLabel =
-      created.visibility === NoteVisibility.SHARED
-        ? isArchitect
-          ? "Architect"
-          : isWorldGmFlag || isCampaignGmFlag
-            ? "GM"
-            : null
-        : null;
+      created.visibility === NoteVisibility.GM
+        ? "GM"
+        : created.visibility === NoteVisibility.SHARED
+          ? isArchitect
+            ? "Architect"
+            : isCampaignGmFlag
+              ? "GM"
+              : null
+          : null;
 
     res.status(201).json({
       id: created.id,
       body: created.body,
       visibility: created.visibility,
+      shareWithArchitect: created.shareWithArchitect,
+      shareCharacterIds: noteShares.map((share) => share.characterId),
       createdAt: created.createdAt,
       author: created.author,
       authorLabel,
@@ -6891,6 +7216,269 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
         canAccess: true
       }))
     });
+  });
+
+  app.put("/api/notes/:id", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const { body, visibility, shareWithArchitect, shareCharacterIds } = req.body as {
+      body?: string;
+      visibility?: string;
+      shareWithArchitect?: boolean;
+      shareCharacterIds?: string[];
+    };
+
+    if (!body || body.trim() === "") {
+      res.status(400).json({ error: "Note body is required." });
+      return;
+    }
+
+    const note = await prisma.note.findUnique({
+      where: { id },
+      include: {
+        author: { select: { id: true, name: true, email: true } },
+        character: { select: { id: true, name: true } }
+      }
+    });
+    if (!note) {
+      res.status(404).json({ error: "Note not found." });
+      return;
+    }
+
+    if (note.authorId !== user.id) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const entity = await prisma.entity.findUnique({
+      where: { id: note.entityId },
+      select: { id: true, worldId: true }
+    });
+    if (!entity) {
+      res.status(404).json({ error: "Entity not found." });
+      return;
+    }
+
+    const accessFilter = await buildEntityAccessFilter(
+      user,
+      entity.worldId,
+      note.campaignId ?? undefined,
+      note.characterId ?? undefined
+    );
+    const canRead = await prisma.entity.findFirst({
+      where: { id: entity.id, ...accessFilter },
+      select: { id: true }
+    });
+    if (!canRead) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const resolvedVisibility =
+      visibility === "PRIVATE" || visibility === "SHARED" || visibility === "GM"
+        ? (visibility as NoteVisibility)
+        : note.visibility;
+
+    if (resolvedVisibility === NoteVisibility.SHARED && !note.campaignId) {
+      res.status(400).json({ error: "Shared notes require a campaign context." });
+      return;
+    }
+    if (resolvedVisibility === NoteVisibility.GM && !note.campaignId) {
+      res.status(400).json({ error: "GM notes require a campaign context." });
+      return;
+    }
+
+    if (resolvedVisibility === NoteVisibility.GM) {
+      const isCampaignGmFlag = note.campaignId
+        ? await isCampaignGm(user.id, note.campaignId)
+        : false;
+      if (!isCampaignGmFlag) {
+        res.status(403).json({ error: "Only the campaign GM can edit GM notes." });
+        return;
+      }
+    }
+
+    const shareCharacterIdList = Array.isArray(shareCharacterIds)
+      ? shareCharacterIds.filter(Boolean)
+      : [];
+    if (resolvedVisibility !== NoteVisibility.GM) {
+      if (shareCharacterIdList.length > 0) {
+        res.status(400).json({ error: "GM note sharing is not available for this note." });
+        return;
+      }
+    }
+
+    if (resolvedVisibility === NoteVisibility.GM && shareCharacterIdList.length > 0) {
+      const campaignCharacters = await prisma.characterCampaign.findMany({
+        where: { campaignId: note.campaignId as string, characterId: { in: shareCharacterIdList } },
+        select: { characterId: true }
+      });
+      const allowed = new Set(campaignCharacters.map((entry) => entry.characterId));
+      const missing = shareCharacterIdList.filter((id) => !allowed.has(id));
+      if (missing.length > 0) {
+        res.status(400).json({ error: "One or more shared characters are not in the campaign." });
+        return;
+      }
+    }
+
+    const tags = extractNoteTags(body);
+    const entityTagIds = tags
+      .filter((tag) => tag.tagType === NoteTagType.ENTITY)
+      .map((tag) => tag.targetId);
+
+    if (entityTagIds.length > 0) {
+      const entityAccessFilter = await buildEntityAccessFilter(
+        user,
+        entity.worldId,
+        note.campaignId ?? undefined,
+        note.characterId ?? undefined
+      );
+      const accessibleEntities = await prisma.entity.findMany({
+        where: { id: { in: entityTagIds }, ...entityAccessFilter },
+        select: { id: true }
+      });
+      const accessibleIds = new Set(accessibleEntities.map((entry) => entry.id));
+      const missing = entityTagIds.filter((targetId) => !accessibleIds.has(targetId));
+      if (missing.length > 0) {
+        res.status(400).json({ error: "One or more tagged entities are not accessible." });
+        return;
+      }
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const next = await tx.note.update({
+        where: { id },
+        data: {
+          body,
+          visibility: resolvedVisibility,
+          shareWithArchitect:
+            resolvedVisibility === NoteVisibility.GM ? Boolean(shareWithArchitect) : false
+        }
+      });
+      await tx.noteTag.deleteMany({ where: { noteId: id } });
+      if (tags.length > 0) {
+        await tx.noteTag.createMany({
+          data: tags.map((tag) => ({
+            noteId: id,
+            tagType: tag.tagType,
+            targetId: tag.targetId,
+            label: tag.label
+          }))
+        });
+      }
+      await tx.noteShare.deleteMany({ where: { noteId: id } });
+      if (resolvedVisibility === NoteVisibility.GM && shareCharacterIdList.length > 0) {
+        await tx.noteShare.createMany({
+          data: shareCharacterIdList.map((characterId) => ({
+            noteId: id,
+            characterId
+          })),
+          skipDuplicates: true
+        });
+      }
+      return next;
+    });
+
+    const noteTags = await prisma.noteTag.findMany({ where: { noteId: id } });
+    const noteShares = await prisma.noteShare.findMany({
+      where: { noteId: id },
+      select: { characterId: true }
+    });
+
+    const world = await prisma.world.findUnique({
+      where: { id: entity.worldId },
+      select: {
+        primaryArchitectId: true,
+        architects: { select: { userId: true } },
+        gameMasters: { select: { userId: true } }
+      }
+    });
+    const architectIds = new Set<string>(
+      world
+        ? [world.primaryArchitectId, ...world.architects.map((entry) => entry.userId)]
+        : []
+    );
+    const worldGmIds = new Set<string>(
+      world ? world.gameMasters.map((entry) => entry.userId) : []
+    );
+    const campaignGmId = note.campaignId
+      ? (
+          await prisma.campaign.findUnique({
+            where: { id: note.campaignId },
+            select: { gmUserId: true }
+          })
+        )?.gmUserId
+      : null;
+
+    const authorBase = note.author.name ?? note.author.email;
+    const authorLabel = note.character?.name
+      ? `${note.character.name} played by ${authorBase}`
+      : authorBase;
+    const isArchitectAuthor = architectIds.has(note.authorId);
+    const isGmAuthor = campaignGmId ? campaignGmId === note.authorId : false;
+    const authorRoleLabel =
+      updated.visibility === NoteVisibility.GM
+        ? "GM"
+        : updated.visibility === NoteVisibility.SHARED
+          ? isArchitectAuthor
+            ? "Architect"
+            : isGmAuthor
+              ? "GM"
+              : null
+          : null;
+
+    res.json({
+      id: updated.id,
+      body: updated.body,
+      visibility: updated.visibility,
+      shareWithArchitect: updated.shareWithArchitect,
+      shareCharacterIds: noteShares.map((share) => share.characterId),
+      createdAt: updated.createdAt,
+      author: note.author,
+      authorLabel,
+      authorRoleLabel,
+      tags: noteTags.map((tag) => ({
+        id: tag.id,
+        tagType: tag.tagType,
+        targetId: tag.targetId,
+        label: tag.label,
+        canAccess: true
+      }))
+    });
+  });
+
+  app.delete("/api/notes/:id", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const note = await prisma.note.findUnique({
+      where: { id },
+      select: { id: true, authorId: true }
+    });
+    if (!note) {
+      res.status(404).json({ error: "Note not found." });
+      return;
+    }
+
+    if (note.authorId !== user.id) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    await prisma.$transaction([
+      prisma.noteTag.deleteMany({ where: { noteId: id } }),
+      prisma.note.delete({ where: { id } })
+    ]);
+    res.json({ ok: true });
   });
 
   app.get("/api/entity-tags", requireAuth, async (req, res) => {

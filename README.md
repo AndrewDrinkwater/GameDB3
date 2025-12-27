@@ -33,6 +33,17 @@ Backend env: `backend/.env`
 - `DATABASE_URL`
 - `DATABASE_URL_TEST` (test database, required for backend Jest runs)
 
+## Access Control
+- Authentication required for all API routes except `/health` and auth endpoints.
+- System admin (Role.ADMIN or a system role with `system.manage`) can manage system config (users, roles/controls, properties, choices, views, related lists, dictionary, user prefs) and entity type list defaults.
+- System views and related lists respect `adminOnly`; non-admins only see `adminOnly = false` entries.
+- Worlds: read/list access for admins and users assigned as primary architect, world architect, world GM, world campaign creator, or world character creator. Only admins/architects can update worlds or manage world role assignments; only admins can change the primary architect.
+- Campaigns: read/list access for admins, campaign GMs, campaign creators, world architects, and roster players. Create allowed for admins and world architects/GMs (GM must belong to the world). Update/delete/roster changes allowed for admins, campaign GMs, or world architects.
+- Characters: read/list access for admins, the player, world architects, and campaign GMs. Create allowed for admins or world/campaign character creators (campaign GMs can create in their campaigns). Update/delete allowed for admins, world architects, or the player (admins can change `playerId`).
+- Entity types/fields/choices: templates are admin-only. World entity types/fields are managed by admins and world architects; non-admins can only read templates unless they are architects of the world.
+- Entities: create allowed per world `entityPermissionScope` (architects always; optional GMs/players). Read requires world access plus entity access grants (global/campaign/character); architects can read all entities in a world unless a character context is enforced. Write requires entity WRITE access in the current context (or admin). Entity access updates are restricted to admins, world architects, and world GMs.
+- Notes: readable to users who can read the entity. Admins/architects/world GMs see all notes for the requested context. Others see shared notes for the campaign context plus their own notes; campaign GMs see private notes in their campaign. Shared notes require a campaign context. Players can author notes only with a campaign + their own character; note tags are limited to accessible entities.
+
 ## Scripts
 Root:
 - `npm run dev` - starts backend + frontend

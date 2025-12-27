@@ -90,6 +90,9 @@ describe("FormView unsaved state", () => {
       if (url.startsWith("/api/references?entityKey=entity_types")) {
         return createResponse([{ id: "type-1", label: "NPC" }]);
       }
+      if (url.startsWith("/api/permissions?")) {
+        return createResponse({ canCreate: true, canEdit: true, canDelete: true });
+      }
       if (url === "/api/entities" && init?.method === "POST") {
         return createResponse({ id: "entity-1" });
       }
@@ -130,7 +133,8 @@ describe("FormView unsaved state", () => {
 
     await screen.findByRole("heading", { name: "Entity" });
 
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    const saveButton = await screen.findByRole("button", { name: "Save" });
+    await user.click(saveButton);
 
     await waitFor(() => {
       const fetchMock = (global as typeof globalThis).fetch as jest.Mock;

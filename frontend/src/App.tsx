@@ -1330,53 +1330,55 @@ function AppShell() {
                     >
                       Characters
                     </button>
-                    {entityTypeStats.length > 0 ? (
-                      <div className="sidebar__section">
-                        <span className="sidebar__section-title">Entities</span>
-                        <div className="sidebar__section-body sidebar__entity-list">
-                          <button
-                            type="button"
-                            className="sidebar__entity-item"
-                            onClick={() => {
-                              navigateWithGuard("/list/entities");
-                              handleSidebarSelect();
-                            }}
-                          >
-                            <span>All Entities</span>
-                          </button>
-                          {entityTypeStats.map((type) => (
+                    {context.worldId ? (
+                      entityTypeStats.length > 0 ? (
+                        <div className="sidebar__section">
+                          <span className="sidebar__section-title">Entities</span>
+                          <div className="sidebar__section-body sidebar__entity-list">
                             <button
-                              key={type.id}
                               type="button"
                               className="sidebar__entity-item"
                               onClick={() => {
-                                navigateWithGuard(`/list/entities?entityTypeId=${type.id}`);
+                                navigateWithGuard("/list/entities");
                                 handleSidebarSelect();
                               }}
                             >
-                              <span>{type.name}</span>
-                              <span className="sidebar__entity-count">{type.count}</span>
+                              <span>All Entities</span>
                             </button>
-                          ))}
+                            {entityTypeStats.map((type) => (
+                              <button
+                                key={type.id}
+                                type="button"
+                                className="sidebar__entity-item"
+                                onClick={() => {
+                                  navigateWithGuard(`/list/entities?entityTypeId=${type.id}`);
+                                  handleSidebarSelect();
+                                }}
+                              >
+                                <span>{type.name}</span>
+                                <span className="sidebar__entity-count">{type.count}</span>
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="sidebar__section">
-                        <span className="sidebar__section-title">Entities</span>
-                        <div className="sidebar__section-body sidebar__entity-list">
-                          <button
-                            type="button"
-                            className="sidebar__entity-item"
-                            onClick={() => {
-                              navigateWithGuard("/list/entities");
-                              handleSidebarSelect();
-                            }}
-                          >
-                            <span>All Entities</span>
-                          </button>
+                      ) : (
+                        <div className="sidebar__section">
+                          <span className="sidebar__section-title">Entities</span>
+                          <div className="sidebar__section-body sidebar__entity-list">
+                            <button
+                              type="button"
+                              className="sidebar__entity-item"
+                              onClick={() => {
+                                navigateWithGuard("/list/entities");
+                                handleSidebarSelect();
+                              }}
+                            >
+                              <span>All Entities</span>
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )
+                    ) : null}
                     {worldAdminAllowed ? (
                       <div className="sidebar__section">
                         <button

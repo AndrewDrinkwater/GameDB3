@@ -28,6 +28,7 @@ type Choice = { value: string; label: string };
 type EntityFormDesignerProps = {
   token: string;
   entityTypeId: string;
+  readOnly?: boolean;
 };
 
 const sortByOrder = (a: { sortOrder?: number }, b: { sortOrder?: number }) =>
@@ -35,7 +36,11 @@ const sortByOrder = (a: { sortOrder?: number }, b: { sortOrder?: number }) =>
 
 const sortByFormOrder = (a: FieldDefinition, b: FieldDefinition) => a.formOrder - b.formOrder;
 
-export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDesignerProps) {
+export default function EntityFormDesigner({
+  token,
+  entityTypeId,
+  readOnly
+}: EntityFormDesignerProps) {
   const [sections, setSections] = useState<FormSection[]>([]);
   const [fields, setFields] = useState<FieldDefinition[]>([]);
   const [loading, setLoading] = useState(true);
@@ -160,6 +165,7 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
   };
 
   const handleAddSection = async () => {
+    if (readOnly) return;
     const nextOrder = sections.length > 0 ? Math.max(...sections.map((s) => s.sortOrder ?? 0)) + 1 : 1;
     const response = await fetch("/api/entity-form-sections", {
       method: "POST",
@@ -181,6 +187,7 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
   };
 
   const moveSection = (sectionId: string, direction: -1 | 1) => {
+    if (readOnly) return;
     setSections((current) => {
       const sorted = [...current].sort(sortByOrder);
       const index = sorted.findIndex((section) => section.id === sectionId);
@@ -205,6 +212,7 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
   };
 
   const handleDeleteSection = async (sectionId: string) => {
+    if (readOnly) return;
     if (!window.confirm("Delete this section? Fields will be unassigned.")) return;
     const response = await fetch(`/api/entity-form-sections/${sectionId}`, {
       method: "DELETE",
@@ -296,9 +304,11 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
           <h3>Form Designer</h3>
           <p>Arrange fields, group them into sections, and tune visibility.</p>
         </div>
-        <button type="button" className="ghost-button" onClick={handleAddSection}>
-          Add section
-        </button>
+        {!readOnly ? (
+          <button type="button" className="ghost-button" onClick={handleAddSection}>
+            Add section
+          </button>
+        ) : null}
       </div>
 
       {sections.length === 0 ? (
@@ -315,12 +325,14 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                 className="form-designer__title-input"
                 value={section.title}
                 onChange={(event) => {
+                  if (readOnly) return;
                   const title = event.target.value;
                   setSections((current) =>
                     current.map((item) => (item.id === section.id ? { ...item, title } : item))
                   );
                 }}
                 onBlur={() => persistSectionUpdate(section.id, { title: section.title })}
+                disabled={readOnly}
               />
               <div className="form-designer__section-actions">
                 <div className="form-designer__section-order">
@@ -328,7 +340,9 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                     type="button"
                     className="ghost-button"
                     onClick={() => moveSection(section.id, -1)}
-                    disabled={sections.findIndex((item) => item.id === section.id) === 0}
+                    disabled={
+                      readOnly || sections.findIndex((item) => item.id === section.id) === 0
+                    }
                     aria-label="Move section up"
                   >
                     Up
@@ -338,6 +352,7 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                     className="ghost-button"
                     onClick={() => moveSection(section.id, 1)}
                     disabled={
+                      readOnly ||
                       sections.findIndex((item) => item.id === section.id) === sections.length - 1
                     }
                     aria-label="Move section down"
@@ -348,6 +363,7 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                 <select
                   value={layout}
                   onChange={(event) => {
+                    if (readOnly) return;
                     const nextLayout = event.target.value as FormSection["layout"];
                     setSections((current) =>
                       current.map((item) =>
@@ -356,6 +372,7 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                     );
                     void persistSectionUpdate(section.id, { layout: nextLayout });
                   }}
+                  disabled={readOnly}
                 >
                   <option value="ONE_COLUMN">Single column</option>
                   <option value="TWO_COLUMN">Two columns</option>
@@ -364,6 +381,7 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                   type="button"
                   className="ghost-button"
                   onClick={() => handleDeleteSection(section.id)}
+                  disabled={readOnly}
                 >
                   Remove
                 </button>
@@ -394,13 +412,15 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                       <div
                         key={field.id}
                         className="form-designer__field"
-                        draggable
+                        draggable={!readOnly}
                         onDragStart={() => {
+                          if (readOnly) return;
                           dragFieldId.current = field.id;
                         }}
                         onDragOver={(event) => event.preventDefault()}
                         onDrop={(event) => {
                           event.stopPropagation();
+                          if (readOnly) return;
                           handleDropField(section.id, column, index);
                         }}
                       >
@@ -419,6 +439,7 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                               type="checkbox"
                               checked={field.required}
                               onChange={(event) => {
+                                if (readOnly) return;
                                 const nextRequired = event.target.checked;
                                 updateField(field.id, (current) => ({
                                   ...current,
@@ -426,6 +447,7 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                                 }));
                                 void persistFieldUpdate(field.id, { required: nextRequired });
                               }}
+                              disabled={readOnly}
                             />
                             Required
                           </label>
@@ -440,6 +462,7 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                                 [field.id]: !current[field.id]
                               }))
                             }
+                            disabled={readOnly}
                           >
                             Conditions
                           </button>
@@ -450,7 +473,9 @@ export default function EntityFormDesigner({ token, entityTypeId }: EntityFormDe
                               value={resolveConditions(field.conditions) as any}
                               fieldOptions={conditionFieldOptions}
                               token={token}
+                              disabled={readOnly}
                               onChange={(next) => {
+                                if (readOnly) return;
                                 updateField(field.id, (current) => ({
                                   ...current,
                                   conditions: next

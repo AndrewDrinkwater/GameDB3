@@ -6,9 +6,11 @@ import EntityAccessEditor from "./EntityAccessEditor";
 import EntitySidePanel from "./EntitySidePanel";
 import EntityNotes from "./EntityNotes";
 import RelatedLists from "./RelatedLists";
+import Toast from "./Toast";
 import { usePopout } from "./PopoutProvider";
 import { useUnsavedChangesPrompt } from "../utils/unsavedChanges";
 import { dispatchUnauthorized } from "../utils/auth";
+import { usePermissions } from "../utils/permissions";
 
 type ViewField = {
   id: string;
@@ -248,6 +250,7 @@ export default function FormView({
   const [openAuditEntryId, setOpenAuditEntryId] = useState<string | null>(null);
   const [entityTypeWorldId, setEntityTypeWorldId] = useState<string | null>(null);
   const [entityPanelId, setEntityPanelId] = useState<string | null>(null);
+  const [entityTypePromptOptions, setEntityTypePromptOptions] = useState<Choice[]>([]);
   const [conditionFieldOptions, setConditionFieldOptions] = useState<ConditionFieldOption[]>([]);
   const [entityTab, setEntityTab] = useState<
     "info" | "config" | "access" | "notes" | "audit"
@@ -256,6 +259,11 @@ export default function FormView({
   const [fieldChoices, setFieldChoices] = useState<EntityFieldChoice[]>([]);
   const [fieldChoicesLoading, setFieldChoicesLoading] = useState(false);
   const [fieldChoicesError, setFieldChoicesError] = useState<string | null>(null);
+  const [noteDirty, setNoteDirty] = useState(false);
+  const [noteDiscardVersion, setNoteDiscardVersion] = useState(0);
+  const [saveNotice, setSaveNotice] = useState<{ id: string; message: string } | null>(
+    null
+  );
   const [newChoice, setNewChoice] = useState({
     value: "",
     label: "",
@@ -271,8 +279,30 @@ export default function FormView({
   const loadedKeyRef = useRef<string>("");
   const isDirtyRef = useRef(false);
   const suppressDirtyRef = useRef(false);
+  const entityTypePromptShownRef = useRef(false);
+  const entityTypeSelectionRef = useRef<string>("");
 
   const isNew = recordId === "new";
+  const { permissions } = usePermissions({
+    token,
+    entityKey: view?.entityKey,
+    recordId: isNew ? undefined : recordId,
+    worldId:
+      (typeof formData.worldId === "string" ? formData.worldId : undefined) ?? contextWorldId,
+    campaignId: contextCampaignId,
+    characterId: contextCharacterId,
+    entityTypeId:
+      (typeof formData.entityTypeId === "string" ? formData.entityTypeId : undefined) ??
+      (typeof formData.sourceTypeId === "string" ? formData.sourceTypeId : undefined),
+    entityFieldId:
+      typeof formData.entityFieldId === "string" ? formData.entityFieldId : undefined,
+    isTemplate: Boolean(formData.isTemplate),
+    enabled: Boolean(view?.entityKey)
+  });
+  const canCreateRecord = isNew ? permissions.canCreate : true;
+  const canEditRecord = isNew ? permissions.canCreate : permissions.canEdit;
+  const canDeleteRecord = !isNew && permissions.canDelete;
+  const isFormReadOnly = !canEditRecord;
   const formatAuditAction = (action: string) =>
     action
       .replace(/_/g, " ")
@@ -309,8 +339,19 @@ export default function FormView({
       entityAccess:
         view?.entityKey === "entities" && !entityAccessAllowed ? null : entityAccess
     });
+  const ensureSnapshotReady = () => {
+    if (hasSnapshotRef.current) return;
+    const key = `${viewKey}:${recordId}`;
+    if (loadedKeyRef.current !== key || loading || !view) return;
+    initialSnapshotRef.current = buildSnapshot();
+    hasSnapshotRef.current = true;
+    suppressDirtyRef.current = false;
+    setIsDirty(false);
+  };
   const clearDirty = () => {
     isDirtyRef.current = false;
+    setNoteDirty(false);
+    setNoteDiscardVersion((current) => current + 1);
     setIsDirty(false);
     window.dispatchEvent(new CustomEvent("ttrpg:form-dirty", { detail: { dirty: false } }));
   };
@@ -321,6 +362,10 @@ export default function FormView({
       return true;
     }
     return false;
+  };
+
+  const showSaveNotice = (message: string) => {
+    setSaveNotice({ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, message });
   };
 
   useEffect(() => {
@@ -425,6 +470,19 @@ export default function FormView({
             if (viewData.entityKey === "entities" && record.fieldValues) {
               setEntityValues(record.fieldValues as Record<string, unknown>);
             }
+            if (viewData.entityKey === "entities") {
+              const accessAllowed = (record as { accessAllowed?: boolean }).accessAllowed;
+              const auditAllowed = (record as { auditAllowed?: boolean }).auditAllowed;
+              if (typeof accessAllowed === "boolean") {
+                setEntityAccessAllowed(accessAllowed);
+                if (!accessAllowed) {
+                  setEntityAccessWarning("Access controls are unavailable for this entity.");
+                }
+              }
+              if (typeof auditAllowed === "boolean") {
+                setEntityAuditAllowed(auditAllowed);
+              }
+            }
           }
         } else {
           setFormData(initialValues ?? {});
@@ -457,6 +515,8 @@ export default function FormView({
     initialSnapshotRef.current = "";
     loadedKeyRef.current = "";
     suppressDirtyRef.current = false;
+    entityTypePromptShownRef.current = false;
+    entityTypeSelectionRef.current = "";
     setIsDirty(false);
   }, [viewKey, recordId]);
 
@@ -500,7 +560,7 @@ export default function FormView({
 
   useEffect(() => {
     if (loading || !view) return;
-    if (view.entityKey === "entities" && entityAccess === null) return;
+    if (view.entityKey === "entities" && entityAccessAllowed && entityAccess === null) return;
     const key = `${viewKey}:${recordId}`;
     if (loadedKeyRef.current !== key) return;
     if (snapshotKeyRef.current === key) return;
@@ -509,17 +569,23 @@ export default function FormView({
     hasSnapshotRef.current = true;
     suppressDirtyRef.current = false;
     setIsDirty(false);
-  }, [loading, view, viewKey, recordId, entityAccess]);
+  }, [loading, view, viewKey, recordId, entityAccess, entityAccessAllowed]);
 
   useEffect(() => {
     if (!hasSnapshotRef.current) return;
     if (suppressDirtyRef.current) {
-      setIsDirty(false);
+      setIsDirty(noteDirty);
       return;
     }
     const nextSnapshot = buildSnapshot();
-    setIsDirty(nextSnapshot !== initialSnapshotRef.current);
-  }, [formData, entityValues, entityAccess]);
+    const formDirty = nextSnapshot !== initialSnapshotRef.current;
+    setIsDirty(formDirty || noteDirty);
+  }, [formData, entityValues, entityAccess, noteDirty]);
+
+  useEffect(() => {
+    if (!noteDirty) return;
+    setIsDirty(true);
+  }, [noteDirty]);
 
   useEffect(() => {
     if (!view || view.entityKey !== "entities") return;
@@ -764,6 +830,8 @@ export default function FormView({
     };
 
     const loadAccess = async () => {
+      const key = `${viewKey}:${recordId}`;
+      if (recordId !== "new" && loadedKeyRef.current !== key) return;
       if (recordId === "new") {
         if (contextCampaignId) {
           const campaigns = await resolveLabels("campaigns", [contextCampaignId]);
@@ -793,6 +861,14 @@ export default function FormView({
       });
       setEntityAccessAllowed(true);
       setEntityAccessWarning(null);
+    }
+    return;
+  }
+
+  if ((formData as { accessAllowed?: boolean }).accessAllowed === false) {
+    if (!ignore) {
+      setEntityAccessAllowed(false);
+      setEntityAccessWarning("Access controls are unavailable for this entity.");
     }
     return;
   }
@@ -845,6 +921,99 @@ export default function FormView({
 
   useEffect(() => {
     let ignore = false;
+    if (!view || view.entityKey !== "entities") return;
+    if (!isNew) return;
+    if (formData.entityTypeId) return;
+    const worldId = (formData.worldId as string | undefined) ?? contextWorldId;
+    if (!worldId) return;
+
+    const loadEntityTypes = async () => {
+      const params = new URLSearchParams({ entityKey: "entity_types" });
+      params.set("worldId", worldId);
+      const response = await fetch(`/api/references?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (handleUnauthorized(response)) return;
+      if (!response.ok) return;
+      const data = (await response.json()) as Array<{ id: string; label: string }>;
+      if (!ignore) {
+        setEntityTypePromptOptions(data.map((item) => ({ value: item.id, label: item.label })));
+      }
+    };
+
+    void loadEntityTypes();
+
+    return () => {
+      ignore = true;
+    };
+  }, [view, isNew, formData.entityTypeId, formData.worldId, contextWorldId, token]);
+
+  useEffect(() => {
+    if (!view || view.entityKey !== "entities") return;
+    if (!isNew) return;
+    if (formData.entityTypeId) return;
+    if (entityTypePromptShownRef.current) return;
+    if (entityTypePromptOptions.length === 0) return;
+
+    entityTypePromptShownRef.current = true;
+    entityTypeSelectionRef.current = entityTypePromptOptions[0]?.value ?? "";
+
+    const EntityTypePrompt = () => {
+      const [value, setValue] = useState(entityTypeSelectionRef.current);
+      return (
+        <label className="form-view__field">
+          <span className="form-view__label">Entity type</span>
+          <select
+            value={value}
+            onChange={(event) => {
+              const next = event.target.value;
+              setValue(next);
+              entityTypeSelectionRef.current = next;
+            }}
+          >
+            {entityTypePromptOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      );
+    };
+
+    showPopout({
+      title: "What type of Entity are you creating?",
+      message: <EntityTypePrompt />,
+      dismissOnBackdrop: false,
+      actions: [
+        {
+          label: "Set type",
+          tone: "primary",
+          onClick: () => {
+            const selected = entityTypeSelectionRef.current;
+            if (!selected) return;
+            const option = entityTypePromptOptions.find((item) => item.value === selected);
+            setFormData((current) => ({ ...current, entityTypeId: selected }));
+            if (option) {
+              setReferenceLabels((current) => ({
+                ...current,
+                entityTypeId: option.label
+              }));
+            }
+          }
+        }
+      ]
+    });
+  }, [
+    view,
+    isNew,
+    formData.entityTypeId,
+    entityTypePromptOptions,
+    showPopout
+  ]);
+
+  useEffect(() => {
+    let ignore = false;
     if (!view || view.entityKey !== "entity_fields") {
       setEntityTypeWorldId(null);
       return;
@@ -885,6 +1054,15 @@ export default function FormView({
     }
 
     const loadAudit = async () => {
+      const key = `${viewKey}:${recordId}`;
+      if (loadedKeyRef.current !== key) return;
+      if ((formData as { auditAllowed?: boolean }).auditAllowed === false) {
+        if (!ignore) {
+          setEntityAuditAllowed(false);
+          setEntityAudit(null);
+        }
+        return;
+      }
       setEntityAuditLoading(true);
       setEntityAuditError(null);
       setOpenAuditEntryId(null);
@@ -1003,15 +1181,18 @@ export default function FormView({
   }, [view, entityFields, formData, entityValues]);
 
   const handleChange = (fieldKey: string, value: unknown) => {
+    ensureSnapshotReady();
     setFormData((current) => ({ ...current, [fieldKey]: value }));
   };
 
   const handleEntityValueChange = (fieldKey: string, value: unknown) => {
+    ensureSnapshotReady();
     setEntityValues((current) => ({ ...current, [fieldKey]: value }));
   };
 
   const renderEntityField = (field: EntityFieldDefinition) => {
     const value = entityValues[field.fieldKey];
+    const isDisabled = isFormReadOnly;
 
     if (field.fieldType === "BOOLEAN") {
       return (
@@ -1020,6 +1201,7 @@ export default function FormView({
             type="checkbox"
             checked={Boolean(value)}
             onChange={(event) => handleEntityValueChange(field.fieldKey, event.target.checked)}
+            disabled={isDisabled}
           />
           <span>{field.label}</span>
         </label>
@@ -1052,19 +1234,23 @@ export default function FormView({
                   value={labelValue}
                   placeholder="Search entities..."
                   onClick={() => {
+                    if (isDisabled) return;
                     setEntityReferenceOpen((current) => ({ ...current, [field.fieldKey]: true }));
                     void handleEntityReferenceSearch(field, labelValue);
                   }}
                   onChange={(event) => {
+                    if (isDisabled) return;
                     const next = event.target.value;
                     setEntityReferenceLabels((current) => ({ ...current, [field.fieldKey]: next }));
                     handleEntityValueChange(field.fieldKey, "");
                     void handleEntityReferenceSearch(field, next);
                   }}
                   onFocus={() => {
+                    if (isDisabled) return;
                     setEntityReferenceOpen((current) => ({ ...current, [field.fieldKey]: true }));
                     void handleEntityReferenceSearch(field, labelValue);
                   }}
+                  disabled={isDisabled}
                 />
                 {renderEntityInfoButton(entityRefId)}
               </div>
@@ -1073,23 +1259,25 @@ export default function FormView({
                   {options.map((option) => (
                     <button
                       type="button"
-                    key={option.value}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      closeEntityReferenceDropdown(field.fieldKey);
-                      handleEntityValueChange(field.fieldKey, option.value);
-                      setEntityReferenceLabels((current) => ({
-                        ...current,
-                        [field.fieldKey]: option.label
-                      }));
-                    }}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
+                      key={option.value}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (isDisabled) return;
+                        closeEntityReferenceDropdown(field.fieldKey);
+                        handleEntityValueChange(field.fieldKey, option.value);
+                        setEntityReferenceLabels((current) => ({
+                          ...current,
+                          [field.fieldKey]: option.label
+                        }));
+                      }}
+                      disabled={isDisabled}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
             ) : isOpen ? (
               <div className="reference-field__options reference-field__options--empty">
                 <div className="reference-field__empty">No available options.</div>
@@ -1110,11 +1298,13 @@ export default function FormView({
           <textarea
             value={value ? String(value) : ""}
             onChange={(event) => handleEntityValueChange(field.fieldKey, event.target.value)}
+            readOnly={isDisabled}
           />
         ) : field.fieldType === "CHOICE" ? (
           <select
             value={value ? String(value) : ""}
             onChange={(event) => handleEntityValueChange(field.fieldKey, event.target.value)}
+            disabled={isDisabled}
           >
             <option value="">Select...</option>
             {(field.choices ?? []).map((choice) => (
@@ -1128,6 +1318,7 @@ export default function FormView({
             type="text"
             value={value ? String(value) : ""}
             onChange={(event) => handleEntityValueChange(field.fieldKey, event.target.value)}
+            disabled={isDisabled}
           />
         )}
       </label>
@@ -1517,6 +1708,7 @@ export default function FormView({
       }
 
       markSaved();
+      showSaveNotice("Changes saved.");
       setSaving(false);
       window.dispatchEvent(
         new CustomEvent("ttrpg:form-saved", { detail: { recordId: savedId } })
@@ -1646,7 +1838,7 @@ export default function FormView({
           return false;
         })
       : formFields;
-  const configFieldKeys = new Set(isEntityView ? ["worldId"] : []);
+  const configFieldKeys = new Set(isEntityView ? ["worldId", "entityTypeId"] : []);
   const canViewConfigTab =
     isEntityView && (isNew || currentUserRole === "ADMIN" || entityAccess !== null);
   const infoFields = isEntityView
@@ -1659,15 +1851,11 @@ export default function FormView({
       : [];
     const sideBySideInfoFields =
       isEntityView && entityTab === "info"
-        ? infoFields.filter(
-            (field) => field.fieldKey === "worldId" || field.fieldKey === "entityTypeId"
-          )
+        ? infoFields.filter((field) => field.fieldKey === "worldId")
         : [];
     const remainingInfoFields =
       sideBySideInfoFields.length > 0
-        ? infoFields.filter(
-            (field) => field.fieldKey !== "worldId" && field.fieldKey !== "entityTypeId"
-          )
+        ? infoFields.filter((field) => field.fieldKey !== "worldId")
         : infoFields;
     const customFieldRows: string[][] =
       view.entityKey === "entity_field_choices"
@@ -1753,6 +1941,7 @@ export default function FormView({
                 campaignId: contextCampaignId,
                 characterId: contextCharacterId
               }}
+              disabled={field.readOnly || isFormReadOnly}
               onChange={(next) => handleChange(field.fieldKey, next)}
             />
           </label>
@@ -1771,6 +1960,7 @@ export default function FormView({
                 value={typeof value === "string" ? value : ""}
                 placeholder={placeholder}
                 onChange={(next) => handleChange(field.fieldKey, next)}
+                disabled={field.readOnly || isFormReadOnly}
               />
             </label>
           );
@@ -1787,7 +1977,7 @@ export default function FormView({
               type="checkbox"
               checked={Boolean(value)}
               onChange={(event) => handleChange(field.fieldKey, event.target.checked)}
-              disabled={field.readOnly || isLocked}
+              disabled={field.readOnly || isLocked || isFormReadOnly}
             />
             <span>{field.label}</span>
           </label>
@@ -1802,6 +1992,7 @@ export default function FormView({
         const disabled =
           field.readOnly ||
           isLocked ||
+          isFormReadOnly ||
           (field.fieldKey === "playerId" && currentUserRole !== "ADMIN");
 
         return (
@@ -1921,14 +2112,14 @@ export default function FormView({
               placeholder={field.placeholder ?? ""}
               onChange={(event) => handleChange(field.fieldKey, event.target.value)}
               required={field.required}
-              readOnly={field.readOnly || isLocked}
+              readOnly={field.readOnly || isLocked || isFormReadOnly}
             />
           ) : field.fieldType === "SELECT" ? (
             <select
               value={String(coerced)}
               onChange={(event) => handleChange(field.fieldKey, event.target.value)}
               required={field.required}
-              disabled={field.readOnly || isLocked}
+              disabled={field.readOnly || isLocked || isFormReadOnly}
             >
               <option value="">Select...</option>
               {choices.map((choice) => (
@@ -1952,7 +2143,7 @@ export default function FormView({
               placeholder={field.placeholder ?? ""}
               onChange={(event) => handleChange(field.fieldKey, event.target.value)}
               required={field.required}
-              disabled={field.readOnly || isLocked}
+              disabled={field.readOnly || isLocked || isFormReadOnly}
             />
           )}
         </label>
@@ -1973,10 +2164,10 @@ export default function FormView({
           <p className="form-view__subtitle">{isNew ? "Create" : "Edit"}</p>
         </div>
         <div className="form-view__actions">
-          {isEntityView && isDirty ? (
+          {isDirty ? (
             <div className="form-view__dirty">Unsaved changes</div>
           ) : null}
-          {!isNew ? (
+          {canDeleteRecord ? (
             <button type="button" className="danger-button" onClick={handleDelete}>
               Delete
             </button>
@@ -2111,6 +2302,7 @@ export default function FormView({
                               onChange={(event) =>
                                 updateChoice(choice.id, { value: event.target.value })
                               }
+                              disabled={!canEditRecord}
                             />
                             <input
                               type="text"
@@ -2118,16 +2310,19 @@ export default function FormView({
                               onChange={(event) =>
                                 updateChoice(choice.id, { label: event.target.value })
                               }
+                              disabled={!canEditRecord}
                             />
                             <ColorPicker
                               value={choice.pillColor ?? ""}
                               placeholder="#5b8def"
                               onChange={(next) => updateChoice(choice.id, { pillColor: next })}
+                              disabled={!canEditRecord}
                             />
                             <ColorPicker
                               value={choice.textColor ?? ""}
                               placeholder="#ffffff"
                               onChange={(next) => updateChoice(choice.id, { textColor: next })}
+                              disabled={!canEditRecord}
                             />
                             <input
                               type="number"
@@ -2137,71 +2332,87 @@ export default function FormView({
                                   sortOrder: event.target.value ? Number(event.target.value) : null
                               })
                             }
+                            disabled={!canEditRecord}
                           />
                           <div className="field-choices__actions">
-                            <button
-                              type="button"
-                              className="ghost-button"
-                              onClick={() => saveChoice(choice)}
-                            >
-                              Save
-                            </button>
-                            <button
-                              type="button"
-                              className="danger-button"
-                              onClick={() => deleteChoice(choice.id)}
-                            >
-                              Delete
-                            </button>
+                            {canEditRecord ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="ghost-button"
+                                  onClick={() => saveChoice(choice)}
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  className="danger-button"
+                                  onClick={() => deleteChoice(choice.id)}
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            ) : null}
                           </div>
                         </div>
                       ))
                     )}
-                    <div className="field-choices__row field-choices__row--new">
-                        <input
-                          type="text"
-                          placeholder="Value"
-                          value={newChoice.value}
-                          onChange={(event) =>
-                            setNewChoice((current) => ({ ...current, value: event.target.value }))
-                          }
+                    {canEditRecord ? (
+                      <div className="field-choices__row field-choices__row--new">
+                          <input
+                            type="text"
+                            placeholder="Value"
+                            value={newChoice.value}
+                            onChange={(event) =>
+                              setNewChoice((current) => ({
+                                ...current,
+                                value: event.target.value
+                              }))
+                            }
+                          />
+                          <input
+                            type="text"
+                            placeholder="Label"
+                            value={newChoice.label}
+                            onChange={(event) =>
+                              setNewChoice((current) => ({
+                                ...current,
+                                label: event.target.value
+                              }))
+                            }
+                          />
+                          <ColorPicker
+                            value={newChoice.pillColor}
+                            placeholder="#5b8def"
+                            onChange={(next) =>
+                              setNewChoice((current) => ({ ...current, pillColor: next }))
+                            }
+                          />
+                          <ColorPicker
+                            value={newChoice.textColor}
+                            placeholder="#ffffff"
+                            onChange={(next) =>
+                              setNewChoice((current) => ({ ...current, textColor: next }))
+                            }
+                          />
+                          <input
+                            type="number"
+                            placeholder="Sort"
+                            value={newChoice.sortOrder}
+                            onChange={(event) =>
+                              setNewChoice((current) => ({
+                                ...current,
+                                sortOrder: event.target.value
+                              }))
+                            }
                         />
-                        <input
-                          type="text"
-                          placeholder="Label"
-                          value={newChoice.label}
-                          onChange={(event) =>
-                            setNewChoice((current) => ({ ...current, label: event.target.value }))
-                          }
-                        />
-                        <ColorPicker
-                          value={newChoice.pillColor}
-                          placeholder="#5b8def"
-                          onChange={(next) =>
-                            setNewChoice((current) => ({ ...current, pillColor: next }))
-                          }
-                        />
-                        <ColorPicker
-                          value={newChoice.textColor}
-                          placeholder="#ffffff"
-                          onChange={(next) =>
-                            setNewChoice((current) => ({ ...current, textColor: next }))
-                          }
-                        />
-                        <input
-                          type="number"
-                          placeholder="Sort"
-                          value={newChoice.sortOrder}
-                          onChange={(event) =>
-                            setNewChoice((current) => ({ ...current, sortOrder: event.target.value }))
-                          }
-                      />
-                      <div className="field-choices__actions">
-                        <button type="button" className="primary-button" onClick={addChoice}>
-                          Add
-                        </button>
+                        <div className="field-choices__actions">
+                          <button type="button" className="primary-button" onClick={addChoice}>
+                            Add
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    ) : null}
                   </>
                 )}
               </div>
@@ -2282,7 +2493,11 @@ export default function FormView({
                     Save the entity type to configure its form layout.
                   </div>
                 ) : (
-                  <EntityFormDesigner token={token} entityTypeId={recordId} />
+                  <EntityFormDesigner
+                    token={token}
+                    entityTypeId={recordId}
+                    readOnly={!canEditRecord}
+                  />
                 )}
               </div>
             ) : null}
@@ -2302,8 +2517,10 @@ export default function FormView({
                 const labelValue = referenceLabels[field.fieldKey] ?? "";
                 const isOpen = referenceOpen[field.fieldKey];
                 const selections = referenceSelections[field.fieldKey] ?? [];
-                const disabled =
-                  field.readOnly || (field.fieldKey === "playerId" && currentUserRole !== "ADMIN");
+        const disabled =
+          field.readOnly ||
+          isFormReadOnly ||
+          (field.fieldKey === "playerId" && currentUserRole !== "ADMIN");
 
                 return (
                   <label key={field.fieldKey} className="form-view__field">
@@ -2495,8 +2712,11 @@ export default function FormView({
               worldId={(formData.worldId as string | undefined) ?? contextWorldId}
               contextCampaignId={contextCampaignId}
               contextCharacterId={contextCharacterId}
+              currentUserId={currentUserId}
               currentUserRole={currentUserRole as "ADMIN" | "USER" | undefined}
               onOpenEntity={(entityId) => setEntityPanelId(entityId)}
+              onDirtyChange={setNoteDirty}
+              discardVersion={noteDiscardVersion}
             />
           </div>
         ) : null}
@@ -2627,25 +2847,28 @@ export default function FormView({
             ) : null}
           </div>
         ) : null}
-        <div className="form-view__actions">
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={handleUpdateAndBack}
-            disabled={saving}
-          >
-            {saving ? "Saving..." : "Update"}
-          </button>
-          <button type="submit" className="primary-button" disabled={saving}>
-            {saving ? "Saving..." : "Save"}
-          </button>
-        </div>
+        {canEditRecord && (isNew ? canCreateRecord : true) ? (
+          <div className="form-view__actions">
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={handleUpdateAndBack}
+              disabled={saving}
+            >
+              {saving ? "Saving..." : "Update"}
+            </button>
+            <button type="submit" className="primary-button" disabled={saving}>
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        ) : null}
       </form>
         <RelatedLists
           token={token}
           parentEntityKey={view.entityKey}
           parentId={recordId}
           disabled={isNew}
+          canManage={canEditRecord}
         />
         <EntitySidePanel
           token={token}
@@ -2655,6 +2878,13 @@ export default function FormView({
           onClose={() => setEntityPanelId(null)}
           onOpenRecord={openEntityRecord}
         />
+        {saveNotice ? (
+          <Toast
+            key={saveNotice.id}
+            message={saveNotice.message}
+            onDismiss={() => setSaveNotice(null)}
+          />
+        ) : null}
       </div>
     );
   }

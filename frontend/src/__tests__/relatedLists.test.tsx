@@ -46,7 +46,7 @@ describe("RelatedLists", () => {
         return Promise.resolve(createResponse({ items: [] }));
       }
 
-      if (url.startsWith("/api/references?entityKey=characters")) {
+      if (url.startsWith("/api/references?entityKey=characters&query=")) {
         return Promise.resolve(
           createResponse([
             { id: "char-1", label: "Test Character" }

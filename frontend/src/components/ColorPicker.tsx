@@ -2,6 +2,7 @@ type ColorPickerProps = {
   value: string;
   placeholder?: string;
   onChange: (value: string) => void;
+  disabled?: boolean;
 };
 
 const normalizeHexColor = (value: string) => {
@@ -12,7 +13,12 @@ const normalizeHexColor = (value: string) => {
   return "#000000";
 };
 
-export default function ColorPicker({ value, placeholder, onChange }: ColorPickerProps) {
+export default function ColorPicker({
+  value,
+  placeholder,
+  onChange,
+  disabled
+}: ColorPickerProps) {
   const safeValue = normalizeHexColor(value);
 
   return (
@@ -23,6 +29,7 @@ export default function ColorPicker({ value, placeholder, onChange }: ColorPicke
         value={safeValue}
         onChange={(event) => onChange(event.target.value)}
         aria-label={placeholder ?? "Pick colour"}
+        disabled={disabled}
       />
       <input
         className="color-picker__input"
@@ -30,6 +37,7 @@ export default function ColorPicker({ value, placeholder, onChange }: ColorPicke
         placeholder={placeholder}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
       />
     </div>
   );

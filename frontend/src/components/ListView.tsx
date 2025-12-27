@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { dispatchUnauthorized } from "../utils/auth";
+import { usePermissions } from "../utils/permissions";
 import { usePopout } from "./PopoutProvider";
 import EntitySidePanel from "./EntitySidePanel";
 
@@ -151,6 +152,16 @@ export default function ListView({
   const listColumnsKey = JSON.stringify(listColumns);
   const entityTypeId = extraParams?.entityTypeId;
   const isEntityTypeList = view?.entityKey === "entities" && Boolean(entityTypeId);
+  const { permissions } = usePermissions({
+    token,
+    entityKey: view?.entityKey,
+    worldId: contextWorldId,
+    campaignId: contextCampaignId,
+    characterId: contextCharacterId,
+    entityTypeId,
+    enabled: Boolean(view?.entityKey)
+  });
+  const canCreate = permissions.canCreate;
 
   const normalizeFilterGroup = (input: unknown): ListFilterGroup => {
     if (Array.isArray(input)) {
@@ -1141,9 +1152,11 @@ export default function ListView({
             ) : null}
           </div>
           <div className="list-view__toolbar-right">
-            <button type="button" className="primary-button" onClick={() => onOpenForm("new")}>
-              New
-            </button>
+            {canCreate ? (
+              <button type="button" className="primary-button" onClick={() => onOpenForm("new")}>
+                New
+              </button>
+            ) : null}
             {canConfigureList ? (
               <button
                 type="button"
@@ -1298,13 +1311,15 @@ export default function ListView({
               <div className="list-view__empty-text">
                 {`This list contains ${String(titleOverride ?? view.title).toLowerCase()}.`}
               </div>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => onOpenForm("new")}
-              >
-                {`Create ${String(titleOverride ?? view.title).replace(/s$/, "")}`}
-              </button>
+              {canCreate ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => onOpenForm("new")}
+                >
+                  {`Create ${String(titleOverride ?? view.title).replace(/s$/, "")}`}
+                </button>
+              ) : null}
             </div>
           ) : (
             filteredRows.map((row) => (

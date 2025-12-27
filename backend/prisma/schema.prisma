@@ -81,6 +81,7 @@ enum EntityFormSectionLayout {
 enum NoteVisibility {
   PRIVATE
   SHARED
+  GM
 }
 
 enum NoteTagType {
@@ -356,6 +357,7 @@ model Character {
   world     World              @relation(fields: [worldId], references: [id])
   campaigns CharacterCampaign[]
   notes     Note[]
+  noteShares NoteShare[]
 
   @@index([playerId])
   @@index([worldId])
@@ -678,6 +680,7 @@ model Note {
   campaignId  String?
   characterId String?
   visibility  NoteVisibility @default(SHARED)
+  shareWithArchitect Boolean  @default(false)
   body        String
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
@@ -687,10 +690,23 @@ model Note {
   campaign  Campaign? @relation(fields: [campaignId], references: [id])
   character Character? @relation(fields: [characterId], references: [id])
   tags      NoteTag[]
+  shares    NoteShare[]
 
   @@index([entityId])
   @@index([authorId])
   @@index([campaignId])
+  @@index([characterId])
+}
+
+model NoteShare {
+  noteId      String
+  characterId String
+  createdAt   DateTime @default(now())
+
+  note      Note      @relation(fields: [noteId], references: [id])
+  character Character @relation(fields: [characterId], references: [id])
+
+  @@id([noteId, characterId])
   @@index([characterId])
 }
 

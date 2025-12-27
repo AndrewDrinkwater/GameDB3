@@ -2291,6 +2291,32 @@ body {
   letter-spacing: 0.08em;
 }
 
+.toast {
+  position: fixed;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  z-index: 70;
+  padding: 0.6rem 0.95rem;
+  border-radius: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  color: var(--text);
+  font-size: 0.9rem;
+  box-shadow: 0 12px 24px var(--shadow);
+  animation: toast-in 160ms ease;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .related-lists {
   margin-top: 2rem;
   background: color-mix(in srgb, var(--surface) 92%, var(--surface-2));
@@ -2410,6 +2436,11 @@ body {
 .related-lists__empty {
   padding: 1rem;
   color: var(--text-muted);
+}
+
+.related-lists__hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
 }
 
 .related-lists__error {
@@ -2927,6 +2958,18 @@ body {
   color: var(--text-muted);
 }
 
+.note-card__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.note-card__actions .ghost-button {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+}
+
 .note-card__author {
   font-weight: 600;
   color: var(--text);
@@ -2967,6 +3010,11 @@ body {
   color: color-mix(in srgb, var(--accent) 90%, #ffffff);
 }
 
+.note-card__visibility--gm {
+  background: color-mix(in srgb, #ef4444 18%, transparent);
+  color: #b91c1c;
+}
+
 .note-card__body {
   white-space: pre-wrap;
   line-height: 1.5;
@@ -2980,6 +3028,94 @@ body {
   padding: 0.45rem 0.7rem;
   border-radius: 0.6rem;
   border: 1px solid color-mix(in srgb, #f59e0b 50%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.note-card__notice-close {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+}
+
+.note-card__notice-close:hover,
+.note-card__notice-close:focus-visible {
+  background: color-mix(in srgb, #f59e0b 35%, transparent);
+}
+
+.note-card__edit {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.note-card__edit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.note-card__edit-actions label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.note-card__edit-actions select {
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.note-card__edit-buttons {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.note-gm-share {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  display: grid;
+  gap: 0.6rem;
+}
+
+.note-gm-share__option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.note-gm-share__players {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.note-gm-share__label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.note-gm-share__empty {
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
 .note-tag {

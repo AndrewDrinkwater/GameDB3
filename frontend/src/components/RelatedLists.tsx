@@ -37,6 +37,7 @@ type RelatedListsProps = {
   parentEntityKey: string;
   parentId: string;
   disabled?: boolean;
+  canManage?: boolean;
 };
 
 type AddState = {
@@ -163,7 +164,13 @@ const EntityFieldCreateForm = ({ token, entityTypeId, onCreated, onClose }: Enti
   );
 };
 
-export default function RelatedLists({ token, parentEntityKey, parentId, disabled }: RelatedListsProps) {
+export default function RelatedLists({
+  token,
+  parentEntityKey,
+  parentId,
+  disabled,
+  canManage = true
+}: RelatedListsProps) {
   const { showPopout, closePopout } = usePopout();
   const [lists, setLists] = useState<RelatedListConfig[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -251,10 +258,16 @@ export default function RelatedLists({ token, parentEntityKey, parentId, disable
       [list.key]: { ...(current[list.key] ?? emptyAddState), query, loading: true }
     }));
 
-    const response = await fetch(
-      `/api/references?entityKey=${list.relatedEntityKey}&query=${encodeURIComponent(query)}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
+    const searchParams = new URLSearchParams({
+      entityKey: list.relatedEntityKey,
+      query
+    });
+    if (list.parentEntityKey === "campaigns" && list.relatedEntityKey === "characters") {
+      searchParams.set("campaignId", parentId);
+    }
+    const response = await fetch(`/api/references?${searchParams.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
 
     if (response.status === 401) {
       dispatchUnauthorized();
@@ -367,7 +380,7 @@ export default function RelatedLists({ token, parentEntityKey, parentId, disable
       {activeList ? (
         <div className="related-lists__panel">
           <div className="related-lists__toolbar">
-            {canCreateEntityField ? (
+            {canCreateEntityField && canManage ? (
               <button
                 type="button"
                 className="primary-button"
@@ -391,7 +404,7 @@ export default function RelatedLists({ token, parentEntityKey, parentId, disable
               >
                 New field
               </button>
-            ) : (
+            ) : canManage ? (
               <div className="related-lists__add" onBlur={(event) => {
                 const nextTarget = event.relatedTarget as Node | null;
                 if (nextTarget && event.currentTarget.contains(nextTarget)) return;
@@ -429,7 +442,7 @@ export default function RelatedLists({ token, parentEntityKey, parentId, disable
                   </div>
                 ) : null}
               </div>
-            )}
+            ) : null}
           </div>
 
           <div className="related-lists__table">
@@ -467,13 +480,17 @@ export default function RelatedLists({ token, parentEntityKey, parentId, disable
                       );
                     })}
                   <div className="related-lists__cell">
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      onClick={() => handleRemove(activeList, item.relatedId)}
-                    >
-                      Remove
-                    </button>
+                    {canManage ? (
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => handleRemove(activeList, item.relatedId)}
+                      >
+                        Remove
+                      </button>
+                    ) : (
+                      <span className="related-lists__hint">No access</span>
+                    )}
                   </div>
                 </div>
               ))

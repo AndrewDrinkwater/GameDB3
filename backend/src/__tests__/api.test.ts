@@ -13,6 +13,8 @@ type TestContext = {
   architectToken: string;
   viewerId: string;
   viewerToken: string;
+  outsiderId: string;
+  outsiderToken: string;
   gmId: string;
   gmToken: string;
   gmCampaignId: string;
@@ -21,6 +23,7 @@ type TestContext = {
   entityFieldId: string;
   entityIdOne: string;
   entityIdTwo: string;
+  noteEntityId: string;
   personaEntityTypeId: string;
   personaEntityFieldId: string;
   personaChoiceId: string;
@@ -137,6 +140,13 @@ beforeAll(async () => {
     .send({ email: "viewer@example.com", password: "Viewer123!" });
   context.viewerToken = viewerLogin.body.token;
 
+  const outsiderUser = await ensureUser("outsider@example.com", "Outside User", "Outside123!");
+  context.outsiderId = outsiderUser.id;
+  const outsiderLogin = await request(app)
+    .post("/api/auth/login")
+    .send({ email: "outsider@example.com", password: "Outside123!" });
+  context.outsiderToken = outsiderLogin.body.token;
+
   const gmUser = await ensureUser("gm@example.com", "World GM", "Gm123!");
   context.gmId = gmUser.id;
   await prisma.worldGameMaster.upsert({
@@ -196,9 +206,36 @@ afterAll(async () => {
     });
     await prisma.character.delete({ where: { id: context.viewerCharacterId } }).catch(() => undefined);
   }
-  if (context.entityIdOne || context.entityIdTwo) {
+  if (context.noteEntityId) {
+    await prisma.noteTag.deleteMany({
+      where: { note: { entityId: context.noteEntityId } }
+    });
+    await prisma.note.deleteMany({ where: { entityId: context.noteEntityId } });
+  }
+  if (context.entityIdOne || context.entityIdTwo || context.noteEntityId) {
+    await prisma.entityAccess.deleteMany({
+      where: {
+        entityId: {
+          in: [context.entityIdOne, context.entityIdTwo, context.noteEntityId]
+            .filter(Boolean) as string[]
+        }
+      }
+    });
+    await prisma.entityFieldValue.deleteMany({
+      where: {
+        entityId: {
+          in: [context.entityIdOne, context.entityIdTwo, context.noteEntityId]
+            .filter(Boolean) as string[]
+        }
+      }
+    });
     await prisma.entity.deleteMany({
-      where: { id: { in: [context.entityIdOne, context.entityIdTwo].filter(Boolean) as string[] } }
+      where: {
+        id: {
+          in: [context.entityIdOne, context.entityIdTwo, context.noteEntityId]
+            .filter(Boolean) as string[]
+        }
+      }
     });
   }
   if (context.personaChoiceId) {
@@ -369,19 +406,54 @@ describe("Context filters", () => {
     expect(ids).toContain(context.characterId);
   });
 
-  it("includes ownerLabel for character references when GM", async () => {
-    const response = await request(app)
-      .get(`/api/references?entityKey=characters&campaignId=${context.campaignId}`)
-      .set("Authorization", `Bearer ${context.token}`);
+    it("includes ownerLabel for character references when GM", async () => {
+      const response = await request(app)
+        .get(`/api/references?entityKey=characters&campaignId=${context.campaignId}`)
+        .set("Authorization", `Bearer ${context.token}`);
 
-    expect(response.status).toBe(200);
-    const entry = response.body.find((item: { id: string }) => item.id === context.characterId);
-    expect(entry.ownerLabel).toBeTruthy();
-  });
+      expect(response.status).toBe(200);
+      const entry = response.body.find((item: { id: string }) => item.id === context.characterId);
+      expect(entry.ownerLabel).toBeTruthy();
+    });
 
-  it("returns context summary roles", async () => {
-    const response = await request(app)
-      .get(
+    it("shows campaign GM all world characters when adding to a campaign", async () => {
+      const gmCampaign = await prisma.campaign.create({
+        data: {
+          name: `GM Scope Campaign ${Date.now()}`,
+          description: "GM scope test",
+          worldId: context.worldId as string,
+          ownerId: context.gmId as string,
+          gmUserId: context.gmId as string,
+          createdById: context.gmId as string
+        }
+      });
+
+      const otherCharacter = await prisma.character.create({
+        data: {
+          name: `Other Character ${Date.now()}`,
+          worldId: context.worldId as string,
+          playerId: context.viewerId as string
+        }
+      });
+
+      try {
+        const response = await request(app)
+          .get(`/api/references?entityKey=characters&campaignId=${gmCampaign.id}`)
+          .set("Authorization", `Bearer ${context.gmToken}`);
+
+        expect(response.status).toBe(200);
+        const entry = response.body.find((item: { id: string }) => item.id === otherCharacter.id);
+        expect(entry).toBeTruthy();
+        expect(entry.ownerLabel).toBeTruthy();
+      } finally {
+        await prisma.campaign.delete({ where: { id: gmCampaign.id } }).catch(() => undefined);
+        await prisma.character.delete({ where: { id: otherCharacter.id } }).catch(() => undefined);
+      }
+    });
+
+    it("returns context summary roles", async () => {
+      const response = await request(app)
+        .get(
         `/api/context/summary?worldId=${context.worldId}&campaignId=${context.campaignId}&characterId=${context.characterId}`
       )
       .set("Authorization", `Bearer ${context.token}`);
@@ -676,5 +748,181 @@ describe("Entity type and field permissions", () => {
       });
 
     expect(choiceResponse.status).toBe(403);
+  });
+});
+
+describe("Access visibility", () => {
+  it("hides worlds from unrelated users", async () => {
+    const response = await request(app)
+      .get("/api/worlds")
+      .set("Authorization", `Bearer ${context.outsiderToken}`);
+
+    expect(response.status).toBe(200);
+    const ids = response.body.map((item: { id: string }) => item.id);
+    expect(ids).not.toContain(context.worldId);
+  });
+
+  it("blocks unrelated users from campaign and character detail", async () => {
+    const campaignResponse = await request(app)
+      .get(`/api/campaigns/${context.campaignId}`)
+      .set("Authorization", `Bearer ${context.outsiderToken}`);
+
+    expect(campaignResponse.status).toBe(403);
+
+    const characterResponse = await request(app)
+      .get(`/api/characters/${context.characterId}`)
+      .set("Authorization", `Bearer ${context.outsiderToken}`);
+
+    expect(characterResponse.status).toBe(403);
+  });
+});
+
+describe("Notes access", () => {
+  let sharedNoteId: string;
+  let gmPrivateNoteId: string;
+  let playerPrivateNoteId: string;
+
+  beforeAll(async () => {
+    if (!context.viewerCharacterId) {
+      const viewerCharacter = await prisma.character.create({
+        data: {
+          name: `Viewer Character ${Date.now()}`,
+          worldId: context.worldId as string,
+          playerId: context.viewerId as string
+        }
+      });
+      context.viewerCharacterId = viewerCharacter.id;
+
+      await prisma.characterCampaign.upsert({
+        where: {
+          characterId_campaignId: {
+            characterId: viewerCharacter.id,
+            campaignId: context.campaignId as string
+          }
+        },
+        update: {},
+        create: {
+          characterId: viewerCharacter.id,
+          campaignId: context.campaignId as string,
+          status: "ACTIVE"
+        }
+      });
+    }
+
+    const entityResponse = await request(app)
+      .post("/api/entities")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        worldId: context.worldId,
+        entityTypeId: context.entityTypeId,
+        name: `Notes Entity ${Date.now()}`,
+        access: {
+          read: { global: true },
+          write: { global: true }
+        }
+      });
+
+    expect(entityResponse.status).toBe(201);
+    context.noteEntityId = entityResponse.body.id;
+
+    const sharedResponse = await request(app)
+      .post(`/api/entities/${context.noteEntityId}/notes`)
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        body: "Shared note for campaign",
+        visibility: "SHARED",
+        campaignId: context.campaignId
+      });
+
+    expect(sharedResponse.status).toBe(201);
+    sharedNoteId = sharedResponse.body.id;
+
+    const gmResponse = await request(app)
+      .post(`/api/entities/${context.noteEntityId}/notes`)
+      .set("Authorization", `Bearer ${context.gmToken}`)
+      .send({
+        body: "GM private note",
+        visibility: "PRIVATE",
+        campaignId: context.campaignId
+      });
+
+    expect(gmResponse.status).toBe(201);
+    gmPrivateNoteId = gmResponse.body.id;
+
+    const playerResponse = await request(app)
+      .post(`/api/entities/${context.noteEntityId}/notes`)
+      .set("Authorization", `Bearer ${context.viewerToken}`)
+      .send({
+        body: "Player private note",
+        visibility: "PRIVATE",
+        campaignId: context.campaignId,
+        characterId: context.viewerCharacterId
+      });
+
+    expect(playerResponse.status).toBe(201);
+    playerPrivateNoteId = playerResponse.body.id;
+  });
+
+  it("requires campaign context for shared notes", async () => {
+    const response = await request(app)
+      .post(`/api/entities/${context.noteEntityId}/notes`)
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        body: "Shared note without campaign",
+        visibility: "SHARED"
+      });
+
+    expect(response.status).toBe(400);
+  });
+
+  it("blocks players from authoring without character context", async () => {
+    const response = await request(app)
+      .post(`/api/entities/${context.noteEntityId}/notes`)
+      .set("Authorization", `Bearer ${context.viewerToken}`)
+      .send({
+        body: "Player note without character",
+        visibility: "PRIVATE",
+        campaignId: context.campaignId
+      });
+
+    expect(response.status).toBe(403);
+  });
+
+  it("returns shared notes to unrelated users but hides private notes", async () => {
+    const response = await request(app)
+      .get(`/api/entities/${context.noteEntityId}/notes?campaignId=${context.campaignId}`)
+      .set("Authorization", `Bearer ${context.outsiderToken}`);
+
+    expect(response.status).toBe(200);
+    const ids = response.body.map((item: { id: string }) => item.id);
+    expect(ids).toContain(sharedNoteId);
+    expect(ids).not.toContain(gmPrivateNoteId);
+    expect(ids).not.toContain(playerPrivateNoteId);
+  });
+
+  it("shows campaign GMs all notes in that campaign", async () => {
+    const response = await request(app)
+      .get(`/api/entities/${context.noteEntityId}/notes?campaignId=${context.campaignId}`)
+      .set("Authorization", `Bearer ${context.gmToken}`);
+
+    expect(response.status).toBe(200);
+    const ids = response.body.map((item: { id: string }) => item.id);
+    expect(ids).toEqual(
+      expect.arrayContaining([sharedNoteId, gmPrivateNoteId, playerPrivateNoteId])
+    );
+  });
+
+  it("shows players their own private notes in campaign context", async () => {
+    const response = await request(app)
+      .get(
+        `/api/entities/${context.noteEntityId}/notes?campaignId=${context.campaignId}&characterId=${context.viewerCharacterId}`
+      )
+      .set("Authorization", `Bearer ${context.viewerToken}`);
+
+    expect(response.status).toBe(200);
+    const ids = response.body.map((item: { id: string }) => item.id);
+    expect(ids).toContain(sharedNoteId);
+    expect(ids).toContain(playerPrivateNoteId);
+    expect(ids).not.toContain(gmPrivateNoteId);
   });
 });

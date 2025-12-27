@@ -32,6 +32,7 @@ type ConditionBuilderProps = {
     campaignId?: string;
     characterId?: string;
   };
+  disabled?: boolean;
   onChange: (next: ConditionGroup) => void;
 };
 
@@ -50,6 +51,7 @@ export default function ConditionBuilder({
   fieldOptions,
   token,
   context,
+  disabled,
   onChange
 }: ConditionBuilderProps) {
   const normalizeGroup = (input?: ConditionGroup | null): ConditionGroup => {
@@ -164,6 +166,7 @@ export default function ConditionBuilder({
   };
 
   const updateRuleAtPath = (path: number[], index: number, next: Partial<ConditionRule>) => {
+    if (disabled) return;
     onChange(
       updateGroupAtPath(group, path, (target) => ({
         ...target,
@@ -173,6 +176,7 @@ export default function ConditionBuilder({
   };
 
   const removeRuleAtPath = (path: number[], index: number) => {
+    if (disabled) return;
     onChange(
       updateGroupAtPath(group, path, (target) => ({
         ...target,
@@ -182,6 +186,7 @@ export default function ConditionBuilder({
   };
 
   const setGroupLogicAtPath = (path: number[], logic: "AND" | "OR") => {
+    if (disabled) return;
     onChange(updateGroupAtPath(group, path, (target) => ({ ...target, logic })));
   };
 
@@ -202,6 +207,7 @@ export default function ConditionBuilder({
               value: ""
             })
           }
+          disabled={disabled}
         >
           <option value="">Select field...</option>
           {fields.map((field) => (
@@ -213,6 +219,7 @@ export default function ConditionBuilder({
         <select
           value={rule.operator}
           onChange={(event) => updateRuleAtPath(path, index, { operator: event.target.value })}
+          disabled={disabled}
         >
           {operatorList.map((option) => (
             <option key={option.value} value={option.value}>
@@ -226,6 +233,7 @@ export default function ConditionBuilder({
               <select
                 value={rule.value ?? ""}
                 onChange={(event) => updateRuleAtPath(path, index, { value: event.target.value })}
+                disabled={disabled}
               >
                 <option value="">Select value...</option>
                 {fieldMeta.options.map((option) => (
@@ -250,6 +258,7 @@ export default function ConditionBuilder({
                     );
                     updateRuleAtPath(path, index, { value: values });
                   }}
+                  disabled={disabled}
                 >
                   {options.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -263,6 +272,7 @@ export default function ConditionBuilder({
               <select
                 value={rule.value ?? ""}
                 onChange={(event) => updateRuleAtPath(path, index, { value: event.target.value })}
+                disabled={disabled}
               >
                 <option value="">Select value...</option>
                 {options.map((option) => (
@@ -279,6 +289,7 @@ export default function ConditionBuilder({
               value={rule.value ?? ""}
               placeholder="Value"
               onChange={(event) => updateRuleAtPath(path, index, { value: event.target.value })}
+              disabled={disabled}
             />
           );
         })()}
@@ -286,6 +297,7 @@ export default function ConditionBuilder({
           type="button"
           className="ghost-button condition-builder__remove"
           onClick={() => removeRuleAtPath(path, index)}
+          disabled={disabled}
         >
           Remove
         </button>
@@ -301,6 +313,7 @@ export default function ConditionBuilder({
           <select
             value={current.logic}
             onChange={(event) => setGroupLogicAtPath(path, event.target.value as "AND" | "OR")}
+            disabled={disabled}
           >
             <option value="AND">All conditions match</option>
             <option value="OR">Any condition matches</option>
@@ -311,6 +324,7 @@ export default function ConditionBuilder({
             type="button"
             className="ghost-button"
             onClick={() => removeGroupAtPath(path)}
+            disabled={disabled}
           >
             Remove group
           </button>
@@ -320,10 +334,20 @@ export default function ConditionBuilder({
         {current.rules.map((rule, index) => renderRule(rule, index, path))}
       </div>
       <div className="condition-builder__group-actions">
-        <button type="button" className="ghost-button" onClick={() => addRuleAtPath(path)}>
+        <button
+          type="button"
+          className="ghost-button"
+          onClick={() => addRuleAtPath(path)}
+          disabled={disabled}
+        >
           Add condition
         </button>
-        <button type="button" className="ghost-button" onClick={() => addGroupAtPath(path)}>
+        <button
+          type="button"
+          className="ghost-button"
+          onClick={() => addGroupAtPath(path)}
+          disabled={disabled}
+        >
           Add group
         </button>
       </div>
