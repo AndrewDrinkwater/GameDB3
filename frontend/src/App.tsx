@@ -5,6 +5,7 @@ import FormView from "./components/FormView";
 import ContextBar, { ContextSelection } from "./components/ContextBar";
 import PopoutProvider from "./components/PopoutProvider";
 import { useUnsavedChangesPrompt } from "./utils/unsavedChanges";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 type User = {
   id: string;
@@ -107,6 +108,7 @@ function AppShell() {
   const [contextOpen, setContextOpen] = useState(false);
   const [worldAdminExpanded, setWorldAdminExpanded] = useState(true);
   const [worldAdminAllowed, setWorldAdminAllowed] = useState(false);
+  const [globalError, setGlobalError] = useState<string | null>(null);
     const [entityTypeStats, setEntityTypeStats] = useState<
       Array<{ id: string; name: string; count: number }>
     >([]);
@@ -324,6 +326,32 @@ function AppShell() {
     window.addEventListener("ttrpg:unauthorized", handleUnauthorized);
     return () => window.removeEventListener("ttrpg:unauthorized", handleUnauthorized);
   }, [attemptRefresh]);
+
+  useEffect(() => {
+    const handleSaved = () => {
+      hasUnsavedChangesRef.current = false;
+      setHasUnsavedChanges(false);
+    };
+    window.addEventListener("ttrpg:form-saved", handleSaved);
+    return () => window.removeEventListener("ttrpg:form-saved", handleSaved);
+  }, []);
+
+  useEffect(() => {
+    const handleError = (event: ErrorEvent) => {
+      console.error("App error:", event.error || event.message);
+      setGlobalError("We hit a problem, but you can keep working.");
+    };
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      console.error("Unhandled rejection:", event.reason);
+      setGlobalError("We hit a problem, but you can keep working.");
+    };
+    window.addEventListener("error", handleError);
+    window.addEventListener("unhandledrejection", handleRejection);
+    return () => {
+      window.removeEventListener("error", handleError);
+      window.removeEventListener("unhandledrejection", handleRejection);
+    };
+  }, []);
 
   useEffect(() => {
     const syncRoute = () => {
@@ -1490,7 +1518,21 @@ function AppShell() {
               </div>
             </aside>
 
-            <main className="app__main">{renderContent()}</main>
+            <main className="app__main">
+              {globalError ? (
+                <div className="global-error">
+                  <span>{globalError}</span>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => setGlobalError(null)}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              ) : null}
+              <ErrorBoundary resetKey={route}>{renderContent()}</ErrorBoundary>
+            </main>
           </div>
         </>
       ) : (

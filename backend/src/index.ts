@@ -10,6 +10,8 @@ import {
   EntityAccessType,
   EntityFieldType,
   EntityFormSectionLayout,
+  NoteTagType,
+  NoteVisibility,
   PropertyValueType,
   RelatedListFieldSource,
   Role,
@@ -292,6 +294,15 @@ const canManageCampaign = async (userId: string, campaignId: string) => {
   if (!campaign) return false;
   if (campaign.gmUserId === userId) return true;
   return isWorldArchitect(userId, campaign.worldId);
+};
+
+const isCampaignGm = async (userId: string, campaignId: string) => {
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { gmUserId: true }
+  });
+  if (!campaign) return false;
+  return campaign.gmUserId === userId;
 };
 
 const canAccessCampaign = async (userId: string, campaignId: string) => {
@@ -631,7 +642,9 @@ const entityViewSeeds: Record<string, ViewSeed> = {
       { fieldKey: "entityFieldId", label: "Field", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "entity_fields" },
       { fieldKey: "value", label: "Value", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2 },
       { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
-      { fieldKey: "sortOrder", label: "Sort", fieldType: SystemFieldType.NUMBER, listOrder: 4, formOrder: 4 }
+      { fieldKey: "pillColor", label: "Pill Colour", fieldType: SystemFieldType.TEXT, listOrder: 4, formOrder: 4 },
+      { fieldKey: "textColor", label: "Text Colour", fieldType: SystemFieldType.TEXT, listOrder: 5, formOrder: 5 },
+      { fieldKey: "sortOrder", label: "Sort", fieldType: SystemFieldType.NUMBER, listOrder: 6, formOrder: 6 }
     ]
   },
   "entity_field_choices.form": {
@@ -645,7 +658,9 @@ const entityViewSeeds: Record<string, ViewSeed> = {
       { fieldKey: "entityFieldId", label: "Field", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "entity_fields" },
       { fieldKey: "value", label: "Value", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2, required: true },
       { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true },
-      { fieldKey: "sortOrder", label: "Sort", fieldType: SystemFieldType.NUMBER, listOrder: 4, formOrder: 4 }
+      { fieldKey: "pillColor", label: "Pill Colour", fieldType: SystemFieldType.TEXT, listOrder: 4, formOrder: 4 },
+      { fieldKey: "textColor", label: "Text Colour", fieldType: SystemFieldType.TEXT, listOrder: 5, formOrder: 5 },
+      { fieldKey: "sortOrder", label: "Sort", fieldType: SystemFieldType.NUMBER, listOrder: 6, formOrder: 6 }
     ]
   },
   "entities.list": {
@@ -740,6 +755,16 @@ const ensureSeededView = async (key: string) => {
     where: { key: seed.key },
     include: { fields: true }
   });
+};
+
+const backfillSeededViews = async (keys: string[]) => {
+  for (const key of keys) {
+    try {
+      await ensureSeededView(key);
+    } catch (error) {
+      console.warn(`Failed to backfill view ${key}.`, error);
+    }
+  }
 };
 
 const ensureSeededRelatedList = async (key: string) => {
@@ -864,6 +889,46 @@ const buildEntityAccessFilter = async (
   }
 
   return { worldId, OR: accessFilters };
+};
+
+const noteTagPattern = /@\[(.+?)\]\((entity|location):([^)]+)\)/g;
+
+const extractNoteTags = (body: string) => {
+  noteTagPattern.lastIndex = 0;
+  const tags: Array<{ tagType: NoteTagType; targetId: string; label: string }> = [];
+  if (!body) return tags;
+  let match: RegExpExecArray | null = null;
+  while ((match = noteTagPattern.exec(body))) {
+    const [, label, rawType, targetId] = match;
+    if (!label || !targetId) continue;
+    const tagType = rawType === "location" ? NoteTagType.LOCATION : NoteTagType.ENTITY;
+    tags.push({ tagType, targetId, label });
+  }
+  return tags;
+};
+
+const getAccessibleEntity = async (
+  user: User,
+  entityId: string,
+  campaignId?: string,
+  characterId?: string
+) => {
+  const entity = await prisma.entity.findUnique({
+    where: { id: entityId },
+    select: { id: true, worldId: true, name: true }
+  });
+  if (!entity) return null;
+  const accessFilter = await buildEntityAccessFilter(
+    user,
+    entity.worldId,
+    campaignId,
+    characterId
+  );
+  const access = await prisma.entity.findFirst({
+    where: { id: entityId, ...accessFilter },
+    select: { id: true }
+  });
+  return access ? entity : null;
 };
 
 const logSystemAudit = async (
@@ -2771,12 +2836,14 @@ app.get("/api/system/choices/:id", requireAuth, requireSystemAdmin, async (req, 
 });
 
 app.post("/api/system/choices", requireAuth, requireSystemAdmin, async (req, res) => {
-  const { listKey, value, label, sortOrder, isActive } = req.body as {
+  const { listKey, value, label, sortOrder, isActive, pillColor, textColor } = req.body as {
     listKey?: string;
     value?: string;
     label?: string;
     sortOrder?: number;
     isActive?: boolean;
+    pillColor?: string | null;
+    textColor?: string | null;
   };
 
   if (!listKey || !value || !label) {
@@ -2785,24 +2852,26 @@ app.post("/api/system/choices", requireAuth, requireSystemAdmin, async (req, res
   }
 
   const choice = await prisma.systemChoice.create({
-    data: { listKey, value, label, sortOrder, isActive }
+    data: { listKey, value, label, sortOrder, isActive, pillColor, textColor }
   });
   res.status(201).json(choice);
 });
 
 app.put("/api/system/choices/:id", requireAuth, requireSystemAdmin, async (req, res) => {
   const { id } = req.params;
-  const { listKey, value, label, sortOrder, isActive } = req.body as {
+  const { listKey, value, label, sortOrder, isActive, pillColor, textColor } = req.body as {
     listKey?: string;
     value?: string;
     label?: string;
     sortOrder?: number;
     isActive?: boolean;
+    pillColor?: string | null;
+    textColor?: string | null;
   };
 
   const choice = await prisma.systemChoice.update({
     where: { id },
-    data: { listKey, value, label, sortOrder, isActive }
+    data: { listKey, value, label, sortOrder, isActive, pillColor, textColor }
   });
   res.json(choice);
 });
@@ -4510,7 +4579,9 @@ app.post("/api/entity-types", requireAuth, async (req, res) => {
             entityFieldId: createdField.id,
             value: choice.value,
             label: choice.label,
-            sortOrder: choice.sortOrder ?? undefined
+            sortOrder: choice.sortOrder ?? undefined,
+            pillColor: choice.pillColor ?? undefined,
+            textColor: choice.textColor ?? undefined
           }))
         });
       }
@@ -5149,6 +5220,32 @@ app.get("/api/entity-field-choices", requireAuth, async (req, res) => {
   res.json(choices);
 });
 
+app.get("/api/entity-field-choices/:id", requireAuth, async (req, res) => {
+  const user = (req as AuthRequest).user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+
+  const { id } = req.params;
+  const choice = await prisma.entityFieldChoice.findUnique({
+    where: { id },
+    include: { entityField: { select: { entityTypeId: true } } }
+  });
+  if (!choice) {
+    res.status(404).json({ error: "Choice not found." });
+    return;
+  }
+
+  if (!isAdmin(user) && !(await canAccessEntityType(user.id, choice.entityField.entityTypeId))) {
+    res.status(403).json({ error: "Forbidden." });
+    return;
+  }
+
+  const { entityField, ...choiceData } = choice;
+  res.json(choiceData);
+});
+
 app.post("/api/entity-field-choices", requireAuth, async (req, res) => {
   const user = (req as AuthRequest).user;
   if (!user) {
@@ -5156,11 +5253,13 @@ app.post("/api/entity-field-choices", requireAuth, async (req, res) => {
     return;
   }
 
-  const { entityFieldId, value, label, sortOrder } = req.body as {
+  const { entityFieldId, value, label, sortOrder, pillColor, textColor } = req.body as {
     entityFieldId?: string;
     value?: string;
     label?: string;
     sortOrder?: number;
+    pillColor?: string | null;
+    textColor?: string | null;
   };
 
   if (!entityFieldId || !value || !label) {
@@ -5188,7 +5287,9 @@ app.post("/api/entity-field-choices", requireAuth, async (req, res) => {
         entityFieldId,
         value,
         label,
-        sortOrder
+        sortOrder,
+        pillColor,
+        textColor
       }
     });
 
@@ -5224,15 +5325,17 @@ app.put("/api/entity-field-choices/:id", requireAuth, async (req, res) => {
     return;
   }
 
-  const { value, label, sortOrder } = req.body as {
+  const { value, label, sortOrder, pillColor, textColor } = req.body as {
     value?: string;
     label?: string;
     sortOrder?: number;
+    pillColor?: string | null;
+    textColor?: string | null;
   };
 
   const choice = await prisma.entityFieldChoice.update({
     where: { id },
-    data: { value, label, sortOrder }
+    data: { value, label, sortOrder, pillColor, textColor }
   });
 
   res.json(choice);
@@ -5951,21 +6054,28 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
   }
 
   const { id } = req.params;
+  try {
     const entity = await prisma.entity.findUnique({
       where: { id },
       select: { worldId: true, name: true }
     });
-  if (!entity) {
-    res.status(404).json({ error: "Entity not found." });
-    return;
-  }
+    if (!entity) {
+      res.status(404).json({ error: "Entity not found." });
+      return;
+    }
 
-  if (!isAdmin(user) && !(await isWorldArchitect(user.id, entity.worldId))) {
-    res.status(403).json({ error: "Forbidden." });
-    return;
-  }
+    const isArchitect = await isWorldArchitect(user.id, entity.worldId);
+    const isGm =
+      (await isWorldGameMaster(user.id, entity.worldId)) ||
+      (await isWorldGm(user.id, entity.worldId));
+    if (!isAdmin(user) && !isArchitect && !isGm) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
 
     await prisma.$transaction([
+      prisma.noteTag.deleteMany({ where: { note: { entityId: id } } }),
+      prisma.note.deleteMany({ where: { entityId: id } }),
       prisma.systemAudit.create({
         data: {
           entityKey: "entities",
@@ -5979,7 +6089,11 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
       prisma.entityFieldValue.deleteMany({ where: { entityId: id } }),
       prisma.entity.delete({ where: { id } })
     ]);
-  res.json({ ok: true });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Failed to delete entity.", error);
+    res.status(500).json({ error: "Delete failed." });
+  }
 });
 
   app.get("/api/entities/:id/access", requireAuth, async (req, res) => {
@@ -5999,7 +6113,11 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
     return;
   }
 
-  if (!isAdmin(user) && !(await isWorldArchitect(user.id, entity.worldId))) {
+  const isArchitect = await isWorldArchitect(user.id, entity.worldId);
+  const isGm =
+    (await isWorldGameMaster(user.id, entity.worldId)) ||
+    (await isWorldGm(user.id, entity.worldId));
+  if (!isAdmin(user) && !isArchitect && !isGm) {
     res.status(403).json({ error: "Forbidden." });
     return;
   }
@@ -6343,7 +6461,11 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
     return;
   }
 
-    if (!isAdmin(user) && !(await isWorldArchitect(user.id, entity.worldId))) {
+    const isArchitect = await isWorldArchitect(user.id, entity.worldId);
+    const isGm =
+      (await isWorldGameMaster(user.id, entity.worldId)) ||
+      (await isWorldGm(user.id, entity.worldId));
+    if (!isAdmin(user) && !isArchitect && !isGm) {
       res.status(403).json({ error: "Forbidden." });
       return;
     }
@@ -6430,6 +6552,381 @@ app.delete("/api/entities/:id", requireAuth, async (req, res) => {
     await prisma.$transaction(operations);
 
     res.json({ ok: true });
+  });
+
+  app.get("/api/entities/:id/notes", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+    const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+
+    const entity = await prisma.entity.findUnique({
+      where: { id },
+      select: { id: true, worldId: true }
+    });
+    if (!entity) {
+      res.status(404).json({ error: "Entity not found." });
+      return;
+    }
+
+    const accessFilter = await buildEntityAccessFilter(user, entity.worldId, campaignId, characterId);
+    const canRead = await prisma.entity.findFirst({
+      where: { id, ...accessFilter },
+      select: { id: true }
+    });
+    if (!canRead) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const isArchitect = await isWorldArchitect(user.id, entity.worldId);
+    const isWorldGmFlag = await isWorldGameMaster(user.id, entity.worldId);
+    const isContextCampaignGm = campaignId ? await isCampaignGm(user.id, campaignId) : false;
+    const canSeeAll = isAdmin(user) || isArchitect || isWorldGmFlag;
+
+    const visibilityFilters: Prisma.NoteWhereInput[] = [
+      { authorId: user.id },
+      {
+        visibility: NoteVisibility.SHARED,
+        OR: campaignId ? [{ campaignId }, { campaignId: null }] : [{ campaignId: null }]
+      }
+    ];
+    if (isContextCampaignGm && campaignId) {
+      visibilityFilters.push({ visibility: NoteVisibility.PRIVATE, campaignId });
+    }
+
+    const notes = await prisma.note.findMany({
+      where: canSeeAll ? { entityId: id } : { entityId: id, OR: visibilityFilters },
+      include: {
+        author: { select: { id: true, name: true, email: true } },
+        character: { select: { id: true, name: true } },
+        tags: true
+      },
+      orderBy: { createdAt: "desc" }
+    });
+
+    const world = await prisma.world.findUnique({
+      where: { id: entity.worldId },
+      select: {
+        primaryArchitectId: true,
+        architects: { select: { userId: true } },
+        gameMasters: { select: { userId: true } }
+      }
+    });
+    const architectIds = new Set<string>(
+      world
+        ? [world.primaryArchitectId, ...world.architects.map((entry) => entry.userId)]
+        : []
+    );
+    const worldGmIds = new Set<string>(
+      world ? world.gameMasters.map((entry) => entry.userId) : []
+    );
+    const campaignIds = Array.from(
+      new Set(notes.map((note) => note.campaignId).filter(Boolean))
+    ) as string[];
+    const campaigns = campaignIds.length
+      ? await prisma.campaign.findMany({
+          where: { id: { in: campaignIds } },
+          select: { id: true, gmUserId: true }
+        })
+      : [];
+    const campaignGmMap = new Map(campaigns.map((campaign) => [campaign.id, campaign.gmUserId]));
+
+    const entityTagIds = Array.from(
+      new Set(
+        notes
+          .flatMap((note) => note.tags)
+          .filter((tag) => tag.tagType === NoteTagType.ENTITY)
+          .map((tag) => tag.targetId)
+      )
+    );
+
+    const accessibleTagIds = new Set<string>();
+    if (entityTagIds.length > 0) {
+      const entityAccessFilter = await buildEntityAccessFilter(
+        user,
+        entity.worldId,
+        campaignId,
+        characterId
+      );
+      const accessibleEntities = await prisma.entity.findMany({
+        where: { id: { in: entityTagIds }, ...entityAccessFilter },
+        select: { id: true }
+      });
+      accessibleEntities.forEach((entry) => accessibleTagIds.add(entry.id));
+    }
+
+    res.json(
+      notes.map((note) => {
+        const authorBase = note.author.name ?? note.author.email;
+        const authorLabel = note.character?.name
+          ? `${note.character.name} played by ${authorBase}`
+          : authorBase;
+        const isArchitectAuthor = architectIds.has(note.authorId);
+        const isGmAuthor =
+          worldGmIds.has(note.authorId) ||
+          (note.campaignId ? campaignGmMap.get(note.campaignId) === note.authorId : false);
+        const authorRoleLabel =
+          note.visibility === NoteVisibility.SHARED
+            ? isArchitectAuthor
+              ? "Architect"
+              : isGmAuthor
+                ? "GM"
+                : null
+            : null;
+
+        return {
+          id: note.id,
+          body: note.body,
+          visibility: note.visibility,
+          createdAt: note.createdAt,
+          author: note.author,
+          authorLabel,
+          authorRoleLabel,
+          tags: note.tags.map((tag) => ({
+            id: tag.id,
+            tagType: tag.tagType,
+            targetId: tag.targetId,
+            label: tag.label,
+            canAccess: tag.tagType === NoteTagType.ENTITY && accessibleTagIds.has(tag.targetId)
+          }))
+        };
+      })
+    );
+  });
+
+  app.post("/api/entities/:id/notes", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const { id } = req.params;
+    const { body, visibility, campaignId, characterId } = req.body as {
+      body?: string;
+      visibility?: string;
+      campaignId?: string | null;
+      characterId?: string | null;
+    };
+
+    if (!body || body.trim() === "") {
+      res.status(400).json({ error: "Note body is required." });
+      return;
+    }
+
+    const entity = await prisma.entity.findUnique({
+      where: { id },
+      select: { id: true, worldId: true }
+    });
+    if (!entity) {
+      res.status(404).json({ error: "Entity not found." });
+      return;
+    }
+
+    const accessFilter = await buildEntityAccessFilter(
+      user,
+      entity.worldId,
+      campaignId ?? undefined,
+      characterId ?? undefined
+    );
+    const canRead = await prisma.entity.findFirst({
+      where: { id, ...accessFilter },
+      select: { id: true }
+    });
+    if (!canRead) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+
+    const resolvedVisibility =
+      visibility === "PRIVATE" || visibility === "SHARED"
+        ? (visibility as NoteVisibility)
+        : NoteVisibility.SHARED;
+
+    if (resolvedVisibility === NoteVisibility.SHARED && !campaignId) {
+      res.status(400).json({ error: "Shared notes require a campaign context." });
+      return;
+    }
+
+    const campaign = campaignId
+      ? await prisma.campaign.findUnique({
+          where: { id: campaignId },
+          select: { id: true, worldId: true, gmUserId: true }
+        })
+      : null;
+    if (campaignId && !campaign) {
+      res.status(400).json({ error: "Campaign not found." });
+      return;
+    }
+    if (campaign && campaign.worldId !== entity.worldId) {
+      res.status(400).json({ error: "Campaign world mismatch." });
+      return;
+    }
+
+    const character = characterId
+      ? await prisma.character.findUnique({
+          where: { id: characterId },
+          select: { id: true, worldId: true, playerId: true }
+        })
+      : null;
+    if (characterId && !character) {
+      res.status(400).json({ error: "Character not found." });
+      return;
+    }
+    if (character && character.worldId !== entity.worldId) {
+      res.status(400).json({ error: "Character world mismatch." });
+      return;
+    }
+
+    if (campaignId && characterId) {
+      const inCampaign = await prisma.characterCampaign.findFirst({
+        where: { campaignId, characterId }
+      });
+      if (!inCampaign) {
+        res.status(400).json({ error: "Character is not in the campaign." });
+        return;
+      }
+    }
+
+    const isArchitect = await isWorldArchitect(user.id, entity.worldId);
+    const isWorldGmFlag = await isWorldGameMaster(user.id, entity.worldId);
+    const isCampaignGmFlag = campaignId ? campaign?.gmUserId === user.id : false;
+    const canAuthor = isAdmin(user) || isArchitect || isWorldGmFlag || isCampaignGmFlag;
+
+    if (!canAuthor) {
+      if (!character || !campaignId || character.playerId !== user.id) {
+        res.status(403).json({ error: "Player context required." });
+        return;
+      }
+    }
+
+    const tags = extractNoteTags(body);
+    const entityTagIds = tags
+      .filter((tag) => tag.tagType === NoteTagType.ENTITY)
+      .map((tag) => tag.targetId);
+
+    if (entityTagIds.length > 0) {
+      const entityAccessFilter = await buildEntityAccessFilter(
+        user,
+        entity.worldId,
+        campaignId ?? undefined,
+        characterId ?? undefined
+      );
+      const accessibleEntities = await prisma.entity.findMany({
+        where: { id: { in: entityTagIds }, ...entityAccessFilter },
+        select: { id: true }
+      });
+      const accessibleIds = new Set(accessibleEntities.map((entry) => entry.id));
+      const missing = entityTagIds.filter((targetId) => !accessibleIds.has(targetId));
+      if (missing.length > 0) {
+        res.status(400).json({ error: "One or more tagged entities are not accessible." });
+        return;
+      }
+    }
+
+    const created = await prisma.$transaction(async (tx) => {
+      const note = await tx.note.create({
+        data: {
+          entityId: id,
+          authorId: user.id,
+          campaignId: campaignId ?? null,
+          characterId: characterId ?? null,
+          visibility: resolvedVisibility,
+          body
+        },
+        include: {
+          author: { select: { id: true, name: true, email: true } },
+          character: { select: { id: true, name: true } }
+        }
+      });
+
+      if (tags.length > 0) {
+        await tx.noteTag.createMany({
+          data: tags.map((tag) => ({
+            noteId: note.id,
+            tagType: tag.tagType,
+            targetId: tag.targetId,
+            label: tag.label
+          }))
+        });
+      }
+
+      return note;
+    });
+
+    const noteTags = await prisma.noteTag.findMany({ where: { noteId: created.id } });
+
+    const authorBase = created.author.name ?? created.author.email;
+    const authorLabel = created.character?.name
+      ? `${created.character.name} played by ${authorBase}`
+      : authorBase;
+    const authorRoleLabel =
+      created.visibility === NoteVisibility.SHARED
+        ? isArchitect
+          ? "Architect"
+          : isWorldGmFlag || isCampaignGmFlag
+            ? "GM"
+            : null
+        : null;
+
+    res.status(201).json({
+      id: created.id,
+      body: created.body,
+      visibility: created.visibility,
+      createdAt: created.createdAt,
+      author: created.author,
+      authorLabel,
+      authorRoleLabel,
+      tags: noteTags.map((tag) => ({
+        id: tag.id,
+        tagType: tag.tagType,
+        targetId: tag.targetId,
+        label: tag.label,
+        canAccess: true
+      }))
+    });
+  });
+
+  app.get("/api/entity-tags", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+
+    const query = typeof req.query.query === "string" ? req.query.query : undefined;
+    const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+    const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+    const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+
+    if (!worldId) {
+      res.status(400).json({ error: "worldId is required." });
+      return;
+    }
+
+    const accessFilter = await buildEntityAccessFilter(user, worldId, campaignId, characterId);
+    const where: Prisma.EntityWhereInput = {
+      ...accessFilter
+    };
+
+    if (query && query.trim() !== "") {
+      where.name = { contains: query.trim(), mode: Prisma.QueryMode.insensitive };
+    }
+
+    const entities = await prisma.entity.findMany({
+      where,
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+      take: 25
+    });
+
+    res.json(entities.map((entity) => ({ id: entity.id, label: entity.name })));
   });
 
 app.post("/api/campaigns/:id/roster", requireAuth, async (req, res) => {
@@ -6526,6 +7023,7 @@ app.delete("/api/campaigns/:id/roster/:characterId", requireAuth, async (req, re
 });
 
 if (process.env.NODE_ENV !== "test") {
+  void backfillSeededViews(["entity_field_choices.list", "entity_field_choices.form"]);
   app.listen(port, () => {
     console.log(`API listening on http://localhost:${port}`);
   });

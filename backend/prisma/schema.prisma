@@ -78,6 +78,16 @@ enum EntityFormSectionLayout {
   TWO_COLUMN
 }
 
+enum NoteVisibility {
+  PRIVATE
+  SHARED
+}
+
+enum NoteTagType {
+  ENTITY
+  LOCATION
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -107,6 +117,7 @@ model User {
   createdCampaigns   Campaign[]          @relation("CampaignCreator")
   refreshTokens      RefreshToken[]
   systemAudits       SystemAudit[]
+  notesAuthored      Note[]              @relation("NoteAuthor")
 }
 
 model World {
@@ -152,6 +163,7 @@ model Campaign {
   delegates          CampaignDelegate[]
   roster             CharacterCampaign[]
   characterCreators  CampaignCharacterCreator[]
+  notes              Note[]
 
   @@index([worldId])
   @@index([ownerId])
@@ -262,6 +274,8 @@ model EntityFieldChoice {
   value         String
   label         String
   sortOrder     Int?
+  pillColor     String?
+  textColor     String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -286,6 +300,7 @@ model Entity {
   createdBy  User              @relation("EntityCreator", fields: [createdById], references: [id])
   values     EntityFieldValue[]
   access     EntityAccess[]
+  notes      Note[]
 
   @@index([worldId])
   @@index([entityTypeId])
@@ -340,6 +355,7 @@ model Character {
   player    User               @relation(fields: [playerId], references: [id])
   world     World              @relation(fields: [worldId], references: [id])
   campaigns CharacterCampaign[]
+  notes     Note[]
 
   @@index([playerId])
   @@index([worldId])
@@ -497,6 +513,8 @@ model SystemChoice {
   label     String
   sortOrder Int?
   isActive  Boolean  @default(true)
+  pillColor String?
+  textColor String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -651,4 +669,41 @@ model SystemAudit {
 
   @@index([entityKey, entityId])
   @@index([actorId])
+}
+
+model Note {
+  id          String         @id @default(uuid())
+  entityId    String
+  authorId    String
+  campaignId  String?
+  characterId String?
+  visibility  NoteVisibility @default(SHARED)
+  body        String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  entity    Entity    @relation(fields: [entityId], references: [id])
+  author    User      @relation("NoteAuthor", fields: [authorId], references: [id])
+  campaign  Campaign? @relation(fields: [campaignId], references: [id])
+  character Character? @relation(fields: [characterId], references: [id])
+  tags      NoteTag[]
+
+  @@index([entityId])
+  @@index([authorId])
+  @@index([campaignId])
+  @@index([characterId])
+}
+
+model NoteTag {
+  id        String     @id @default(uuid())
+  noteId    String
+  tagType   NoteTagType
+  targetId  String
+  label     String
+  createdAt DateTime   @default(now())
+
+  note Note @relation(fields: [noteId], references: [id])
+
+  @@index([noteId])
+  @@index([tagType, targetId])
 }

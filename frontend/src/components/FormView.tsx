@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ConditionBuilder from "./ConditionBuilder";
+import ColorPicker from "./ColorPicker";
 import EntityFormDesigner from "./EntityFormDesigner";
 import EntityAccessEditor from "./EntityAccessEditor";
 import EntitySidePanel from "./EntitySidePanel";
+import EntityNotes from "./EntityNotes";
 import RelatedLists from "./RelatedLists";
 import { usePopout } from "./PopoutProvider";
 import { useUnsavedChangesPrompt } from "../utils/unsavedChanges";
@@ -54,6 +56,8 @@ type EntityFieldChoice = {
   value: string;
   label: string;
   sortOrder?: number | null;
+  pillColor?: string | null;
+  textColor?: string | null;
 };
 
 type EntityFieldDefinition = {
@@ -235,6 +239,8 @@ export default function FormView({
   const [entityReferenceLabels, setEntityReferenceLabels] = useState<Record<string, string>>({});
   const [entityReferenceOpen, setEntityReferenceOpen] = useState<Record<string, boolean>>({});
   const [entityAccess, setEntityAccess] = useState<EntityAccessState | null>(null);
+  const [entityAccessAllowed, setEntityAccessAllowed] = useState(false);
+  const [entityAccessWarning, setEntityAccessWarning] = useState<string | null>(null);
   const [entityAudit, setEntityAudit] = useState<EntityAuditPayload | null>(null);
   const [entityAuditAllowed, setEntityAuditAllowed] = useState(false);
   const [entityAuditLoading, setEntityAuditLoading] = useState(false);
@@ -243,20 +249,28 @@ export default function FormView({
   const [entityTypeWorldId, setEntityTypeWorldId] = useState<string | null>(null);
   const [entityPanelId, setEntityPanelId] = useState<string | null>(null);
   const [conditionFieldOptions, setConditionFieldOptions] = useState<ConditionFieldOption[]>([]);
-  const [entityTab, setEntityTab] = useState<"info" | "config" | "access" | "audit">(
-    "info"
-  );
+  const [entityTab, setEntityTab] = useState<
+    "info" | "config" | "access" | "notes" | "audit"
+  >("info");
   const [entityTypeTab, setEntityTypeTab] = useState<"details" | "designer">("details");
   const [fieldChoices, setFieldChoices] = useState<EntityFieldChoice[]>([]);
   const [fieldChoicesLoading, setFieldChoicesLoading] = useState(false);
   const [fieldChoicesError, setFieldChoicesError] = useState<string | null>(null);
-  const [newChoice, setNewChoice] = useState({ value: "", label: "", sortOrder: "" });
+  const [newChoice, setNewChoice] = useState({
+    value: "",
+    label: "",
+    sortOrder: "",
+    pillColor: "",
+    textColor: ""
+  });
   const [isDirty, setIsDirty] = useState(false);
   const { showPopout } = usePopout();
   const initialSnapshotRef = useRef<string>("");
   const hasSnapshotRef = useRef(false);
   const snapshotKeyRef = useRef<string>("");
+  const loadedKeyRef = useRef<string>("");
   const isDirtyRef = useRef(false);
+  const suppressDirtyRef = useRef(false);
 
   const isNew = recordId === "new";
   const formatAuditAction = (action: string) =>
@@ -288,7 +302,13 @@ export default function FormView({
       to?: unknown;
     } => Boolean(entry) && typeof entry === "object");
   };
-  const buildSnapshot = () => stableStringify({ formData, entityValues, entityAccess });
+  const buildSnapshot = () =>
+    stableStringify({
+      formData,
+      entityValues,
+      entityAccess:
+        view?.entityKey === "entities" && !entityAccessAllowed ? null : entityAccess
+    });
   const clearDirty = () => {
     isDirtyRef.current = false;
     setIsDirty(false);
@@ -318,9 +338,11 @@ export default function FormView({
         setEntityReferenceOptions({});
         setEntityReferenceLabels({});
         setEntityReferenceOpen({});
-        setEntityAccess(null);
-        setEntityAudit(null);
-        setEntityAuditAllowed(false);
+      setEntityAccess(null);
+      setEntityAccessAllowed(false);
+      setEntityAccessWarning(null);
+      setEntityAudit(null);
+      setEntityAuditAllowed(false);
         setEntityAuditLoading(false);
         setEntityAuditError(null);
         setOpenAuditEntryId(null);
@@ -410,6 +432,7 @@ export default function FormView({
             setReferenceLabels((current) => ({ ...current, ...initialLabels }));
           }
         }
+        loadedKeyRef.current = `${viewKey}:${recordId}`;
       } catch (err) {
         if (!ignore) {
           setError(err instanceof Error ? err.message : "Failed to load form.");
@@ -432,6 +455,8 @@ export default function FormView({
     hasSnapshotRef.current = false;
     snapshotKeyRef.current = "";
     initialSnapshotRef.current = "";
+    loadedKeyRef.current = "";
+    suppressDirtyRef.current = false;
     setIsDirty(false);
   }, [viewKey, recordId]);
 
@@ -477,18 +502,32 @@ export default function FormView({
     if (loading || !view) return;
     if (view.entityKey === "entities" && entityAccess === null) return;
     const key = `${viewKey}:${recordId}`;
+    if (loadedKeyRef.current !== key) return;
     if (snapshotKeyRef.current === key) return;
     snapshotKeyRef.current = key;
     initialSnapshotRef.current = buildSnapshot();
     hasSnapshotRef.current = true;
+    suppressDirtyRef.current = false;
     setIsDirty(false);
   }, [loading, view, viewKey, recordId, entityAccess]);
 
   useEffect(() => {
     if (!hasSnapshotRef.current) return;
+    if (suppressDirtyRef.current) {
+      setIsDirty(false);
+      return;
+    }
     const nextSnapshot = buildSnapshot();
     setIsDirty(nextSnapshot !== initialSnapshotRef.current);
   }, [formData, entityValues, entityAccess]);
+
+  useEffect(() => {
+    if (!view || view.entityKey !== "entities") return;
+    if (entityAccessAllowed) return;
+    if (!hasSnapshotRef.current) return;
+    initialSnapshotRef.current = buildSnapshot();
+    setIsDirty(false);
+  }, [view, entityAccessAllowed]);
 
   useEffect(() => {
     let ignore = false;
@@ -671,7 +710,7 @@ export default function FormView({
     if (recordId === "new" || formData.fieldType !== "CHOICE") {
       setFieldChoices([]);
       setFieldChoicesError(null);
-      setNewChoice({ value: "", label: "", sortOrder: "" });
+      setNewChoice({ value: "", label: "", sortOrder: "", pillColor: "", textColor: "" });
       return;
     }
 
@@ -729,40 +768,51 @@ export default function FormView({
         if (contextCampaignId) {
           const campaigns = await resolveLabels("campaigns", [contextCampaignId]);
           if (!ignore) {
-            setEntityAccess({
-              readGlobal: false,
-              readCampaigns: campaigns,
-              readCharacters: [],
-              writeGlobal: false,
-              writeCampaigns: campaigns,
-              writeCharacters: []
-            });
-          }
-          return;
-        }
-
-        if (!ignore) {
-          setEntityAccess({
-            readGlobal: true,
-            readCampaigns: [],
-            readCharacters: [],
-            writeGlobal: true,
-            writeCampaigns: [],
-            writeCharacters: []
-          });
-        }
-        return;
+        setEntityAccess({
+          readGlobal: false,
+          readCampaigns: campaigns,
+          readCharacters: [],
+          writeGlobal: false,
+          writeCampaigns: campaigns,
+          writeCharacters: []
+        });
+        setEntityAccessAllowed(true);
+        setEntityAccessWarning(null);
       }
+      return;
+    }
 
-      const response = await fetch(`/api/entities/${recordId}/access`, {
-        headers: { Authorization: `Bearer ${token}` }
+    if (!ignore) {
+      setEntityAccess({
+        readGlobal: true,
+        readCampaigns: [],
+        readCharacters: [],
+        writeGlobal: true,
+        writeCampaigns: [],
+        writeCharacters: []
       });
-      if (handleUnauthorized(response)) return;
-      if (!response.ok) return;
-      const data = (await response.json()) as {
-        read: { global: boolean; campaigns: string[]; characters: string[] };
-        write: { global: boolean; campaigns: string[]; characters: string[] };
-      };
+      setEntityAccessAllowed(true);
+      setEntityAccessWarning(null);
+    }
+    return;
+  }
+
+  const response = await fetch(`/api/entities/${recordId}/access`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (handleUnauthorized(response)) return;
+  if (response.status === 403) {
+    if (!ignore) {
+      setEntityAccessAllowed(false);
+      setEntityAccessWarning("Access controls are unavailable for this entity.");
+    }
+    return;
+  }
+  if (!response.ok) return;
+  const data = (await response.json()) as {
+    read: { global: boolean; campaigns: string[]; characters: string[] };
+    write: { global: boolean; campaigns: string[]; characters: string[] };
+  };
 
       const [readCampaigns, readCharacters, writeCampaigns, writeCharacters] =
         await Promise.all([
@@ -772,17 +822,19 @@ export default function FormView({
           resolveLabels("characters", data.write.characters ?? [])
         ]);
 
-      if (!ignore) {
-        setEntityAccess({
-          readGlobal: data.read.global,
-          readCampaigns,
-          readCharacters,
-          writeGlobal: data.write.global,
-          writeCampaigns,
-          writeCharacters
-        });
-      }
-    };
+  if (!ignore) {
+    setEntityAccess({
+      readGlobal: data.read.global,
+      readCampaigns,
+      readCharacters,
+      writeGlobal: data.write.global,
+      writeCampaigns,
+      writeCharacters
+    });
+    setEntityAccessAllowed(true);
+    setEntityAccessWarning(null);
+  }
+};
 
     void loadAccess();
 
@@ -1134,7 +1186,9 @@ export default function FormView({
         body: JSON.stringify({
           value: choice.value,
           label: choice.label,
-          sortOrder: choice.sortOrder ?? null
+          sortOrder: choice.sortOrder ?? null,
+          pillColor: choice.pillColor?.trim() || null,
+          textColor: choice.textColor?.trim() || null
         })
       });
       if (handleUnauthorized(response)) return;
@@ -1187,7 +1241,9 @@ export default function FormView({
           entityFieldId: recordId,
           value: newChoice.value.trim(),
           label: newChoice.label.trim(),
-          sortOrder: newChoice.sortOrder ? Number(newChoice.sortOrder) : undefined
+          sortOrder: newChoice.sortOrder ? Number(newChoice.sortOrder) : undefined,
+          pillColor: newChoice.pillColor.trim() || null,
+          textColor: newChoice.textColor.trim() || null
         })
       });
       if (handleUnauthorized(response)) return;
@@ -1199,7 +1255,7 @@ export default function FormView({
       setFieldChoices((current) =>
         [...current, created].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
       );
-      setNewChoice({ value: "", label: "", sortOrder: "" });
+          setNewChoice({ value: "", label: "", sortOrder: "", pillColor: "", textColor: "" });
       setFieldChoicesError(null);
     } catch (err) {
       setFieldChoicesError(err instanceof Error ? err.message : "Unable to add choice.");
@@ -1369,14 +1425,24 @@ export default function FormView({
     }
 
     try {
-      const response = await fetch(isNew ? view.endpoint : `${view.endpoint}/${recordId}`, {
-        method: isNew ? "POST" : "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify(payload)
-      });
+    let requestUrl = isNew ? view.endpoint : `${view.endpoint}/${recordId}`;
+    if (!isNew && view.entityKey === "entities") {
+      const params = new URLSearchParams();
+      if (contextCampaignId) params.set("campaignId", contextCampaignId);
+      if (contextCharacterId) params.set("characterId", contextCharacterId);
+      if (params.toString()) {
+        requestUrl = `${requestUrl}?${params.toString()}`;
+      }
+    }
+
+    const response = await fetch(requestUrl, {
+      method: isNew ? "POST" : "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(payload)
+    });
 
       if (handleUnauthorized(response)) {
         setSaving(false);
@@ -1395,7 +1461,7 @@ export default function FormView({
         }
       }
 
-      if (view.entityKey === "entities" && entityAccess) {
+      if (!isNew && view.entityKey === "entities" && entityAccessAllowed && entityAccess) {
         const accessResponse = await fetch(`/api/entities/${savedId}/access`, {
           method: "PUT",
           headers: {
@@ -1418,6 +1484,9 @@ export default function FormView({
         if (handleUnauthorized(accessResponse)) {
           setSaving(false);
           return false;
+        }
+        if (!accessResponse.ok) {
+          setEntityAccessWarning("Access controls could not be updated.");
         }
       }
 
@@ -1449,6 +1518,20 @@ export default function FormView({
 
       markSaved();
       setSaving(false);
+      window.dispatchEvent(
+        new CustomEvent("ttrpg:form-saved", { detail: { recordId: savedId } })
+      );
+      if (isNew && view.entityKey === "entities" && savedId && savedId !== recordId) {
+        hasSnapshotRef.current = false;
+        snapshotKeyRef.current = "";
+        initialSnapshotRef.current = "";
+        suppressDirtyRef.current = true;
+        setIsDirty(false);
+        window.dispatchEvent(
+          new CustomEvent("ttrpg:form-dirty", { detail: { dirty: false } })
+        );
+        window.location.hash = `/form/entities/${savedId}`;
+      }
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed.");
@@ -1586,6 +1669,35 @@ export default function FormView({
             (field) => field.fieldKey !== "worldId" && field.fieldKey !== "entityTypeId"
           )
         : infoFields;
+    const customFieldRows: string[][] =
+      view.entityKey === "entity_field_choices"
+        ? [
+            ["entityFieldId", "value"],
+            ["label", "sortOrder"],
+            ["pillColor", "textColor"]
+          ]
+        : view.entityKey === "entity_fields"
+          ? [
+              ["entityTypeId", "fieldKey"],
+              ["label", "fieldType"],
+              ["required", "referenceEntityTypeId"],
+              ["referenceLocationTypeKey"]
+            ]
+          : [];
+    const shouldUseCustomRows = !isEntityView && customFieldRows.length > 0;
+    const customRowFields = shouldUseCustomRows
+      ? customFieldRows
+          .map((row) =>
+            row.map((key) => infoFields.find((field) => field.fieldKey === key)).filter(Boolean)
+          )
+          .filter((row) => row.length > 0) as ViewField[][]
+      : [];
+    const customRowFieldKeys = shouldUseCustomRows
+      ? new Set(customRowFields.flat().map((field) => field.fieldKey))
+      : new Set<string>();
+    const customRemainingFields = shouldUseCustomRows
+      ? infoFields.filter((field) => !customRowFieldKeys.has(field.fieldKey))
+      : infoFields;
     const shouldLockEntityField = (field: ViewField) =>
       isEntityView &&
       !isNew &&
@@ -1645,6 +1757,24 @@ export default function FormView({
             />
           </label>
         );
+      }
+
+      if (view?.entityKey === "entity_field_choices") {
+        if (field.fieldKey === "pillColor" || field.fieldKey === "textColor") {
+          const label =
+            field.fieldKey === "pillColor" ? "Pill colour" : "Text colour";
+          const placeholder = field.fieldKey === "pillColor" ? "#5b8def" : "#ffffff";
+          return (
+            <label key={field.fieldKey} className="form-view__field">
+              <span className="form-view__label">{label}</span>
+              <ColorPicker
+                value={typeof value === "string" ? value : ""}
+                placeholder={placeholder}
+                onChange={(next) => handleChange(field.fieldKey, next)}
+              />
+            </label>
+          );
+        }
       }
 
       if (field.fieldType === "BOOLEAN") {
@@ -1829,6 +1959,9 @@ export default function FormView({
       );
     };
 
+  const formTitle =
+    isEntityView && !isNew && formData.name ? String(formData.name) : view.title;
+
   return (
     <div className="form-view">
       <div className="form-view__header">
@@ -1836,10 +1969,13 @@ export default function FormView({
             &lt;- Back
           </button>
         <div>
-          <h1>{view.title}</h1>
+          <h1>{formTitle}</h1>
           <p className="form-view__subtitle">{isNew ? "Create" : "Edit"}</p>
         </div>
         <div className="form-view__actions">
+          {isEntityView && isDirty ? (
+            <div className="form-view__dirty">Unsaved changes</div>
+          ) : null}
           {!isNew ? (
             <button type="button" className="danger-button" onClick={handleDelete}>
               Delete
@@ -1872,14 +2008,25 @@ export default function FormView({
                   Config
                 </button>
               ) : null}
+                {entityAccessAllowed || isNew ? (
+                  <button
+                    type="button"
+                    className={`form-view__tab ${entityTab === "access" ? "is-active" : ""}`}
+                    onClick={() => setEntityTab("access")}
+                    role="tab"
+                    aria-selected={entityTab === "access"}
+                  >
+                    Access
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className={`form-view__tab ${entityTab === "access" ? "is-active" : ""}`}
-                  onClick={() => setEntityTab("access")}
+                  className={`form-view__tab ${entityTab === "notes" ? "is-active" : ""}`}
+                  onClick={() => setEntityTab("notes")}
                   role="tab"
-                  aria-selected={entityTab === "access"}
+                  aria-selected={entityTab === "notes"}
                 >
-                  Access
+                  Notes
                 </button>
                 {entityAuditAllowed ? (
                   <button
@@ -1925,7 +2072,14 @@ export default function FormView({
                       {sideBySideInfoFields.map(renderField)}
                     </div>
                   ) : null}
-                  {remainingInfoFields.map(renderField)}
+                  {shouldUseCustomRows
+                    ? customRowFields.map((row, index) => (
+                        <div key={`custom-row-${index}`} className="form-view__field-row">
+                          {row.map(renderField)}
+                        </div>
+                      ))
+                    : remainingInfoFields.map(renderField)}
+                  {shouldUseCustomRows ? customRemainingFields.map(renderField) : null}
                 </>
               )}
               {isChoiceField && !isNew ? (
@@ -1941,6 +2095,8 @@ export default function FormView({
                     <div className="field-choices__row field-choices__row--header">
                       <span>Value</span>
                       <span>Label</span>
+                      <span>Pill colour</span>
+                      <span>Text colour</span>
                       <span>Sort</span>
                       <span>Actions</span>
                     </div>
@@ -1949,26 +2105,36 @@ export default function FormView({
                     ) : (
                       fieldChoices.map((choice) => (
                         <div key={choice.id} className="field-choices__row">
-                          <input
-                            type="text"
-                            value={choice.value}
-                            onChange={(event) =>
-                              updateChoice(choice.id, { value: event.target.value })
-                            }
-                          />
-                          <input
-                            type="text"
-                            value={choice.label}
-                            onChange={(event) =>
-                              updateChoice(choice.id, { label: event.target.value })
-                            }
-                          />
-                          <input
-                            type="number"
-                            value={choice.sortOrder ?? ""}
-                            onChange={(event) =>
-                              updateChoice(choice.id, {
-                                sortOrder: event.target.value ? Number(event.target.value) : null
+                            <input
+                              type="text"
+                              value={choice.value}
+                              onChange={(event) =>
+                                updateChoice(choice.id, { value: event.target.value })
+                              }
+                            />
+                            <input
+                              type="text"
+                              value={choice.label}
+                              onChange={(event) =>
+                                updateChoice(choice.id, { label: event.target.value })
+                              }
+                            />
+                            <ColorPicker
+                              value={choice.pillColor ?? ""}
+                              placeholder="#5b8def"
+                              onChange={(next) => updateChoice(choice.id, { pillColor: next })}
+                            />
+                            <ColorPicker
+                              value={choice.textColor ?? ""}
+                              placeholder="#ffffff"
+                              onChange={(next) => updateChoice(choice.id, { textColor: next })}
+                            />
+                            <input
+                              type="number"
+                              value={choice.sortOrder ?? ""}
+                              onChange={(event) =>
+                                updateChoice(choice.id, {
+                                  sortOrder: event.target.value ? Number(event.target.value) : null
                               })
                             }
                           />
@@ -1992,29 +2158,43 @@ export default function FormView({
                       ))
                     )}
                     <div className="field-choices__row field-choices__row--new">
-                      <input
-                        type="text"
-                        placeholder="Value"
-                        value={newChoice.value}
-                        onChange={(event) =>
-                          setNewChoice((current) => ({ ...current, value: event.target.value }))
-                        }
-                      />
-                      <input
-                        type="text"
-                        placeholder="Label"
-                        value={newChoice.label}
-                        onChange={(event) =>
-                          setNewChoice((current) => ({ ...current, label: event.target.value }))
-                        }
-                      />
-                      <input
-                        type="number"
-                        placeholder="Sort"
-                        value={newChoice.sortOrder}
-                        onChange={(event) =>
-                          setNewChoice((current) => ({ ...current, sortOrder: event.target.value }))
-                        }
+                        <input
+                          type="text"
+                          placeholder="Value"
+                          value={newChoice.value}
+                          onChange={(event) =>
+                            setNewChoice((current) => ({ ...current, value: event.target.value }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          placeholder="Label"
+                          value={newChoice.label}
+                          onChange={(event) =>
+                            setNewChoice((current) => ({ ...current, label: event.target.value }))
+                          }
+                        />
+                        <ColorPicker
+                          value={newChoice.pillColor}
+                          placeholder="#5b8def"
+                          onChange={(next) =>
+                            setNewChoice((current) => ({ ...current, pillColor: next }))
+                          }
+                        />
+                        <ColorPicker
+                          value={newChoice.textColor}
+                          placeholder="#ffffff"
+                          onChange={(next) =>
+                            setNewChoice((current) => ({ ...current, textColor: next }))
+                          }
+                        />
+                        <input
+                          type="number"
+                          placeholder="Sort"
+                          value={newChoice.sortOrder}
+                          onChange={(event) =>
+                            setNewChoice((current) => ({ ...current, sortOrder: event.target.value }))
+                          }
                       />
                       <div className="field-choices__actions">
                         <button type="button" className="primary-button" onClick={addChoice}>
@@ -2292,6 +2472,9 @@ export default function FormView({
         {isEntityView && entityTab === "access" ? (
           <div className="form-view__section">
             <h2>Access</h2>
+            {entityAccessWarning ? (
+              <div className="form-view__hint">{entityAccessWarning}</div>
+            ) : null}
             {entityAccess ? (
               <EntityAccessEditor
                 token={token}
@@ -2302,6 +2485,19 @@ export default function FormView({
             ) : (
               <div className="form-view__hint">Access controls are unavailable.</div>
             )}
+          </div>
+        ) : null}
+        {isEntityView && entityTab === "notes" ? (
+          <div className="form-view__section">
+            <EntityNotes
+              token={token}
+              entityId={recordId}
+              worldId={(formData.worldId as string | undefined) ?? contextWorldId}
+              contextCampaignId={contextCampaignId}
+              contextCharacterId={contextCharacterId}
+              currentUserRole={currentUserRole as "ADMIN" | "USER" | undefined}
+              onOpenEntity={(entityId) => setEntityPanelId(entityId)}
+            />
           </div>
         ) : null}
         {isEntityView && entityTab === "audit" ? (

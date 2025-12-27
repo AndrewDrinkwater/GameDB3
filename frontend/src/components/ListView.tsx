@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { dispatchUnauthorized } from "../utils/auth";
 import { usePopout } from "./PopoutProvider";
 import EntitySidePanel from "./EntitySidePanel";
@@ -31,7 +31,7 @@ type SystemView = {
   fields: ViewField[];
 };
 
-type Choice = { value: string; label: string };
+type Choice = { value: string; label: string; pillColor?: string | null; textColor?: string | null };
 
 type ListFilterRule = {
   fieldKey: string;
@@ -143,7 +143,7 @@ export default function ListView({
   const [dataLoading, setDataLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [choiceMaps, setChoiceMaps] = useState<Record<string, Record<string, string>>>({});
+  const [choiceMaps, setChoiceMaps] = useState<Record<string, Record<string, Choice>>>({});
   const [referenceMaps, setReferenceMaps] = useState<Record<string, Record<string, string>>>({});
   const [entityPanelId, setEntityPanelId] = useState<string | null>(null);
   const extraParamsKey = JSON.stringify(extraParams ?? {});
@@ -215,10 +215,10 @@ export default function ListView({
 
         if (ignore) return;
 
-        const newChoiceMaps: Record<string, Record<string, string>> = {};
+        const newChoiceMaps: Record<string, Record<string, Choice>> = {};
         listKeyResults.forEach(([listKey, choices]) => {
-          newChoiceMaps[listKey] = choices.reduce<Record<string, string>>((acc, choice) => {
-            acc[choice.value] = choice.label;
+          newChoiceMaps[listKey] = choices.reduce<Record<string, Choice>>((acc, choice) => {
+            acc[choice.value] = choice;
             return acc;
           }, {});
         });
@@ -396,7 +396,9 @@ export default function ListView({
               source: "entity" as const,
               choices: field.choices?.map((choice) => ({
                 value: choice.value,
-                label: choice.label
+                label: choice.label,
+                pillColor: choice.pillColor ?? null,
+                textColor: choice.textColor ?? null
               })),
               referenceEntityKey:
                 field.fieldType === "ENTITY_REFERENCE" ? "entities" : undefined,
@@ -657,17 +659,19 @@ export default function ListView({
 
   const filteredRows = useMemo(() => filterRows(rows, listFields, query), [rows, listFields, query]);
   const primaryField = listFields[0];
-  const statusField = listFields.find((field) => field.fieldType === "SELECT" && isStatusField(field));
+  const statusField = listFields.find(
+    (field) => (field.fieldType === "SELECT" || field.fieldType === "CHOICE") && isStatusField(field)
+  );
   const secondaryFields = listFields.filter((field) => field !== primaryField);
   const canConfigureList = availableFields.length > 0;
   const showEntityFilters = Boolean(isEntityTypeList);
   const isAdmin = currentUserRole === "ADMIN";
 
-  const updateFilter = (index: number, next: Partial<ListFilterRule>) => {
-    setFilters((current) =>
-      current.map((filter, i) => (i === index ? { ...filter, ...next } : filter))
-    );
-  };
+    const updateFilter = (index: number, next: Partial<ListFilterRule>) => {
+      setFilters((current) =>
+        current.map((filter, i) => (i === index ? { ...filter, ...next } : filter))
+      );
+    };
 
   const addFilter = () => {
     const defaultField = availableFields[0]?.fieldKey ?? "";
@@ -827,7 +831,7 @@ export default function ListView({
                 disabled={!canAdd}
                 onClick={handleAddSelected}
               >
-                Add →
+                Add
               </button>
               <button
                 type="button"
@@ -835,7 +839,7 @@ export default function ListView({
                 disabled={!canRemove}
                 onClick={handleRemoveSelected}
               >
-                ← Remove
+                Remove
               </button>
               <button
                 type="button"
@@ -941,11 +945,13 @@ export default function ListView({
     updatePopout
   ]);
 
+  const getRawValue = (field: ListField, row: Record<string, unknown>) =>
+    field.source === "entity"
+      ? (row.fieldValues as Record<string, unknown> | undefined)?.[field.fieldKey]
+      : row[field.fieldKey];
+
   const getDisplayValue = (field: ListField, row: Record<string, unknown>) => {
-    const rawValue =
-      field.source === "entity"
-        ? (row.fieldValues as Record<string, unknown> | undefined)?.[field.fieldKey]
-        : row[field.fieldKey];
+    const rawValue = getRawValue(field, row);
     if (rawValue === null || rawValue === undefined) return "";
 
     if (field.fieldType === "BOOLEAN") {
@@ -964,17 +970,88 @@ export default function ListView({
         ? referenceMaps[referenceKey]?.[String(rawValue)]
         : undefined;
 
-    return mapped ?? choiceMapped ?? referenceLabel ?? rawValue;
+    return mapped?.label ?? choiceMapped ?? referenceLabel ?? rawValue;
   };
 
+    const getChoiceFormat = (field: ListField, rawValue: unknown) => {
+      if (rawValue === null || rawValue === undefined) return null;
+      const value = String(rawValue);
+      const fromField = field.choices?.find((choice) => choice.value === value);
+      const listKey = field.optionsListKey ?? "";
+      const fromList = listKey ? choiceMaps[listKey]?.[value] : undefined;
+      const choice = fromField ?? fromList;
+      if (!choice) return null;
+      return {
+        label: choice.label,
+        pillColor: choice.pillColor ?? null,
+        textColor: choice.textColor ?? null
+      };
+    };
+
     const renderCellValue = (field: ListField, row: Record<string, unknown>) => {
+      const rawValue = getRawValue(field, row);
       const display = getDisplayValue(field, row);
       const text = String(display ?? "");
-      if (field.fieldType === "SELECT" && isStatusField(field) && text) {
-        const tone = getStatusTone(text);
-        return <span className={`status-badge status-badge--${tone}`}>{text}</span>;
+      if (text) {
+        const format = getChoiceFormat(field, rawValue);
+        if (format && (format.pillColor || format.textColor)) {
+          return (
+            <span
+              className="choice-badge"
+              style={{
+                backgroundColor: format.pillColor ?? undefined,
+                color: format.textColor ?? undefined
+              }}
+            >
+              {format.label ?? text}
+            </span>
+          );
+        }
+        if (
+          (field.fieldType === "SELECT" || field.fieldType === "CHOICE") &&
+          isStatusField(field)
+        ) {
+          const tone = getStatusTone(text);
+          return <span className={`status-badge status-badge--${tone}`}>{text}</span>;
+        }
       }
       return text;
+    };
+
+    const operatorLabelMap: Record<string, string> = {
+      equals: "is",
+      not_equals: "is not",
+      contains: "contains",
+      contains_any: "contains any",
+      is_set: "is set",
+      is_not_set: "is not set"
+    };
+    const getFilterLabel = (filter: ListFilterRule) => {
+      const fieldMeta = availableFields.find((field) => field.fieldKey === filter.fieldKey);
+      const label = fieldMeta?.label ?? filter.fieldKey;
+      const operatorLabel = operatorLabelMap[filter.operator] ?? filter.operator;
+      if (filter.operator === "is_set" || filter.operator === "is_not_set") {
+        return `${label} ${operatorLabel}`;
+      }
+      if (fieldMeta?.choices?.length) {
+        const choice = fieldMeta.choices.find(
+          (entry) => entry.value === String(filter.value ?? "")
+        );
+        return `${label} ${operatorLabel} ${choice?.label ?? filter.value ?? ""}`;
+      }
+      if (fieldMeta?.optionsListKey) {
+        const mapped = choiceMaps[fieldMeta.optionsListKey]?.[String(filter.value ?? "")];
+        return `${label} ${operatorLabel} ${mapped?.label ?? filter.value ?? ""}`;
+      }
+      if (fieldMeta?.referenceEntityKey) {
+        const referenceEntity = fieldMeta.referenceEntityKey ?? "";
+        const referenceKey = `${referenceEntity}:${fieldMeta.referenceEntityTypeId ?? "any"}`;
+        const referenceLabel = filter.value
+          ? referenceMaps[referenceKey]?.[String(filter.value)]
+          : undefined;
+        return `${label} ${operatorLabel} ${referenceLabel ?? filter.value ?? ""}`;
+      }
+      return `${label} ${operatorLabel} ${filter.value ?? ""}`;
     };
 
     const renderEntityNameCell = (row: Record<string, unknown>) => {
@@ -1011,55 +1088,77 @@ export default function ListView({
 
   return (
     <div className="list-view">
-      <div className="list-view__header">
-        <div>
-          <h1>{titleOverride ?? view.title}</h1>
-          <p className="list-view__subtitle">{subtitleOverride ?? "List view"}</p>
-        </div>
-        <div className="list-view__actions">
-          <input
-            className="list-view__search"
-            placeholder="Search records"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          {canConfigureList ? (
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={openConfigPopout}
-            >
-              List config
-            </button>
-          ) : null}
-          <button type="button" className="primary-button" onClick={() => onOpenForm("new")}>
-            New
-          </button>
-        </div>
-      </div>
-      {showEntityFilters ? (
-        <div className="list-view__filters">
-          <div className="list-view__filters-header">
-            <span>Filters</span>
-            <div className="list-view__filters-actions">
-              <label className="list-view__filters-logic">
-                Match
-                <select
-                  value={filterLogic}
-                  onChange={(event) => setFilterLogic(event.target.value as "AND" | "OR")}
-                >
-                  <option value="AND">All</option>
-                  <option value="OR">Any</option>
-                </select>
-              </label>
-              <button type="button" className="ghost-button" onClick={addFilter}>
-                Add filter
-              </button>
-            </div>
+        <div className="list-view__header">
+          <div className="list-view__heading">
+            <h1>{titleOverride ?? view.title}</h1>
+            <p className="list-view__subtitle">{subtitleOverride ?? "List view"}</p>
           </div>
-          {filters.length === 0 ? (
-            <div className="list-view__filters-empty">No filters applied.</div>
-          ) : (
+        </div>
+        <div className="list-view__toolbar">
+          <div className="list-view__toolbar-left">
+            <input
+              className="list-view__search"
+              placeholder="Search records"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            {showEntityFilters ? (
+              <>
+                <label className="list-view__filters-logic">
+                  Match
+                  <select
+                    value={filterLogic}
+                    onChange={(event) => setFilterLogic(event.target.value as "AND" | "OR")}
+                  >
+                    <option value="AND">All</option>
+                    <option value="OR">Any</option>
+                  </select>
+                </label>
+                <button type="button" className="ghost-button" onClick={addFilter}>
+                  Add filter
+                </button>
+              </>
+            ) : null}
+          </div>
+          <div className="list-view__toolbar-center">
+            {showEntityFilters && filters.length > 0 ? (
+              <div className="list-view__filter-chips">
+                {filters.map((filter, index) => (
+                  <button
+                    key={`${filter.fieldKey}-${index}`}
+                    type="button"
+                    className="list-view__filter-chip"
+                    onClick={() => removeFilter(index)}
+                    title="Remove filter"
+                  >
+                    <span>{getFilterLabel(filter)}</span>
+                    <span aria-hidden="true"></span>
+                  </button>
+                ))}
+              </div>
+            ) : showEntityFilters ? (
+              <span className="list-view__filters-hint">No filters applied.</span>
+            ) : null}
+          </div>
+          <div className="list-view__toolbar-right">
+            <button type="button" className="primary-button" onClick={() => onOpenForm("new")}>
+              New
+            </button>
+            {canConfigureList ? (
+              <button
+                type="button"
+                className="list-view__icon-button"
+                onClick={openConfigPopout}
+                aria-label="List configuration"
+                title="List configuration"
+              >
+                ⚙
+              </button>
+            ) : null}
+          </div>
+        </div>
+        {showEntityFilters && filters.length > 0 ? (
+          <div className="list-view__filters list-view__filters--open">
             <div className="list-view__filters-body">
               {filters.map((filter, index) => {
                 const fieldMeta = availableFields.find(
@@ -1101,9 +1200,9 @@ export default function ListView({
                       >
                         <option value="">Select value...</option>
                         {Object.entries(choiceMaps[fieldMeta.optionsListKey] ?? {}).map(
-                          ([value, label]) => (
+                          ([value, choice]) => (
                             <option key={value} value={value}>
-                              {label}
+                              {choice.label}
                             </option>
                           )
                         )}
@@ -1175,72 +1274,95 @@ export default function ListView({
                 );
               })}
             </div>
-          )}
-        </div>
-      ) : null}
+          </div>
+        ) : null}
 
-      <div className="list-view__table">
-        <div className="list-view__row list-view__row--header" role="row">
-          {listFields.map((field) => (
-            <div
-              key={field.fieldKey}
-              className="list-view__cell"
-              style={{ width: field.width ?? "auto" }}
-            >
-              {field.label}
-            </div>
-          ))}
-          <div className="list-view__cell list-view__cell--actions">Actions</div>
-        </div>
-        {filteredRows.length === 0 ? (
-          <div className="list-view__empty">No records yet.</div>
-        ) : (
-          filteredRows.map((row) => (
-            <div
-              key={String(row.id)}
-              className="list-view__row"
-              role="button"
-              tabIndex={0}
-              onClick={() => onOpenForm(String(row.id))}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onOpenForm(String(row.id));
-                }
-              }}
-            >
-                {listFields.map((field) => {
-                  const value = renderCellValue(field, row);
-                  const typeClass =
-                    field.fieldType === "NUMBER"
-                      ? "list-view__cell--numeric"
-                      : field.fieldType === "BOOLEAN"
-                        ? "list-view__cell--boolean"
-                        : "";
-  
-                  return (
-                    <div key={field.fieldKey} className={`list-view__cell ${typeClass}`}>
-                      {view.entityKey === "entities" && field.fieldKey === "name"
-                        ? renderEntityNameCell(row)
-                        : value}
-                    </div>
-                  );
-                })}
-              <div className="list-view__cell list-view__cell--actions">
-                <button
-                  type="button"
-                  className="ghost-button list-view__row-action"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onOpenForm(String(row.id));
-                  }}
-                >
-                  Open
-                </button>
+        <div className="list-view__table">
+          <div className="list-view__row list-view__row--header" role="row">
+            {listFields.map((field) => (
+              <div
+                key={field.fieldKey}
+                className="list-view__cell"
+                style={{ width: field.width ?? "auto" }}
+              >
+                {field.label}
               </div>
+            ))}
+            <div className="list-view__cell list-view__cell--actions" aria-hidden="true" />
+          </div>
+          {filteredRows.length === 0 ? (
+            <div className="list-view__empty">
+              <div className="list-view__empty-title">
+                {`No ${titleOverride ?? view.title} yet`}
+              </div>
+              <div className="list-view__empty-text">
+                {`This list contains ${String(titleOverride ?? view.title).toLowerCase()}.`}
+              </div>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => onOpenForm("new")}
+              >
+                {`Create ${String(titleOverride ?? view.title).replace(/s$/, "")}`}
+              </button>
             </div>
-          ))
-        )}
+          ) : (
+            filteredRows.map((row) => (
+              <div
+                key={String(row.id)}
+                className="list-view__row"
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpenForm(String(row.id))}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onOpenForm(String(row.id));
+                  }
+                }}
+              >
+                  {listFields.map((field) => {
+                    const value = renderCellValue(field, row);
+                    const typeClass =
+                      field.fieldType === "NUMBER"
+                        ? "list-view__cell--numeric"
+                        : field.fieldType === "BOOLEAN"
+                          ? "list-view__cell--boolean"
+                          : "";
+                    const descriptionClass =
+                      field.fieldKey === "description" ? "list-view__cell--description" : "";
+                    const statusClass =
+                      field.fieldType === "SELECT" && isStatusField(field)
+                        ? "list-view__cell--status"
+                        : "";
+    
+                    return (
+                      <div
+                        key={field.fieldKey}
+                        className={`list-view__cell ${typeClass} ${descriptionClass} ${statusClass}`}
+                      >
+                        {view.entityKey === "entities" && field.fieldKey === "name"
+                          ? renderEntityNameCell(row)
+                          : value}
+                      </div>
+                    );
+                  })}
+                <div className="list-view__cell list-view__cell--actions">
+                  <button
+                    type="button"
+                    className="list-view__row-action"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenForm(String(row.id));
+                    }}
+                    aria-label="Row actions"
+                  >
+                    ...
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
       </div>
 
       <div className="list-view__cards">
@@ -1295,3 +1417,5 @@ export default function ListView({
     </div>
   );
 }
+
+
