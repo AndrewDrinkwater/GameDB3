@@ -258,6 +258,7 @@ async function main() {
     { entityKey: "locations", fieldKey: "name", label: "Location Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "location_types", fieldKey: "name", label: "Location Type Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "entity_types", fieldKey: "name", label: "Entity Type Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "relationship_types", fieldKey: "name", label: "Relationship Type Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "entity_fields", fieldKey: "label", label: "Field Label", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "location_type_fields", fieldKey: "fieldLabel", label: "Field Label", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "location_type_field_choices", fieldKey: "label", label: "Field Choice Label", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
@@ -515,6 +516,66 @@ async function main() {
       { fieldKey: "entityTypeId", label: "Type", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, required: true, referenceEntityKey: "entity_types", referenceScope: "entity_type" },
       { fieldKey: "currentLocationId", label: "Location", fieldType: SystemFieldType.REFERENCE, listOrder: 4, formOrder: 4, required: true, referenceEntityKey: "locations", referenceScope: "location_reference" },
       { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 5, formOrder: 5 }
+    ]
+  },
+  {
+    key: "relationship_types.list",
+    title: "Relationship Types",
+    entityKey: "relationship_types",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/relationship-types",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "worlds" },
+      { fieldKey: "fromLabel", label: "From Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
+      { fieldKey: "toLabel", label: "To Label", fieldType: SystemFieldType.TEXT, listOrder: 4, formOrder: 4 },
+      { fieldKey: "isPeerable", label: "Peerable", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 }
+    ]
+  },
+  {
+    key: "relationship_types.form",
+    title: "Relationship Type",
+    entityKey: "relationship_types",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/relationship-types",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, required: true, referenceEntityKey: "worlds" },
+      { fieldKey: "fromLabel", label: "From Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true },
+      { fieldKey: "toLabel", label: "To Label", fieldType: SystemFieldType.TEXT, listOrder: 4, formOrder: 4, required: true },
+      { fieldKey: "pastFromLabel", label: "Past From Label", fieldType: SystemFieldType.TEXT, listOrder: 5, formOrder: 5 },
+      { fieldKey: "pastToLabel", label: "Past To Label", fieldType: SystemFieldType.TEXT, listOrder: 6, formOrder: 6 },
+      { fieldKey: "isPeerable", label: "Peerable", fieldType: SystemFieldType.BOOLEAN, listOrder: 7, formOrder: 7 },
+      { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 8, formOrder: 8 },
+      { fieldKey: "metadata", label: "Metadata (JSON)", fieldType: SystemFieldType.TEXTAREA, listOrder: 9, formOrder: 9 }
+    ]
+  },
+  {
+    key: "relationship_type_rules.list",
+    title: "Relationship Type Rules",
+    entityKey: "relationship_type_rules",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/relationship-type-rules",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "relationshipTypeId", label: "Relationship Type", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "relationship_types", referenceScope: "relationship_type" },
+      { fieldKey: "fromEntityTypeId", label: "From Entity Type", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "entity_types", referenceScope: "entity_type" },
+      { fieldKey: "toEntityTypeId", label: "To Entity Type", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, referenceEntityKey: "entity_types", referenceScope: "entity_type" }
+    ]
+  },
+  {
+    key: "relationship_type_rules.form",
+    title: "Relationship Type Rule",
+    entityKey: "relationship_type_rules",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/relationship-type-rules",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "relationshipTypeId", label: "Relationship Type", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "relationship_types", referenceScope: "relationship_type" },
+      { fieldKey: "fromEntityTypeId", label: "From Entity Type", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, required: true, referenceEntityKey: "entity_types", referenceScope: "entity_type", allowMultiple: true },
+      { fieldKey: "toEntityTypeId", label: "To Entity Type", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, required: true, referenceEntityKey: "entity_types", referenceScope: "entity_type", allowMultiple: true }
     ]
   },
   {

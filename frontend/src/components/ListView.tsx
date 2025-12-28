@@ -280,6 +280,12 @@ export default function ListView({
         if (view.entityKey === "entity_field_choices" && contextWorldId) {
           params.set("worldId", contextWorldId);
         }
+        if (view.entityKey === "relationship_types" && contextWorldId) {
+          params.set("worldId", contextWorldId);
+        }
+        if (view.entityKey === "relationship_type_rules" && contextWorldId) {
+          params.set("worldId", contextWorldId);
+        }
         if (view.entityKey === "location_types" && contextWorldId) {
           params.set("worldId", contextWorldId);
         }

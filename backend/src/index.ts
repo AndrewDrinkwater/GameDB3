@@ -8,7 +8,11 @@ if (process.env.NODE_ENV !== "test") {
     "entity_field_choices.list",
     "entity_field_choices.form",
     "location_types.list",
-    "location_types.form"
+    "location_types.form",
+    "relationship_types.list",
+    "relationship_types.form",
+    "relationship_type_rules.list",
+    "relationship_type_rules.form"
   ]);
   app.listen(port, () => {
     console.log(`API listening on http://localhost:${port}`);

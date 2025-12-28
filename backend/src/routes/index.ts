@@ -8,6 +8,7 @@ import { registerEntityTypesRoutes } from "./entityTypes";
 import { registerLocationsRoutes } from "./locations";
 import { registerLocationTypesRoutes } from "./locationTypes";
 import { registerNotesRoutes } from "./notes";
+import { registerRelationshipsRoutes } from "./relationships";
 import { registerSystemRoutes } from "./system";
 import { registerTagsRoutes } from "./tags";
 import { registerUserPreferencesRoutes } from "./userPreferences";
@@ -26,5 +27,6 @@ export const registerRoutes = (app: express.Express) => {
   registerLocationsRoutes(app);
   registerEntitiesRoutes(app);
   registerNotesRoutes(app);
+  registerRelationshipsRoutes(app);
   registerTagsRoutes(app);
 };

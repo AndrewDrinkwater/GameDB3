@@ -1413,3 +1413,564 @@ describe("Location types, fields, and rules", () => {
     expect(entry?.fieldValues?.[fieldKey]).toBe("Hidden Hollow");
   });
 });
+
+describe("Relationships", () => {
+  const createdEntityTypeIds: string[] = [];
+  const createdEntityIds: string[] = [];
+  const createdRelationshipTypeIds: string[] = [];
+  const createdRelationshipRuleIds: string[] = [];
+  const createdRelationshipIds: string[] = [];
+  const createdPeerGroupIds: string[] = [];
+  const createdCharacterIds: string[] = [];
+
+  const trackEntityType = (id: string) => {
+    createdEntityTypeIds.push(id);
+    return id;
+  };
+  const trackEntity = (id: string) => {
+    createdEntityIds.push(id);
+    return id;
+  };
+  const trackRelationshipType = (id: string) => {
+    createdRelationshipTypeIds.push(id);
+    return id;
+  };
+  const trackRelationshipRule = (id: string) => {
+    createdRelationshipRuleIds.push(id);
+    return id;
+  };
+  const trackRelationship = (id: string) => {
+    createdRelationshipIds.push(id);
+    return id;
+  };
+  const trackPeerGroup = (id: string | null) => {
+    if (id) createdPeerGroupIds.push(id);
+    return id;
+  };
+
+  let secondaryEntityTypeId = "";
+  let viewerCharacterId = "";
+  let entityAlphaId = "";
+  let entityBetaId = "";
+  let entityGammaId = "";
+  let entityRestrictedId = "";
+  let mentorTypeId = "";
+  let allyTypeId = "";
+  let mentorRelationshipId = "";
+  let peerRelationshipId = "";
+
+  beforeAll(async () => {
+    const worldId = context.worldId as string;
+    const createdById = context.adminId as string;
+
+    const secondaryType = await prisma.entityType.create({
+      data: {
+        worldId,
+        name: `Relationship Target ${Date.now()}`,
+        description: "Secondary entity type",
+        createdById
+      }
+    });
+    secondaryEntityTypeId = trackEntityType(secondaryType.id);
+
+    const viewerCharacter = await prisma.character.create({
+      data: {
+        name: `Relationship Viewer ${Date.now()}`,
+        worldId,
+        playerId: context.viewerId as string
+      }
+    });
+    viewerCharacterId = viewerCharacter.id;
+    createdCharacterIds.push(viewerCharacter.id);
+
+    const createEntity = async (
+      name: string,
+      entityTypeId: string,
+      access: Record<string, unknown>
+    ) => {
+      const response = await request(app)
+        .post("/api/entities")
+        .set("Authorization", `Bearer ${context.token}`)
+        .send({
+          worldId,
+          entityTypeId,
+          currentLocationId: context.locationId,
+          name,
+          access
+        });
+
+      expect(response.status).toBe(201);
+      return trackEntity(response.body.id);
+    };
+
+    entityAlphaId = await createEntity("Relationship Alpha", context.entityTypeId as string, {
+      read: { global: true },
+      write: { global: true }
+    });
+    entityBetaId = await createEntity("Relationship Beta", secondaryEntityTypeId, {
+      read: { global: true },
+      write: { global: true }
+    });
+    entityGammaId = await createEntity("Relationship Gamma", secondaryEntityTypeId, {
+      read: { global: true },
+      write: { global: true }
+    });
+    entityRestrictedId = await createEntity("Relationship Restricted", secondaryEntityTypeId, {
+      read: { characters: [viewerCharacterId] },
+      write: { global: true }
+    });
+  });
+
+  afterAll(async () => {
+    if (createdPeerGroupIds.length > 0) {
+      await prisma.relationship.deleteMany({
+        where: { peerGroupId: { in: createdPeerGroupIds } }
+      });
+    }
+
+    if (createdRelationshipIds.length > 0) {
+      await prisma.relationship.deleteMany({
+        where: { id: { in: createdRelationshipIds } }
+      });
+    }
+
+    if (createdRelationshipRuleIds.length > 0) {
+      await prisma.relationshipTypeRule.deleteMany({
+        where: { id: { in: createdRelationshipRuleIds } }
+      });
+    }
+
+    if (createdRelationshipTypeIds.length > 0) {
+      await prisma.relationshipType.deleteMany({
+        where: { id: { in: createdRelationshipTypeIds } }
+      });
+    }
+
+    if (createdEntityIds.length > 0) {
+      await prisma.entityAccess.deleteMany({
+        where: { entityId: { in: createdEntityIds } }
+      });
+      await prisma.entityFieldValue.deleteMany({
+        where: { entityId: { in: createdEntityIds } }
+      });
+      await prisma.entity.deleteMany({
+        where: { id: { in: createdEntityIds } }
+      });
+    }
+
+    if (createdCharacterIds.length > 0) {
+      await prisma.characterCampaign.deleteMany({
+        where: { characterId: { in: createdCharacterIds } }
+      });
+      await prisma.character.deleteMany({
+        where: { id: { in: createdCharacterIds } }
+      });
+    }
+
+    if (createdEntityTypeIds.length > 0) {
+      await prisma.entityType.deleteMany({
+        where: { id: { in: createdEntityTypeIds } }
+      });
+    }
+  });
+
+  it("creates relationship types and rules", async () => {
+    const mentorResponse = await request(app)
+      .post("/api/relationship-types")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        worldId: context.worldId,
+        name: `Mentor ${Date.now()}`,
+        description: "Mentor relationship",
+        fromLabel: "Mentor",
+        toLabel: "Student",
+        pastFromLabel: "Former Mentor",
+        pastToLabel: "Former Student",
+        isPeerable: false
+      });
+
+    expect(mentorResponse.status).toBe(201);
+    mentorTypeId = trackRelationshipType(mentorResponse.body.id);
+
+    const allyResponse = await request(app)
+      .post("/api/relationship-types")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        worldId: context.worldId,
+        name: `Ally ${Date.now()}`,
+        description: "Peer ally relationship",
+        fromLabel: "Ally",
+        toLabel: "Ally",
+        pastFromLabel: "Former Ally",
+        pastToLabel: "Former Ally",
+        isPeerable: true
+      });
+
+    expect(allyResponse.status).toBe(201);
+    allyTypeId = trackRelationshipType(allyResponse.body.id);
+
+    const mentorRuleResponse = await request(app)
+      .post("/api/relationship-type-rules")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        relationshipTypeId: mentorTypeId,
+        fromEntityTypeId: context.entityTypeId,
+        toEntityTypeId: secondaryEntityTypeId
+      });
+
+    expect(mentorRuleResponse.status).toBe(201);
+    trackRelationshipRule(mentorRuleResponse.body.id);
+
+    const allyForwardResponse = await request(app)
+      .post("/api/relationship-type-rules")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        relationshipTypeId: allyTypeId,
+        fromEntityTypeId: context.entityTypeId,
+        toEntityTypeId: secondaryEntityTypeId
+      });
+
+    expect(allyForwardResponse.status).toBe(201);
+    trackRelationshipRule(allyForwardResponse.body.id);
+
+    const allyReverseResponse = await request(app)
+      .post("/api/relationship-type-rules")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        relationshipTypeId: allyTypeId,
+        fromEntityTypeId: secondaryEntityTypeId,
+        toEntityTypeId: context.entityTypeId
+      });
+
+    expect(allyReverseResponse.status).toBe(201);
+    trackRelationshipRule(allyReverseResponse.body.id);
+  });
+
+  it("blocks viewers from creating relationship types", async () => {
+    const response = await request(app)
+      .post("/api/relationship-types")
+      .set("Authorization", `Bearer ${context.viewerToken}`)
+      .send({
+        worldId: context.worldId,
+        name: `Viewer Type ${Date.now()}`,
+        fromLabel: "Knows",
+        toLabel: "Known"
+      });
+
+    expect(response.status).toBe(403);
+  });
+
+  it("prevents duplicate relationship type rules", async () => {
+    const response = await request(app)
+      .post("/api/relationship-type-rules")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        relationshipTypeId: mentorTypeId,
+        fromEntityTypeId: context.entityTypeId,
+        toEntityTypeId: secondaryEntityTypeId
+      });
+
+    expect(response.status).toBe(409);
+  });
+
+  it("creates directional relationships and blocks duplicates", async () => {
+    const createResponse = await request(app)
+      .post("/api/relationships")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        relationshipTypeId: mentorTypeId,
+        fromEntityId: entityAlphaId,
+        toEntityId: entityBetaId,
+        visibilityScope: "GLOBAL"
+      });
+
+    expect(createResponse.status).toBe(201);
+    mentorRelationshipId = trackRelationship(createResponse.body.id);
+
+    const duplicateResponse = await request(app)
+      .post("/api/relationships")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        relationshipTypeId: mentorTypeId,
+        fromEntityId: entityAlphaId,
+        toEntityId: entityBetaId,
+        visibilityScope: "GLOBAL"
+      });
+
+    expect(duplicateResponse.status).toBe(409);
+
+    const invalidPairResponse = await request(app)
+      .post("/api/relationships")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        relationshipTypeId: mentorTypeId,
+        fromEntityId: entityBetaId,
+        toEntityId: entityAlphaId,
+        visibilityScope: "GLOBAL"
+      });
+
+    expect(invalidPairResponse.status).toBe(400);
+
+    const fromList = await request(app)
+      .get(`/api/entities/${entityAlphaId}/relationships?status=active`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(fromList.status).toBe(200);
+    expect(fromList.body.outgoing).toHaveLength(1);
+    expect(fromList.body.outgoing[0].label).toBe("Mentor");
+    expect(fromList.body.incoming).toHaveLength(0);
+    expect(fromList.body.peers).toHaveLength(0);
+
+    const toList = await request(app)
+      .get(`/api/entities/${entityBetaId}/relationships?status=active`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(toList.status).toBe(200);
+    expect(toList.body.incoming).toHaveLength(1);
+    expect(toList.body.incoming[0].label).toBe("Student");
+  });
+
+  it("updates relationship type labels retroactively", async () => {
+    const updateResponse = await request(app)
+      .put(`/api/relationship-types/${mentorTypeId}`)
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        fromLabel: "Guide",
+        toLabel: "Protege"
+      });
+
+    expect(updateResponse.status).toBe(200);
+
+    const fromList = await request(app)
+      .get(`/api/entities/${entityAlphaId}/relationships?status=active`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(fromList.status).toBe(200);
+    expect(fromList.body.outgoing[0].id).toBe(mentorRelationshipId);
+    expect(fromList.body.outgoing[0].label).toBe("Guide");
+
+    const toList = await request(app)
+      .get(`/api/entities/${entityBetaId}/relationships?status=active`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(toList.status).toBe(200);
+    expect(toList.body.incoming[0].id).toBe(mentorRelationshipId);
+    expect(toList.body.incoming[0].label).toBe("Protege");
+  });
+
+  it("creates peer relationships and expires atomically", async () => {
+    const peerResponse = await request(app)
+      .post("/api/relationships")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        relationshipTypeId: allyTypeId,
+        fromEntityId: entityAlphaId,
+        toEntityId: entityBetaId,
+        visibilityScope: "GLOBAL"
+      });
+
+    expect(peerResponse.status).toBe(201);
+    peerRelationshipId = trackRelationship(peerResponse.body.id);
+    const peerGroupId = trackPeerGroup(peerResponse.body.peerGroupId);
+    expect(peerGroupId).toBeTruthy();
+
+    const peers = await prisma.relationship.findMany({
+      where: { peerGroupId }
+    });
+    expect(peers).toHaveLength(2);
+
+    const expireResponse = await request(app)
+      .post(`/api/relationships/${peerRelationshipId}/expire`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(expireResponse.status).toBe(200);
+
+    const expiredPeers = await prisma.relationship.findMany({
+      where: { peerGroupId }
+    });
+    expect(expiredPeers.every((rel) => rel.status === "EXPIRED")).toBe(true);
+    expect(expiredPeers.every((rel) => rel.expiredAt)).toBe(true);
+
+    const listResponse = await request(app)
+      .get(`/api/entities/${entityAlphaId}/relationships?status=expired`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.peers).toHaveLength(1);
+    expect(listResponse.body.peers[0].label).toBe("Former Ally");
+
+    const deleteResponse = await request(app)
+      .delete(`/api/relationships/${peerRelationshipId}`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(deleteResponse.status).toBe(200);
+
+    const remaining = await prisma.relationship.findMany({
+      where: { peerGroupId }
+    });
+    expect(remaining).toHaveLength(0);
+  });
+
+  it("enforces entity access when listing relationships", async () => {
+    const createResponse = await request(app)
+      .post("/api/relationships")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        relationshipTypeId: mentorTypeId,
+        fromEntityId: entityAlphaId,
+        toEntityId: entityRestrictedId,
+        visibilityScope: "GLOBAL"
+      });
+
+    expect(createResponse.status).toBe(201);
+    const restrictedRelationshipId = trackRelationship(createResponse.body.id);
+
+    const viewerList = await request(app)
+      .get(`/api/entities/${entityAlphaId}/relationships`)
+      .set("Authorization", `Bearer ${context.viewerToken}`);
+
+    expect(viewerList.status).toBe(200);
+    const viewerItems = [
+      ...viewerList.body.outgoing,
+      ...viewerList.body.incoming,
+      ...viewerList.body.peers
+    ];
+    expect(
+      viewerItems.some((item: { otherEntityId: string }) => item.otherEntityId === entityRestrictedId)
+    ).toBe(false);
+
+    const viewerWithCharacter = await request(app)
+      .get(
+        `/api/entities/${entityAlphaId}/relationships?characterId=${viewerCharacterId}`
+      )
+      .set("Authorization", `Bearer ${context.viewerToken}`);
+
+    expect(viewerWithCharacter.status).toBe(200);
+    const viewerWithCharacterItems = [
+      ...viewerWithCharacter.body.outgoing,
+      ...viewerWithCharacter.body.incoming,
+      ...viewerWithCharacter.body.peers
+    ];
+    expect(
+      viewerWithCharacterItems.some(
+        (item: { id: string }) => item.id === restrictedRelationshipId
+      )
+    ).toBe(true);
+  });
+
+  it("enforces relationship visibility scopes", async () => {
+    const createResponse = await request(app)
+      .post("/api/relationships")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        relationshipTypeId: mentorTypeId,
+        fromEntityId: entityAlphaId,
+        toEntityId: entityGammaId,
+        visibilityScope: "CAMPAIGN",
+        visibilityRefId: context.campaignId
+      });
+
+    expect(createResponse.status).toBe(201);
+    const campaignRelationshipId = trackRelationship(createResponse.body.id);
+
+    const viewerNoContext = await request(app)
+      .get(`/api/entities/${entityAlphaId}/relationships`)
+      .set("Authorization", `Bearer ${context.viewerToken}`);
+
+    expect(viewerNoContext.status).toBe(200);
+    const viewerNoContextItems = [
+      ...viewerNoContext.body.outgoing,
+      ...viewerNoContext.body.incoming,
+      ...viewerNoContext.body.peers
+    ];
+    expect(
+      viewerNoContextItems.some(
+        (item: { id: string }) => item.id === campaignRelationshipId
+      )
+    ).toBe(false);
+
+    const viewerWithCampaign = await request(app)
+      .get(
+        `/api/entities/${entityAlphaId}/relationships?campaignId=${context.campaignId}`
+      )
+      .set("Authorization", `Bearer ${context.viewerToken}`);
+
+    expect(viewerWithCampaign.status).toBe(200);
+    const viewerWithCampaignItems = [
+      ...viewerWithCampaign.body.outgoing,
+      ...viewerWithCampaign.body.incoming,
+      ...viewerWithCampaign.body.peers
+    ];
+    expect(
+      viewerWithCampaignItems.some(
+        (item: { id: string }) => item.id === campaignRelationshipId
+      )
+    ).toBe(true);
+
+    const adminView = await request(app)
+      .get(`/api/entities/${entityAlphaId}/relationships`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(adminView.status).toBe(200);
+    const adminItems = [
+      ...adminView.body.outgoing,
+      ...adminView.body.incoming,
+      ...adminView.body.peers
+    ];
+    expect(
+      adminItems.some((item: { id: string }) => item.id === campaignRelationshipId)
+    ).toBe(true);
+  });
+
+  it("blocks relationship lists when the base entity is unreadable", async () => {
+    const response = await request(app)
+      .get(`/api/entities/${entityRestrictedId}/relationships`)
+      .set("Authorization", `Bearer ${context.viewerToken}`);
+
+    expect(response.status).toBe(403);
+  });
+
+  it("prevents deleting relationship types with rules", async () => {
+    const typeResponse = await request(app)
+      .post("/api/relationship-types")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        worldId: context.worldId,
+        name: `Temporary ${Date.now()}`,
+        fromLabel: "Knows",
+        toLabel: "Known"
+      });
+
+    expect(typeResponse.status).toBe(201);
+    const tempTypeId = typeResponse.body.id as string;
+
+    const ruleResponse = await request(app)
+      .post("/api/relationship-type-rules")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        relationshipTypeId: tempTypeId,
+        fromEntityTypeId: context.entityTypeId,
+        toEntityTypeId: secondaryEntityTypeId
+      });
+
+    expect(ruleResponse.status).toBe(201);
+
+    const deleteBlocked = await request(app)
+      .delete(`/api/relationship-types/${tempTypeId}`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(deleteBlocked.status).toBe(400);
+
+    const deleteRule = await request(app)
+      .delete(`/api/relationship-type-rules/${ruleResponse.body.id}`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(deleteRule.status).toBe(200);
+
+    const deleteType = await request(app)
+      .delete(`/api/relationship-types/${tempTypeId}`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(deleteType.status).toBe(200);
+  });
+});

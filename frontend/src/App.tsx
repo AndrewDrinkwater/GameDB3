@@ -50,6 +50,16 @@ const viewRegistry: Record<string, ViewConfig> = {
     formKey: "entity_field_choices.form",
     label: "Entity Field Choices"
   },
+  relationship_types: {
+    listKey: "relationship_types.list",
+    formKey: "relationship_types.form",
+    label: "Relationship Types"
+  },
+  relationship_type_rules: {
+    listKey: "relationship_type_rules.list",
+    formKey: "relationship_type_rules.form",
+    label: "Relationship Rules"
+  },
   entities: { listKey: "entities.list", formKey: "entities.form", label: "Entities" },
   location_types: {
     listKey: "location_types.list",
@@ -1264,6 +1274,10 @@ function AppShell() {
                     ? context.worldId
                       ? { worldId: context.worldId }
                       : undefined
+                    : routeParts[1] === "relationship_types"
+                      ? context.worldId
+                        ? { worldId: context.worldId }
+                        : undefined
                     : routeParts[1] === "location_types"
                       ? context.worldId
                         ? { worldId: context.worldId }
@@ -1665,6 +1679,29 @@ function AppShell() {
                                   }}
                                 >
                                   Field Choices
+                                </button>
+                              </div>
+                            </div>
+                            <div className="sidebar__subsection">
+                              <span className="sidebar__subsection-title">Relationship Admin</span>
+                              <div className="sidebar__subsection-body">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/list/relationship_types");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Relationship Types
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/list/relationship_type_rules");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Relationship Rules
                                 </button>
                               </div>
                             </div>

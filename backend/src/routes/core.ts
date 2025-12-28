@@ -796,6 +796,13 @@ export const registerCoreRoutes = (app: express.Express) => {
     const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
     const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
     const entityTypeId = typeof req.query.entityTypeId === "string" ? req.query.entityTypeId : undefined;
+    const entityTypeIdsParam =
+      typeof req.query.entityTypeIds === "string" ? req.query.entityTypeIds : undefined;
+    const includeEntityTypeId =
+      typeof req.query.includeEntityTypeId === "string"
+        ? req.query.includeEntityTypeId.toLowerCase() === "true" ||
+          req.query.includeEntityTypeId === "1"
+        : false;
     const locationTypeId =
       typeof req.query.locationTypeId === "string" ? req.query.locationTypeId : undefined;
   
@@ -1053,7 +1060,63 @@ export const registerCoreRoutes = (app: express.Express) => {
       res.json(results);
       return;
     }
-  
+
+    if (entityKey === "relationship_types") {
+      const labelField = await getLabelFieldForEntity(entityKey);
+      const baseClause: Prisma.RelationshipTypeWhereInput = ids
+        ? { id: { in: ids } }
+        : queryValue
+          ? { name: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
+          : {};
+
+      const filters: Prisma.RelationshipTypeWhereInput[] = [baseClause];
+      if (scope === "relationship_type") {
+        if (worldId) {
+          if (!isAdmin(user) && !(await canAccessWorld(user.id, worldId))) {
+            res.status(403).json({ error: "Forbidden." });
+            return;
+          }
+          filters.push({ worldId });
+        } else if (!isAdmin(user)) {
+          res.json([]);
+          return;
+        }
+      } else if (worldId) {
+        if (!isAdmin(user) && !(await canAccessWorld(user.id, worldId))) {
+          res.status(403).json({ error: "Forbidden." });
+          return;
+        }
+        filters.push({ worldId });
+      } else if (!isAdmin(user) && !ids) {
+        res.json([]);
+        return;
+      }
+
+      const whereClause: Prisma.RelationshipTypeWhereInput =
+        filters.length > 1 ? { AND: filters } : baseClause;
+
+      const select: Record<string, boolean> = { id: true };
+      select[labelField] = true;
+
+      const types = await prisma.relationshipType.findMany({
+        where: whereClause,
+        select: select as Record<string, true>,
+        orderBy: { name: "asc" },
+        take: 25
+      });
+
+      const results = types.map((relationshipType) => {
+        const labelValue = (relationshipType as Record<string, unknown>)[labelField];
+        return {
+          id: relationshipType.id,
+          label: labelValue ? String(labelValue) : relationshipType.id
+        };
+      });
+
+      res.json(results);
+      return;
+    }
+
     if (entityKey === "entities") {
       const labelField = await getLabelFieldForEntity(entityKey);
       const baseClause: Prisma.EntityWhereInput = ids
@@ -1061,10 +1124,20 @@ export const registerCoreRoutes = (app: express.Express) => {
         : queryValue
           ? { name: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
           : {};
-  
+
       const filters: Prisma.EntityWhereInput[] = [baseClause];
       if (worldId) filters.push({ worldId });
-      if (entityTypeId) filters.push({ entityTypeId });
+      const entityTypeIds = entityTypeIdsParam
+        ? entityTypeIdsParam
+            .split(",")
+            .map((id) => id.trim())
+            .filter(Boolean)
+        : undefined;
+      if (entityTypeIds && entityTypeIds.length > 0) {
+        filters.push({ entityTypeId: { in: entityTypeIds } });
+      } else if (entityTypeId) {
+        filters.push({ entityTypeId });
+      }
   
         if (!isAdmin(user)) {
           if (!worldId) {
@@ -1101,7 +1174,10 @@ export const registerCoreRoutes = (app: express.Express) => {
       const whereClause: Prisma.EntityWhereInput = filters.length > 1 ? { AND: filters } : baseClause;
       const select: Record<string, boolean> = { id: true };
       select[labelField] = true;
-  
+      if (includeEntityTypeId) {
+        select.entityTypeId = true;
+      }
+
       const entities = await prisma.entity.findMany({
         where: whereClause,
         select: select as Record<string, true>,
@@ -1111,12 +1187,16 @@ export const registerCoreRoutes = (app: express.Express) => {
   
       const results = entities.map((entity) => {
         const labelValue = (entity as Record<string, unknown>)[labelField];
-        return {
+        const payload: Record<string, unknown> = {
           id: entity.id,
           label: labelValue ? String(labelValue) : entity.id
         };
+        if (includeEntityTypeId) {
+          payload.entityTypeId = (entity as { entityTypeId?: string }).entityTypeId;
+        }
+        return payload;
       });
-  
+
       res.json(results);
       return;
     }
@@ -1540,6 +1620,33 @@ export const registerCoreRoutes = (app: express.Express) => {
         }
         break;
       }
+      case "relationship_types": {
+        if (recordId) {
+          const relationshipType = await prisma.relationshipType.findUnique({
+            where: { id: recordId },
+            select: { worldId: true }
+          });
+          if (!relationshipType) {
+            res.status(404).json({ error: "Relationship type not found." });
+            return;
+          }
+          const canManage =
+            admin ||
+            (await isWorldArchitect(user.id, relationshipType.worldId)) ||
+            (await isWorldGameMaster(user.id, relationshipType.worldId)) ||
+            (await isWorldGm(user.id, relationshipType.worldId));
+          canEdit = canManage;
+          canDelete = canManage;
+        }
+        if (worldId) {
+          canCreate =
+            admin ||
+            (await isWorldArchitect(user.id, worldId)) ||
+            (await isWorldGameMaster(user.id, worldId)) ||
+            (await isWorldGm(user.id, worldId));
+        }
+        break;
+      }
       case "location_types": {
         if (worldId) {
           canCreate = admin || (await isWorldArchitect(user.id, worldId));
@@ -1610,6 +1717,33 @@ export const registerCoreRoutes = (app: express.Express) => {
             canEdit = canManage;
             canDelete = canManage;
           }
+        }
+        break;
+      }
+      case "relationship_type_rules": {
+        if (recordId) {
+          const rule = await prisma.relationshipTypeRule.findUnique({
+            where: { id: recordId },
+            include: { relationshipType: { select: { worldId: true } } }
+          });
+          if (!rule) {
+            res.status(404).json({ error: "Relationship type rule not found." });
+            return;
+          }
+          const canManage =
+            admin ||
+            (await isWorldArchitect(user.id, rule.relationshipType.worldId)) ||
+            (await isWorldGameMaster(user.id, rule.relationshipType.worldId)) ||
+            (await isWorldGm(user.id, rule.relationshipType.worldId));
+          canEdit = canManage;
+          canDelete = canManage;
+        }
+        if (worldId) {
+          canCreate =
+            admin ||
+            (await isWorldArchitect(user.id, worldId)) ||
+            (await isWorldGameMaster(user.id, worldId)) ||
+            (await isWorldGm(user.id, worldId));
         }
         break;
       }

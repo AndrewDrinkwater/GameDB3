@@ -5,6 +5,7 @@ import EntityFormDesigner from "./EntityFormDesigner";
 import EntityAccessEditor from "./EntityAccessEditor";
 import EntitySidePanel from "./EntitySidePanel";
 import EntityNotes from "./EntityNotes";
+import EntityRelationships from "./EntityRelationships";
 import RelatedLists from "./RelatedLists";
 import Toast from "./Toast";
 import { usePopout } from "./PopoutProvider";
@@ -253,7 +254,7 @@ export default function FormView({
   const [entityTypePromptOptions, setEntityTypePromptOptions] = useState<Choice[]>([]);
   const [conditionFieldOptions, setConditionFieldOptions] = useState<ConditionFieldOption[]>([]);
   const [entityTab, setEntityTab] = useState<
-    "info" | "config" | "access" | "notes" | "audit"
+    "info" | "config" | "relationships" | "access" | "notes" | "audit"
   >("info");
   const [entityTypeTab, setEntityTypeTab] = useState<"details" | "designer">("details");
   const [fieldChoices, setFieldChoices] = useState<EntityFieldChoice[]>([]);
@@ -473,6 +474,16 @@ export default function FormView({
           }
 
           const record = (await recordResponse.json()) as Record<string, unknown>;
+          if (viewData.entityKey === "relationship_type_rules") {
+            const fromValue = record.fromEntityTypeId;
+            const toValue = record.toEntityTypeId;
+            record.fromEntityTypeId = Array.isArray(fromValue)
+              ? fromValue
+              : fromValue
+                ? [fromValue]
+                : [];
+            record.toEntityTypeId = Array.isArray(toValue) ? toValue : toValue ? [toValue] : [];
+          }
           if (!ignore) {
             setFormData(record);
             if (
@@ -1226,6 +1237,14 @@ export default function FormView({
         return true;
       });
     }
+    if (view.entityKey === "relationship_type_rules") {
+      fields = fields.map((field) => {
+        if (field.fieldKey === "fromEntityTypeId" || field.fieldKey === "toEntityTypeId") {
+          return { ...field, allowMultiple: true };
+        }
+        return field;
+      });
+    }
     return fields;
   }, [view, formData.fieldType]);
 
@@ -1250,6 +1269,13 @@ export default function FormView({
     ensureSnapshotReady();
     setFormData((current) => ({ ...current, [fieldKey]: value }));
   };
+
+  const isMultiReferenceField = (field: ViewField) =>
+    Boolean(
+      field.allowMultiple ||
+        (view?.entityKey === "relationship_type_rules" &&
+          (field.fieldKey === "fromEntityTypeId" || field.fieldKey === "toEntityTypeId"))
+    );
 
   const handleEntityValueChange = (fieldKey: string, value: unknown) => {
     ensureSnapshotReady();
@@ -1421,7 +1447,7 @@ export default function FormView({
         (typeof formData.worldId === "string" ? formData.worldId : undefined) ??
         contextWorldId;
       const contextParams =
-        effectiveScope === "entity_type"
+        effectiveScope === "entity_type" || effectiveScope === "relationship_type"
           ? formData.worldId
             ? `&worldId=${formData.worldId}`
             : entityTypeWorldId
@@ -1602,7 +1628,7 @@ export default function FormView({
   };
 
   const resolveReferenceSelection = (field: ViewField) => {
-    if (field.allowMultiple) return;
+    if (isMultiReferenceField(field)) return;
     const options = referenceOptions[field.fieldKey] ?? [];
     const labelValue = (referenceLabels[field.fieldKey] ?? "").trim();
 
@@ -1631,7 +1657,7 @@ export default function FormView({
 
   const handleReferenceSelect = (field: ViewField, option: Choice) => {
     closeReferenceDropdown(field.fieldKey);
-    if (field.allowMultiple) {
+    if (isMultiReferenceField(field)) {
       setReferenceSelections((current) => {
         const existing = current[field.fieldKey] ?? [];
         if (existing.some((item) => item.value === option.value)) {
@@ -1672,7 +1698,7 @@ export default function FormView({
       .filter((field) => {
         const value = formData[field.fieldKey];
         if (field.fieldType === "REFERENCE") {
-          return field.allowMultiple ? !Array.isArray(value) || value.length === 0 : !value;
+          return isMultiReferenceField(field) ? !Array.isArray(value) || value.length === 0 : !value;
         }
         return value === undefined || value === "";
       })
@@ -1996,10 +2022,12 @@ export default function FormView({
     return <div className="view-state error">{error ?? "Form unavailable."}</div>;
   }
 
-  const isEntityView = view.entityKey === "entities";
-  const isLocationView = view.entityKey === "locations";
-  const isEntityTypeView = view.entityKey === "entity_types";
-  const isRecordView = isEntityView || isLocationView;
+    const isEntityView = view.entityKey === "entities";
+    const isLocationView = view.entityKey === "locations";
+    const isEntityTypeView = view.entityKey === "entity_types";
+    const isRecordView = isEntityView || isLocationView;
+    const showFormActions =
+      canEditRecord && (isNew ? canCreateRecord : true) && !(isEntityView && entityTab === "relationships");
   const templateFieldKeys = new Set(["isTemplate", "sourceTypeId"]);
   const entityTypeFields =
     view.entityKey === "entity_types"
@@ -2183,7 +2211,7 @@ export default function FormView({
                 setReferenceOpen((current) => ({ ...current, [field.fieldKey]: false }));
               }}
             >
-              {field.allowMultiple && selections.length > 0 ? (
+              {isMultiReferenceField(field) && selections.length > 0 ? (
                 <div className="reference-field__chips">
                   {selections.map((item) => (
                     <button
@@ -2221,7 +2249,7 @@ export default function FormView({
                   onChange={(event) => {
                     const next = event.target.value;
                     setReferenceLabels((current) => ({ ...current, [field.fieldKey]: next }));
-                    if (!field.allowMultiple) {
+                    if (!isMultiReferenceField(field)) {
                       handleChange(field.fieldKey, "");
                     }
                     void handleReferenceSearch(field, next);
@@ -2241,7 +2269,7 @@ export default function FormView({
               </div>
               {field.required &&
               (!formData[field.fieldKey] ||
-                (field.allowMultiple &&
+                (isMultiReferenceField(field) &&
                   Array.isArray(formData[field.fieldKey]) &&
                   formData[field.fieldKey].length === 0)) ? (
                 <div className="form-view__hint">Select a value.</div>
@@ -2370,6 +2398,17 @@ export default function FormView({
                   aria-selected={entityTab === "config"}
                 >
                   Config
+                </button>
+              ) : null}
+              {isEntityView ? (
+                <button
+                  type="button"
+                  className={`form-view__tab ${entityTab === "relationships" ? "is-active" : ""}`}
+                  onClick={() => setEntityTab("relationships")}
+                  role="tab"
+                  aria-selected={entityTab === "relationships"}
+                >
+                  Relationships
                 </button>
               ) : null}
                 {entityAccessAllowed || isNew ? (
@@ -2715,7 +2754,7 @@ export default function FormView({
                         }));
                       }}
                     >
-                      {field.allowMultiple && selections.length > 0 ? (
+                      {isMultiReferenceField(field) && selections.length > 0 ? (
                         <div className="reference-field__chips">
                           {selections.map((item) => (
                             <button
@@ -2760,7 +2799,7 @@ export default function FormView({
                             ...current,
                             [field.fieldKey]: next
                           }));
-                          if (!field.allowMultiple) {
+                          if (!isMultiReferenceField(field)) {
                             handleChange(field.fieldKey, "");
                           }
                           void handleReferenceSearch(field, next);
@@ -2777,7 +2816,7 @@ export default function FormView({
                       />
                       {field.required &&
                       (!formData[field.fieldKey] ||
-                        (field.allowMultiple &&
+                        (isMultiReferenceField(field) &&
                           Array.isArray(formData[field.fieldKey]) &&
                           formData[field.fieldKey].length === 0)) ? (
                         <div className="form-view__hint">Select a value.</div>
@@ -2859,6 +2898,20 @@ export default function FormView({
             {configFields.length === 0 ? (
               <div className="form-view__hint">No configuration fields available.</div>
             ) : null}
+          </div>
+        ) : null}
+        {isEntityView && entityTab === "relationships" ? (
+          <div className="form-view__section">
+            <EntityRelationships
+              token={token}
+              entityId={recordId}
+              worldId={(formData.worldId as string | undefined) ?? contextWorldId}
+              entityTypeId={formData.entityTypeId as string | undefined}
+              entityName={formData.name as string | undefined}
+              contextCampaignId={contextCampaignId}
+              contextCharacterId={contextCharacterId}
+              onOpenEntity={(entityId) => setEntityPanelId(entityId)}
+            />
           </div>
         ) : null}
         {isRecordView && entityTab === "access" ? (
@@ -3024,7 +3077,7 @@ export default function FormView({
             ) : null}
           </div>
         ) : null}
-        {canEditRecord && (isNew ? canCreateRecord : true) ? (
+        {showFormActions ? (
           <div className="form-view__actions">
             <button
               type="button"

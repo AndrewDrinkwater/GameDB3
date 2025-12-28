@@ -104,6 +104,11 @@ enum NoteTagType {
   LOCATION
 }
 
+enum RelationshipStatus {
+  ACTIVE
+  EXPIRED
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -135,6 +140,7 @@ model User {
   refreshTokens      RefreshToken[]
   systemAudits       SystemAudit[]
   notesAuthored      Note[]              @relation("NoteAuthor")
+  createdRelationships Relationship[]    @relation("RelationshipCreator")
 }
 
 model World {
@@ -160,6 +166,8 @@ model World {
   entities          Entity[]
   locationTypes     LocationType[]
   locations         Location[]
+  relationshipTypes RelationshipType[]
+  relationships     Relationship[]
 
   @@index([primaryArchitectId])
 }
@@ -208,6 +216,8 @@ model EntityType {
   entities  Entity[]
   listViewDefault EntityTypeListViewDefault?
   listViewPreferences UserListViewPreference[]
+  relationshipTypeRulesFrom RelationshipTypeRule[] @relation("RelationshipRuleFrom")
+  relationshipTypeRulesTo RelationshipTypeRule[] @relation("RelationshipRuleTo")
 
   @@index([worldId])
   @@index([createdById])
@@ -398,6 +408,8 @@ model Entity {
   values     EntityFieldValue[]
   access     EntityAccess[]
   notes      Note[]
+  relationshipsFrom Relationship[] @relation("RelationshipFrom")
+  relationshipsTo Relationship[] @relation("RelationshipTo")
 
   @@index([worldId])
   @@index([entityTypeId])
@@ -432,6 +444,74 @@ model Location {
   @@index([locationTypeId])
   @@index([parentLocationId])
   @@index([createdById])
+}
+
+model RelationshipType {
+  id            String   @id @default(uuid())
+  worldId       String
+  name          String
+  description   String?
+  fromLabel     String
+  toLabel       String
+  pastFromLabel String?
+  pastToLabel   String?
+  isPeerable    Boolean  @default(false)
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  world         World               @relation(fields: [worldId], references: [id])
+  rules         RelationshipTypeRule[]
+  relationships Relationship[]
+
+  @@index([worldId])
+}
+
+model RelationshipTypeRule {
+  id                  String   @id @default(uuid())
+  relationshipTypeId  String
+  fromEntityTypeId    String
+  toEntityTypeId      String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  relationshipType RelationshipType @relation(fields: [relationshipTypeId], references: [id])
+  fromEntityType   EntityType       @relation("RelationshipRuleFrom", fields: [fromEntityTypeId], references: [id])
+  toEntityType     EntityType       @relation("RelationshipRuleTo", fields: [toEntityTypeId], references: [id])
+
+  @@unique([relationshipTypeId, fromEntityTypeId, toEntityTypeId])
+  @@index([relationshipTypeId])
+  @@index([fromEntityTypeId])
+  @@index([toEntityTypeId])
+}
+
+model Relationship {
+  id                 String             @id @default(uuid())
+  worldId            String
+  relationshipTypeId String
+  fromEntityId       String
+  toEntityId         String
+  peerGroupId        String?
+  status             RelationshipStatus @default(ACTIVE)
+  visibilityScope    EntityAccessScope  @default(GLOBAL)
+  visibilityRefId    String?
+  createdById        String
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  expiredAt          DateTime?
+
+  world            World            @relation(fields: [worldId], references: [id])
+  relationshipType RelationshipType @relation(fields: [relationshipTypeId], references: [id])
+  fromEntity       Entity           @relation("RelationshipFrom", fields: [fromEntityId], references: [id])
+  toEntity         Entity           @relation("RelationshipTo", fields: [toEntityId], references: [id])
+  createdBy        User             @relation("RelationshipCreator", fields: [createdById], references: [id])
+
+  @@unique([worldId, relationshipTypeId, fromEntityId, toEntityId])
+  @@index([worldId])
+  @@index([relationshipTypeId])
+  @@index([fromEntityId])
+  @@index([toEntityId])
+  @@index([peerGroupId])
 }
 
 model EntityFieldValue {
