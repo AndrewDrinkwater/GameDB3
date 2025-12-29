@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import EntityRelationships from "../components/EntityRelationships";
 import PopoutProvider from "../components/PopoutProvider";
@@ -58,9 +58,7 @@ describe("EntityRelationships", () => {
     (global as typeof globalThis).fetch = jest.fn((input: RequestInfo) => {
       const url = String(input);
       if (url.includes("/api/entities/") && url.includes("/relationships")) {
-        return Promise.resolve(
-          createResponse({ canManage: true, outgoing: [], incoming: [], peers: [] })
-        );
+        return Promise.resolve(createResponse({ canManage: true, relationships: [] }));
       }
       if (url.startsWith("/api/relationship-types")) {
         return Promise.resolve(createResponse(relationshipTypes));
@@ -86,21 +84,19 @@ describe("EntityRelationships", () => {
       />
     );
 
-    const input = await screen.findByPlaceholderText("Search entities...");
+    await userEvent.click(await screen.findByRole("button", { name: "Add relationship" }));
+
+    const dialog = await screen.findByRole("dialog");
+    const typeSelect = await within(dialog).findByLabelText("Relationship Type");
+    await userEvent.selectOptions(typeSelect, "type-mentor");
+
+    const input = await within(dialog).findByPlaceholderText("Search entities...");
     await userEvent.click(input);
 
-    const targetButton = await screen.findByRole("button", { name: "Target B" });
+    const targetButton = await within(dialog).findByRole("button", { name: "Target B" });
     await userEvent.click(targetButton);
 
-    expect(await screen.findByText("Possible relationships")).toBeInTheDocument();
-    expect(screen.getByText("Mentor (this to target)")).toBeInTheDocument();
-    expect(screen.getByText("Ally (peer)")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByText("Mentor (this to target)"));
-
-    expect(
-      await screen.findByText("Hero (Mentor) to Target B (Student)")
-    ).toBeInTheDocument();
+    expect(await within(dialog).findByText("Hero Mentor Target B")).toBeInTheDocument();
   });
 
   it("filters targets by relationship type and shows swap when both directions exist", async () => {
@@ -130,9 +126,7 @@ describe("EntityRelationships", () => {
     (global as typeof globalThis).fetch = jest.fn((input: RequestInfo) => {
       const url = String(input);
       if (url.includes("/api/entities/") && url.includes("/relationships")) {
-        return Promise.resolve(
-          createResponse({ canManage: true, outgoing: [], incoming: [], peers: [] })
-        );
+        return Promise.resolve(createResponse({ canManage: true, relationships: [] }));
       }
       if (url.startsWith("/api/relationship-types")) {
         return Promise.resolve(createResponse(relationshipTypes));
@@ -158,22 +152,22 @@ describe("EntityRelationships", () => {
       />
     );
 
-    const flowSelect = await screen.findByLabelText("Creation flow");
-    await userEvent.selectOptions(flowSelect, "by-type");
+    await userEvent.click(await screen.findByRole("button", { name: "Add relationship" }));
 
-    const typeSelect = await screen.findByLabelText("Relationship Type");
+    const dialog = await screen.findByRole("dialog");
+    const typeSelect = await within(dialog).findByLabelText("Relationship Type");
     await userEvent.selectOptions(typeSelect, "type-bond");
 
-    const input = await screen.findByPlaceholderText("Search entities...");
+    const input = await within(dialog).findByPlaceholderText("Search entities...");
     await userEvent.click(input);
 
     const fetchCalls = (global.fetch as jest.Mock).mock.calls.map(([input]) => String(input));
     const hasFilterCall = fetchCalls.some((url) => url.includes("entityTypeIds=type-b"));
     expect(hasFilterCall).toBe(true);
 
-    const targetButton = await screen.findByRole("button", { name: "Target B" });
+    const targetButton = await within(dialog).findByRole("button", { name: "Target B" });
     await userEvent.click(targetButton);
 
-    expect(await screen.findByText("Swap direction")).toBeInTheDocument();
+    expect(await within(dialog).findByText("<-> Swap direction")).toBeInTheDocument();
   });
 });

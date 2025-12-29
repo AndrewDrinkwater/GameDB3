@@ -7,6 +7,7 @@ import ContextBar, { ContextSelection } from "./components/ContextBar";
 import PopoutProvider from "./components/PopoutProvider";
 import { useUnsavedChangesPrompt } from "./utils/unsavedChanges";
 import ErrorBoundary from "./components/ErrorBoundary";
+import SessionsPanel from "./components/SessionsPanel";
 
 type User = {
   id: string;
@@ -154,6 +155,7 @@ function AppShell() {
   >([]);
   const [locationMenuVersion, setLocationMenuVersion] = useState(0);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [sessionCount, setSessionCount] = useState(0);
   const [lastEntitiesListRoute, setLastEntitiesListRoute] = useState<string | null>(null);
   const refreshInFlightRef = useRef<Promise<boolean> | null>(null);
   const sidebarRef = useRef<HTMLElement | null>(null);
@@ -587,6 +589,37 @@ function AppShell() {
     context.characterId,
     locationMenuVersion
   ]);
+
+  useEffect(() => {
+    let ignore = false;
+    if (!token || !context.worldId || !context.campaignId) {
+      setSessionCount(0);
+      return;
+    }
+
+    const loadSessionCount = async () => {
+      const params = new URLSearchParams({
+        worldId: context.worldId as string,
+        campaignId: context.campaignId as string
+      });
+      const response = await fetch(`/api/sessions?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (handleUnauthorized(response)) return;
+      if (!response.ok) {
+        if (!ignore) setSessionCount(0);
+        return;
+      }
+      const data = (await response.json()) as Array<{ id: string }>;
+      if (!ignore) setSessionCount(data.length);
+    };
+
+    void loadSessionCount();
+
+    return () => {
+      ignore = true;
+    };
+  }, [token, context.worldId, context.campaignId]);
 
   useEffect(() => {
     const handleLocationTypeUpdate = () => {
@@ -1062,6 +1095,31 @@ function AppShell() {
       const selectedEntityType = entityTypeIdParam
         ? entityTypeStats.find((type) => type.id === entityTypeIdParam)
         : undefined;
+
+      if (routeParts[0] === "sessions") {
+        return (
+            <SessionsPanel
+              token={token}
+              worldId={context.worldId}
+              campaignId={context.campaignId}
+              contextCharacterId={context.characterId}
+              currentUserId={user.id}
+              sessionId={routeParts[1]}
+              onSelectSession={(sessionId) => {
+                navigateWithGuard(`/sessions/${sessionId}`);
+                handleSidebarSelect();
+            }}
+            onOpenEntity={(entityId) => {
+              navigateWithGuard(`/form/entities/${entityId}`);
+              handleSidebarSelect();
+            }}
+            onOpenLocation={(locationId) => {
+              navigateWithGuard(`/form/locations/${locationId}`);
+              handleSidebarSelect();
+            }}
+          />
+        );
+      }
 
       if (routeParts[0] === "profile") {
         return (
@@ -1555,6 +1613,19 @@ function AppShell() {
                     >
                       Characters
                     </button>
+                    {context.campaignId ? (
+                      <button
+                        type="button"
+                        className="sidebar__nav-item--count"
+                        onClick={() => {
+                          navigateWithGuard("/sessions");
+                          handleSidebarSelect();
+                        }}
+                      >
+                        <span>Sessions</span>
+                        <span className="sidebar__entity-count">{sessionCount}</span>
+                      </button>
+                    ) : null}
                     {context.worldId ? (
                       entityTypeStats.length > 0 ? (
                         <div className="sidebar__section">

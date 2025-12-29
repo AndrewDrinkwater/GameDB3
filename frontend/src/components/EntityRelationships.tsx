@@ -781,8 +781,11 @@ export default function EntityRelationships({
 
   useEffect(() => {
     const loadLabels = async () => {
-      if (!relationships) return;
-      const list = relationships.relationships;
+    const list = relationships?.relationships ?? [];
+    if (list.length === 0) {
+      setVisibilityLabels({ campaigns: {}, characters: {} });
+      return;
+    }
       const campaignIds = Array.from(
         new Set(
           list

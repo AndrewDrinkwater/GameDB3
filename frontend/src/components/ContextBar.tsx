@@ -229,7 +229,8 @@ export default function ContextBar({ token, context, onChange, onReset }: Contex
 
   const campaignOptionsLoader = (query: string) =>
     fetchOptions(token, "campaigns", query, {
-      worldId: context.worldId
+      worldId: context.worldId,
+      characterId: context.characterId
     });
 
   const characterOptionsLoader = (query: string) =>

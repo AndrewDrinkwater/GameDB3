@@ -650,6 +650,14 @@ body {
   padding: 0.35rem 0;
 }
 
+.sidebar__nav button.sidebar__nav-item--count {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+}
+
 .sidebar__section {
   margin-top: 1.25rem;
   border-top: 1px solid var(--border);
@@ -3122,15 +3130,47 @@ body {
 }
 
 .mentions__suggestions__item--focused {
-  background: var(--accent-soft);
+    background: var(--accent-soft);
+  }
+
+.rich-text-editor {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.rich-text-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.rich-text-toolbar button {
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 85%, transparent);
+  color: var(--text);
+  padding: 0.25rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.rich-text-toolbar button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.rich-text-toolbar__divider {
+  width: 1px;
+  height: 1.2rem;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
 }
 
 .entity-notes__composer-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
 
 .entity-notes__feed {
   display: grid;
@@ -3369,7 +3409,183 @@ body {
 }
 
 .note-tag:disabled {
-  cursor: not-allowed;
+    cursor: not-allowed;
+  }
+
+.session-notes {
+  display: grid;
+  gap: 1.6rem;
+}
+
+.session-notes__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1.5rem;
+}
+
+.session-notes__composer {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.session-notes__composer-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.session-notes__composer-header h3 {
+  margin: 0 0 0.3rem;
+  font-size: 1.05rem;
+}
+
+.session-notes__composer-header p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.session-notes__visibility {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.session-notes__visibility select {
+  min-width: 140px;
+}
+
+.session-notes__composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.session-notes__feed {
+  display: grid;
+  gap: 1rem;
+}
+
+.session-notes__state {
+  padding: 0.75rem 0;
+  color: var(--text-muted);
+}
+
+.sessions-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 1.5rem;
+  min-height: 520px;
+}
+
+.sessions-panel__sidebar {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.sessions-panel__header h2 {
+  margin: 0 0 0.25rem;
+}
+
+.sessions-panel__header p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.sessions-panel__create {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+}
+
+.sessions-panel__create input {
+  width: 100%;
+}
+
+.sessions-panel__create-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.sessions-panel__list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.sessions-panel__item {
+  text-align: left;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+.sessions-panel__item.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.sessions-panel__item-title {
+  font-weight: 600;
+}
+
+.sessions-panel__item-meta {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.sessions-panel__state {
+  color: var(--text-muted);
+  padding: 0.5rem 0;
+}
+
+.sessions-panel__content {
+  display: grid;
+  gap: 1rem;
+}
+
+.sessions-panel__empty {
+  border-radius: 0.9rem;
+  border: 1px dashed color-mix(in srgb, var(--border) 70%, transparent);
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.sessions-panel__empty h3 {
+  margin: 0 0 0.5rem;
+  color: var(--text);
+}
+
+@media (max-width: 900px) {
+  .sessions-panel {
+    grid-template-columns: 1fr;
+  }
+}
+
+.session-note__list {
+  margin: 0.4rem 0 0.6rem 1.2rem;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.session-note__list li {
+  margin: 0;
+}
+
+.session-note__spacer {
+  height: 0.6rem;
 }
 
 @media (max-width: 720px) {

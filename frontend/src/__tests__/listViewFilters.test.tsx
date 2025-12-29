@@ -103,6 +103,7 @@ describe("ListView filters", () => {
     );
 
     await screen.findByRole("heading", { name: "Entities" });
+    await screen.findByText("Name contains Test");
     await waitFor(() => {
       expect(prefsLoaded).toBe(true);
       expect(entitiesUrls.length).toBeGreaterThan(0);

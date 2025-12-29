@@ -1,87 +1,34 @@
 import { useEffect, useState } from "react";
 import { dispatchUnauthorized } from "../utils/auth";
 
-type EntitySummary = {
+type LocationSummary = {
   id: string;
   name: string;
   description?: string | null;
-  entityTypeId: string;
+  locationTypeId: string;
   worldId: string;
+  status?: string | null;
   fieldValues?: Record<string, unknown>;
 };
 
-type EntitySidePanelProps = {
+type LocationSidePanelProps = {
   token: string;
-  entityId: string | null;
+  locationId: string | null;
   contextCampaignId?: string;
   contextCharacterId?: string;
   onClose: () => void;
-  onOpenRecord: (entityId: string) => void;
+  onOpenRecord: (locationId: string) => void;
 };
 
-type EntityFieldDefinition = {
+type LocationFieldDefinition = {
   id: string;
   fieldKey: string;
-  label: string;
+  fieldLabel: string;
   fieldType: string;
   required: boolean;
   formOrder: number;
   listOrder: number;
-  conditions?: unknown;
   choices?: Array<{ value: string; label: string }>;
-  referenceEntityTypeId?: string | null;
-};
-
-type ConditionRule = {
-  fieldKey: string;
-  operator: string;
-  value?: string;
-};
-
-type ConditionGroup = {
-  logic: "AND" | "OR";
-  rules?: ConditionRule[];
-  groups?: ConditionGroup[];
-};
-
-const evaluateRule = (rule: ConditionRule, values: Record<string, unknown>) => {
-  const rawValue = values[rule.fieldKey];
-  const value = rawValue === undefined || rawValue === null ? "" : String(rawValue);
-  const targetValues = Array.isArray(rule.value)
-    ? rule.value.map((item) => String(item))
-    : rule.value
-      ? [String(rule.value)]
-      : [];
-  const target = targetValues[0] ?? "";
-
-  switch (rule.operator) {
-    case "equals":
-      return value === target;
-    case "not_equals":
-      return value !== target;
-    case "contains":
-      return value.toLowerCase().includes(target.toLowerCase());
-    case "contains_any":
-      return targetValues.some((item) => item === value);
-    case "is_set":
-      return value !== "";
-    case "is_not_set":
-      return value === "";
-    default:
-      return true;
-  }
-};
-
-const evaluateGroup = (group: ConditionGroup, values: Record<string, unknown>) => {
-  const rules = group.rules ?? [];
-  const groups = group.groups ?? [];
-  const results = [
-    ...rules.map((rule) => evaluateRule(rule, values)),
-    ...groups.map((child) => evaluateGroup(child, values))
-  ];
-
-  if (results.length === 0) return true;
-  return group.logic === "AND" ? results.every(Boolean) : results.some(Boolean);
 };
 
 const formatFieldValue = (value: unknown) => {
@@ -94,31 +41,31 @@ const formatFieldValue = (value: unknown) => {
   return String(value);
 };
 
-export default function EntitySidePanel({
+export default function LocationSidePanel({
   token,
-  entityId,
+  locationId,
   contextCampaignId,
   contextCharacterId,
   onClose,
   onOpenRecord
-}: EntitySidePanelProps) {
+}: LocationSidePanelProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [entity, setEntity] = useState<EntitySummary | null>(null);
-  const [entityTypeLabel, setEntityTypeLabel] = useState<string | null>(null);
-  const [entityFields, setEntityFields] = useState<EntityFieldDefinition[]>([]);
-  const [referenceLabels, setReferenceLabels] = useState<Record<string, string>>({});
-  const [locationReferenceLabels, setLocationReferenceLabels] = useState<
-    Record<string, string>
-  >({});
+  const [location, setLocation] = useState<LocationSummary | null>(null);
+  const [locationTypeLabel, setLocationTypeLabel] = useState<string | null>(null);
+  const [locationFields, setLocationFields] = useState<LocationFieldDefinition[]>([]);
+  const [entityReferenceLabels, setEntityReferenceLabels] = useState<Record<string, string>>({});
+  const [locationReferenceLabels, setLocationReferenceLabels] = useState<Record<string, string>>(
+    {}
+  );
 
   useEffect(() => {
     let ignore = false;
-    if (!entityId) {
-      setEntity(null);
-      setEntityTypeLabel(null);
-      setEntityFields([]);
-      setReferenceLabels({});
+    if (!locationId) {
+      setLocation(null);
+      setLocationTypeLabel(null);
+      setLocationFields([]);
+      setEntityReferenceLabels({});
       setLocationReferenceLabels({});
       setError(null);
       setLoading(false);
@@ -133,8 +80,8 @@ export default function EntitySidePanel({
         if (contextCampaignId) params.set("campaignId", contextCampaignId);
         if (contextCharacterId) params.set("characterId", contextCharacterId);
         const url = params.toString()
-          ? `/api/entities/${entityId}?${params.toString()}`
-          : `/api/entities/${entityId}`;
+          ? `/api/locations/${locationId}?${params.toString()}`
+          : `/api/locations/${locationId}`;
         const response = await fetch(url, {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -143,16 +90,15 @@ export default function EntitySidePanel({
           return;
         }
         if (!response.ok) {
-          throw new Error("Unable to load entity.");
+          throw new Error("Unable to load location.");
         }
-        const data = (await response.json()) as EntitySummary;
+        const data = (await response.json()) as LocationSummary;
         if (ignore) return;
-        setEntity(data);
+        setLocation(data);
 
         const typeParams = new URLSearchParams({
-          entityKey: "entity_types",
-          ids: data.entityTypeId,
-          scope: "entity_type",
+          entityKey: "location_types",
+          ids: data.locationTypeId,
           worldId: data.worldId
         });
         const typeResponse = await fetch(`/api/references?${typeParams.toString()}`, {
@@ -165,12 +111,12 @@ export default function EntitySidePanel({
         if (typeResponse.ok) {
           const types = (await typeResponse.json()) as Array<{ id: string; label: string }>;
           if (!ignore && types[0]) {
-            setEntityTypeLabel(types[0].label);
+            setLocationTypeLabel(types[0].label);
           }
         }
 
         const fieldResponse = await fetch(
-          `/api/entity-fields?entityTypeId=${data.entityTypeId}`,
+          `/api/location-type-fields?locationTypeId=${data.locationTypeId}`,
           {
             headers: { Authorization: `Bearer ${token}` }
           }
@@ -180,32 +126,26 @@ export default function EntitySidePanel({
           return;
         }
         if (fieldResponse.ok) {
-          const fields = (await fieldResponse.json()) as EntityFieldDefinition[];
+          const fields = (await fieldResponse.json()) as LocationFieldDefinition[];
           if (!ignore) {
             const sorted = [...fields].sort((a, b) => a.formOrder - b.formOrder);
-            setEntityFields(sorted);
+            setLocationFields(sorted);
           }
 
-          const entityReferenceFields = fields.filter(
-            (field) => field.fieldType === "ENTITY_REFERENCE"
-          );
-          const locationReferenceFields = fields.filter(
-            (field) => field.fieldType === "LOCATION_REFERENCE"
-          );
           const entityRefIds = new Set<string>();
           const locationRefIds = new Set<string>();
-          const collectIds = (fieldList: EntityFieldDefinition[], target: Set<string>) => {
-            fieldList.forEach((field) => {
-              const rawValue = data.fieldValues?.[field.fieldKey];
-              if (Array.isArray(rawValue)) {
-                rawValue.forEach((entry) => target.add(String(entry)));
-              } else if (rawValue) {
-                target.add(String(rawValue));
-              }
-            });
-          };
-          collectIds(entityReferenceFields, entityRefIds);
-          collectIds(locationReferenceFields, locationRefIds);
+          fields.forEach((field) => {
+            if (field.fieldType !== "ENTITY_REFERENCE" && field.fieldType !== "LOCATION_REFERENCE") {
+              return;
+            }
+            const rawValue = data.fieldValues?.[field.fieldKey];
+            const targetSet = field.fieldType === "ENTITY_REFERENCE" ? entityRefIds : locationRefIds;
+            if (Array.isArray(rawValue)) {
+              rawValue.forEach((entry) => targetSet.add(String(entry)));
+            } else if (rawValue) {
+              targetSet.add(String(rawValue));
+            }
+          });
 
           if (entityRefIds.size > 0) {
             const params = new URLSearchParams({
@@ -229,11 +169,11 @@ export default function EntitySidePanel({
                 refs.forEach((item) => {
                   map[item.id] = item.label;
                 });
-                setReferenceLabels(map);
+                setEntityReferenceLabels(map);
               }
             }
           } else if (!ignore) {
-            setReferenceLabels({});
+            setEntityReferenceLabels({});
           }
 
           if (locationRefIds.size > 0) {
@@ -267,7 +207,7 @@ export default function EntitySidePanel({
         }
       } catch (err) {
         if (!ignore) {
-          setError(err instanceof Error ? err.message : "Unable to load entity.");
+          setError(err instanceof Error ? err.message : "Unable to load location.");
         }
       } finally {
         if (!ignore) setLoading(false);
@@ -279,44 +219,24 @@ export default function EntitySidePanel({
     return () => {
       ignore = true;
     };
-  }, [entityId, token, contextCampaignId, contextCharacterId]);
+  }, [locationId, token, contextCampaignId, contextCharacterId]);
 
-  const isOpen = Boolean(entityId);
-  const valueContext = entity
-    ? {
-        ...(entity.fieldValues ?? {}),
-        name: entity.name,
-        description: entity.description ?? "",
-        worldId: entity.worldId,
-        entityTypeId: entity.entityTypeId
-      }
-    : {};
-  const visibleFields = entityFields.filter((field) => {
-    if (!field.conditions) return true;
-    if (typeof field.conditions === "string") {
-      try {
-        const parsed = JSON.parse(field.conditions) as ConditionGroup;
-        return evaluateGroup(parsed, valueContext);
-      } catch {
-        return true;
-      }
-    }
-    return evaluateGroup(field.conditions as ConditionGroup, valueContext);
-  });
-
-  const getFieldDisplayValue = (field: EntityFieldDefinition) => {
-    const rawValue = entity?.fieldValues?.[field.fieldKey];
+  const isOpen = Boolean(locationId);
+  const getFieldDisplayValue = (field: LocationFieldDefinition) => {
+    const rawValue = location?.fieldValues?.[field.fieldKey];
     if (field.fieldType === "CHOICE") {
       const choice = field.choices?.find((entry) => entry.value === String(rawValue));
       return choice?.label ?? formatFieldValue(rawValue);
     }
     if (field.fieldType === "ENTITY_REFERENCE") {
       if (Array.isArray(rawValue)) {
-        const labels = rawValue.map((entry) => referenceLabels[String(entry)] ?? String(entry));
+        const labels = rawValue.map(
+          (entry) => entityReferenceLabels[String(entry)] ?? String(entry)
+        );
         return labels.length > 0 ? labels.join(", ") : "Empty";
       }
       if (!rawValue) return "Empty";
-      return referenceLabels[String(rawValue)] ?? String(rawValue);
+      return entityReferenceLabels[String(rawValue)] ?? String(rawValue);
     }
     if (field.fieldType === "LOCATION_REFERENCE") {
       if (Array.isArray(rawValue)) {
@@ -334,7 +254,8 @@ export default function EntitySidePanel({
     return formatFieldValue(rawValue);
   };
 
-  const hasDescription = Boolean(entity?.description && entity.description.trim() !== "");
+  const hasDescription = Boolean(location?.description && location.description.trim() !== "");
+  const hasFields = locationFields.length > 0;
 
   return (
     <>
@@ -346,18 +267,18 @@ export default function EntitySidePanel({
       <aside className={`entity-panel ${isOpen ? "is-open" : ""}`} aria-hidden={!isOpen}>
         <div className="entity-panel__header">
           <div>
-            <span className="entity-panel__eyebrow">Entity</span>
-            <h2 className="entity-panel__title">{entity?.name ?? "Loading..."}</h2>
-            {entityTypeLabel ? (
-              <div className="entity-panel__meta">{entityTypeLabel}</div>
+            <span className="entity-panel__eyebrow">Location</span>
+            <h2 className="entity-panel__title">{location?.name ?? "Loading..."}</h2>
+            {locationTypeLabel ? (
+              <div className="entity-panel__meta">{locationTypeLabel}</div>
             ) : null}
           </div>
           <div className="entity-panel__actions">
-            {entity ? (
+            {location ? (
               <button
                 type="button"
                 className="ghost-button entity-panel__open"
-                onClick={() => onOpenRecord(entity.id)}
+                onClick={() => onOpenRecord(location.id)}
               >
                 Open record
               </button>
@@ -375,10 +296,10 @@ export default function EntitySidePanel({
               {hasDescription ? (
                 <div className="entity-panel__section entity-panel__section--description">
                   <h3>Description</h3>
-                  <p>{entity?.description}</p>
+                  <p>{location?.description}</p>
                 </div>
               ) : null}
-              {visibleFields.length > 0 ? (
+              {hasFields ? (
                 <div
                   className={`entity-panel__section ${
                     hasDescription ? "" : "entity-panel__section--tight"
@@ -386,9 +307,9 @@ export default function EntitySidePanel({
                 >
                   <h3>Details</h3>
                   <div className="entity-panel__fields">
-                    {visibleFields.map((field) => (
+                    {locationFields.map((field) => (
                       <div className="entity-panel__field" key={field.id}>
-                        <span className="entity-panel__field-label">{field.label}</span>
+                        <span className="entity-panel__field-label">{field.fieldLabel}</span>
                         <span className="entity-panel__field-value">
                           {getFieldDisplayValue(field)}
                         </span>

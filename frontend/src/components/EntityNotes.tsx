@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Mention, MentionsInput } from "react-mentions";
 import { dispatchUnauthorized } from "../utils/auth";
+import type { SessionNoteContent, SessionNoteReference } from "../utils/sessionNotes";
 
 type NoteTag = {
   id: string;
@@ -26,6 +27,16 @@ type NoteEntry = {
 type MentionEntry = NoteEntry & {
   entity?: { id: string; name: string } | null;
   location?: { id: string; name: string } | null;
+};
+
+type SessionMentionEntry = {
+  id: string;
+  content: SessionNoteContent;
+  createdAt: string;
+  author: { id: string; name: string | null; email: string };
+  visibility: "SHARED" | "PRIVATE";
+  session?: { id: string; title?: string | null };
+  references: SessionNoteReference[];
 };
 
 type EntityNotesProps = {
@@ -119,6 +130,9 @@ export default function EntityNotes({
   const [mentions, setMentions] = useState<MentionEntry[]>([]);
   const [mentionsLoading, setMentionsLoading] = useState(false);
   const [mentionsError, setMentionsError] = useState<string | null>(null);
+  const [sessionMentions, setSessionMentions] = useState<SessionMentionEntry[]>([]);
+  const [sessionMentionsLoading, setSessionMentionsLoading] = useState(false);
+  const [sessionMentionsError, setSessionMentionsError] = useState<string | null>(null);
   const [body, setBody] = useState("");
   const [visibility, setVisibility] = useState<"PRIVATE" | "SHARED" | "GM">("SHARED");
   const [posting, setPosting] = useState(false);
@@ -241,10 +255,44 @@ export default function EntityNotes({
     }
   }, [recordId, recordPath, token, contextCampaignId, contextCharacterId]);
 
+  const loadSessionMentions = useCallback(async () => {
+    if (!recordId || recordId === "new") return;
+    if (!contextCampaignId) {
+      setSessionMentions([]);
+      setSessionMentionsError("Campaign context required for session mentions.");
+      return;
+    }
+    setSessionMentionsLoading(true);
+    setSessionMentionsError(null);
+    try {
+      const params = new URLSearchParams({ campaignId: contextCampaignId });
+      const response = await fetch(
+        `/api/${recordPath}/${recordId}/session-notes?${params.toString()}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (response.status === 401) {
+        dispatchUnauthorized();
+        return;
+      }
+      if (!response.ok) {
+        throw new Error("Unable to load session mentions.");
+      }
+      const data = (await response.json()) as SessionMentionEntry[];
+      setSessionMentions(data);
+    } catch (err) {
+      setSessionMentionsError(
+        err instanceof Error ? err.message : "Unable to load session mentions."
+      );
+    } finally {
+      setSessionMentionsLoading(false);
+    }
+  }, [recordId, recordPath, token, contextCampaignId]);
+
   useEffect(() => {
     if (activeTab !== "mentions") return;
     void loadMentions();
-  }, [activeTab, loadMentions]);
+    void loadSessionMentions();
+  }, [activeTab, loadMentions, loadSessionMentions]);
 
   useEffect(() => {
     if (canShare) {
@@ -329,6 +377,9 @@ export default function EntityNotes({
     setMentions([]);
     setMentionsError(null);
     setMentionsLoading(false);
+    setSessionMentions([]);
+    setSessionMentionsError(null);
+    setSessionMentionsLoading(false);
   }, [recordId, recordType]);
 
   useEffect(() => {
@@ -880,15 +931,20 @@ export default function EntityNotes({
               <div className="entity-notes__state">Loading mentions...</div>
             ) : null}
             {mentionsError ? <div className="entity-notes__state">{mentionsError}</div> : null}
-            {!mentionsLoading && !mentionsError && mentions.length === 0 ? (
+            {!mentionsLoading &&
+            !mentionsError &&
+            !sessionMentionsLoading &&
+            !sessionMentionsError &&
+            mentions.length === 0 &&
+            sessionMentions.length === 0 ? (
               <div className="entity-notes__state">No mentions yet.</div>
             ) : null}
-            {!mentionsLoading && !mentionsError
-              ? mentions.map((note) => {
-                  const noteTagMap = new Map<string, NoteTag>();
-                  note.tags.forEach((tag) => {
-                    noteTagMap.set(`${tag.tagType}:${tag.targetId}`, tag);
-                  });
+        {!mentionsLoading && !mentionsError
+          ? mentions.map((note) => {
+              const noteTagMap = new Map<string, NoteTag>();
+              note.tags.forEach((tag) => {
+                noteTagMap.set(`${tag.tagType}:${tag.targetId}`, tag);
+              });
                   return (
                     <div className="note-card" key={note.id}>
                       <div className="note-card__meta">
@@ -950,6 +1006,65 @@ export default function EntityNotes({
                           </button>
                         </div>
                       ) : null}
+                    </div>
+                  );
+                })
+              : null}
+            {sessionMentionsLoading ? (
+              <div className="entity-notes__state">Loading session notes...</div>
+            ) : null}
+            {sessionMentionsError ? (
+              <div className="entity-notes__state">{sessionMentionsError}</div>
+            ) : null}
+            {!sessionMentionsLoading && !sessionMentionsError && sessionMentions.length === 0 ? (
+              <div className="entity-notes__state">No session notes yet.</div>
+            ) : null}
+            {!sessionMentionsLoading && !sessionMentionsError
+              ? sessionMentions.map((note) => {
+                  const noteTagMap = new Map<string, NoteTag>();
+                  note.references.forEach((ref) => {
+                    noteTagMap.set(
+                      `${ref.targetType === "location" ? "LOCATION" : "ENTITY"}:${ref.targetId}`,
+                      {
+                        id: `${ref.targetType}:${ref.targetId}`,
+                        tagType: ref.targetType === "location" ? "LOCATION" : "ENTITY",
+                        targetId: ref.targetId,
+                        label: ref.label,
+                        canAccess: true
+                      }
+                    );
+                  });
+                  return (
+                    <div className="note-card" key={`session-${note.id}`}>
+                      <div className="note-card__meta">
+                        {note.session?.title ? (
+                          <span className="note-card__source">
+                            Session: {note.session.title}
+                          </span>
+                        ) : null}
+                        <div className="note-card__author">
+                          {note.author.name ?? note.author.email}
+                        </div>
+                        <div className="note-card__timestamp">
+                          {formatTimestamp(note.createdAt)}
+                        </div>
+                        <span
+                          className={`note-card__visibility ${
+                            note.visibility === "PRIVATE"
+                              ? "note-card__visibility--private"
+                              : "note-card__visibility--shared"
+                          }`}
+                        >
+                          {note.visibility === "PRIVATE" ? "Private" : "Shared"}
+                        </span>
+                      </div>
+                      <div className="note-card__body">
+                        {renderNoteBody(
+                          note.content.text,
+                          noteTagMap,
+                          (tag) => handleTagClick(note.id, tag)
+                        )}
+                      </div>
                     </div>
                   );
                 })

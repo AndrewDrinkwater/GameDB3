@@ -1443,10 +1443,18 @@ describe("Relationships", () => {
     createdRelationshipIds.push(id);
     return id;
   };
-  const trackPeerGroup = (id: string | null) => {
-    if (id) createdPeerGroupIds.push(id);
-    return id;
-  };
+    const trackPeerGroup = (id: string | null) => {
+      if (id) createdPeerGroupIds.push(id);
+      return id;
+    };
+    const getRelationshipItems = (body: any) =>
+      (body?.relationships ?? []) as Array<{
+        id: string;
+        relationshipId: string;
+        direction: "peer" | "outgoing" | "incoming";
+        label: string;
+        relatedEntityId: string;
+      }>;
 
   let secondaryEntityTypeId = "";
   let viewerCharacterId = "";
@@ -1711,24 +1719,30 @@ describe("Relationships", () => {
 
     expect(invalidPairResponse.status).toBe(400);
 
-    const fromList = await request(app)
-      .get(`/api/entities/${entityAlphaId}/relationships?status=active`)
-      .set("Authorization", `Bearer ${context.token}`);
+      const fromList = await request(app)
+        .get(`/api/entities/${entityAlphaId}/relationships?status=active`)
+        .set("Authorization", `Bearer ${context.token}`);
 
-    expect(fromList.status).toBe(200);
-    expect(fromList.body.outgoing).toHaveLength(1);
-    expect(fromList.body.outgoing[0].label).toBe("Mentor");
-    expect(fromList.body.incoming).toHaveLength(0);
-    expect(fromList.body.peers).toHaveLength(0);
+      expect(fromList.status).toBe(200);
+      const fromItems = getRelationshipItems(fromList.body);
+      const fromOutgoing = fromItems.filter((item) => item.direction === "outgoing");
+      const fromIncoming = fromItems.filter((item) => item.direction === "incoming");
+      const fromPeers = fromItems.filter((item) => item.direction === "peer");
+      expect(fromOutgoing).toHaveLength(1);
+      expect(fromOutgoing[0].label).toBe("Mentor");
+      expect(fromIncoming).toHaveLength(0);
+      expect(fromPeers).toHaveLength(0);
 
-    const toList = await request(app)
-      .get(`/api/entities/${entityBetaId}/relationships?status=active`)
-      .set("Authorization", `Bearer ${context.token}`);
+      const toList = await request(app)
+        .get(`/api/entities/${entityBetaId}/relationships?status=active`)
+        .set("Authorization", `Bearer ${context.token}`);
 
-    expect(toList.status).toBe(200);
-    expect(toList.body.incoming).toHaveLength(1);
-    expect(toList.body.incoming[0].label).toBe("Student");
-  });
+      expect(toList.status).toBe(200);
+      const toItems = getRelationshipItems(toList.body);
+      const toIncoming = toItems.filter((item) => item.direction === "incoming");
+      expect(toIncoming).toHaveLength(1);
+      expect(toIncoming[0].label).toBe("Student");
+    });
 
   it("updates relationship type labels retroactively", async () => {
     const updateResponse = await request(app)
@@ -1741,22 +1755,28 @@ describe("Relationships", () => {
 
     expect(updateResponse.status).toBe(200);
 
-    const fromList = await request(app)
-      .get(`/api/entities/${entityAlphaId}/relationships?status=active`)
-      .set("Authorization", `Bearer ${context.token}`);
+      const fromList = await request(app)
+        .get(`/api/entities/${entityAlphaId}/relationships?status=active`)
+        .set("Authorization", `Bearer ${context.token}`);
 
-    expect(fromList.status).toBe(200);
-    expect(fromList.body.outgoing[0].id).toBe(mentorRelationshipId);
-    expect(fromList.body.outgoing[0].label).toBe("Guide");
+      expect(fromList.status).toBe(200);
+      const fromItems = getRelationshipItems(fromList.body);
+      const outgoing = fromItems.find(
+        (item) => item.direction === "outgoing" && item.relationshipId === mentorRelationshipId
+      );
+      expect(outgoing?.label).toBe("Guide");
 
-    const toList = await request(app)
-      .get(`/api/entities/${entityBetaId}/relationships?status=active`)
-      .set("Authorization", `Bearer ${context.token}`);
+      const toList = await request(app)
+        .get(`/api/entities/${entityBetaId}/relationships?status=active`)
+        .set("Authorization", `Bearer ${context.token}`);
 
-    expect(toList.status).toBe(200);
-    expect(toList.body.incoming[0].id).toBe(mentorRelationshipId);
-    expect(toList.body.incoming[0].label).toBe("Protege");
-  });
+      expect(toList.status).toBe(200);
+      const toItems = getRelationshipItems(toList.body);
+      const incoming = toItems.find(
+        (item) => item.direction === "incoming" && item.relationshipId === mentorRelationshipId
+      );
+      expect(incoming?.label).toBe("Protege");
+    });
 
   it("creates peer relationships and expires atomically", async () => {
     const peerResponse = await request(app)
@@ -1774,10 +1794,10 @@ describe("Relationships", () => {
     const peerGroupId = trackPeerGroup(peerResponse.body.peerGroupId);
     expect(peerGroupId).toBeTruthy();
 
-    const peers = await prisma.relationship.findMany({
-      where: { peerGroupId }
-    });
-    expect(peers).toHaveLength(2);
+      const prismaPeers = await prisma.relationship.findMany({
+        where: { peerGroupId }
+      });
+      expect(prismaPeers).toHaveLength(2);
 
     const expireResponse = await request(app)
       .post(`/api/relationships/${peerRelationshipId}/expire`)
@@ -1791,13 +1811,15 @@ describe("Relationships", () => {
     expect(expiredPeers.every((rel) => rel.status === "EXPIRED")).toBe(true);
     expect(expiredPeers.every((rel) => rel.expiredAt)).toBe(true);
 
-    const listResponse = await request(app)
-      .get(`/api/entities/${entityAlphaId}/relationships?status=expired`)
-      .set("Authorization", `Bearer ${context.token}`);
+      const listResponse = await request(app)
+        .get(`/api/entities/${entityAlphaId}/relationships?status=expired`)
+        .set("Authorization", `Bearer ${context.token}`);
 
-    expect(listResponse.status).toBe(200);
-    expect(listResponse.body.peers).toHaveLength(1);
-    expect(listResponse.body.peers[0].label).toBe("Former Ally");
+      expect(listResponse.status).toBe(200);
+      const listItems = getRelationshipItems(listResponse.body);
+      const peerItems = listItems.filter((item) => item.direction === "peer");
+      expect(peerItems).toHaveLength(1);
+      expect(peerItems[0].label).toBe("Former Ally");
 
     const deleteResponse = await request(app)
       .delete(`/api/relationships/${peerRelationshipId}`)
@@ -1825,19 +1847,15 @@ describe("Relationships", () => {
     expect(createResponse.status).toBe(201);
     const restrictedRelationshipId = trackRelationship(createResponse.body.id);
 
-    const viewerList = await request(app)
-      .get(`/api/entities/${entityAlphaId}/relationships`)
-      .set("Authorization", `Bearer ${context.viewerToken}`);
+      const viewerList = await request(app)
+        .get(`/api/entities/${entityAlphaId}/relationships`)
+        .set("Authorization", `Bearer ${context.viewerToken}`);
 
-    expect(viewerList.status).toBe(200);
-    const viewerItems = [
-      ...viewerList.body.outgoing,
-      ...viewerList.body.incoming,
-      ...viewerList.body.peers
-    ];
-    expect(
-      viewerItems.some((item: { otherEntityId: string }) => item.otherEntityId === entityRestrictedId)
-    ).toBe(false);
+      expect(viewerList.status).toBe(200);
+      const viewerItems = getRelationshipItems(viewerList.body);
+      expect(
+        viewerItems.some((item) => item.relatedEntityId === entityRestrictedId)
+      ).toBe(false);
 
     const viewerWithCharacter = await request(app)
       .get(
@@ -1845,15 +1863,11 @@ describe("Relationships", () => {
       )
       .set("Authorization", `Bearer ${context.viewerToken}`);
 
-    expect(viewerWithCharacter.status).toBe(200);
-    const viewerWithCharacterItems = [
-      ...viewerWithCharacter.body.outgoing,
-      ...viewerWithCharacter.body.incoming,
-      ...viewerWithCharacter.body.peers
-    ];
-    expect(
-      viewerWithCharacterItems.some(
-        (item: { id: string }) => item.id === restrictedRelationshipId
+      expect(viewerWithCharacter.status).toBe(200);
+      const viewerWithCharacterItems = getRelationshipItems(viewerWithCharacter.body);
+      expect(
+        viewerWithCharacterItems.some(
+          (item: { id: string }) => item.id === restrictedRelationshipId
       )
     ).toBe(true);
   });
@@ -1873,19 +1887,15 @@ describe("Relationships", () => {
     expect(createResponse.status).toBe(201);
     const campaignRelationshipId = trackRelationship(createResponse.body.id);
 
-    const viewerNoContext = await request(app)
-      .get(`/api/entities/${entityAlphaId}/relationships`)
-      .set("Authorization", `Bearer ${context.viewerToken}`);
+      const viewerNoContext = await request(app)
+        .get(`/api/entities/${entityAlphaId}/relationships`)
+        .set("Authorization", `Bearer ${context.viewerToken}`);
 
-    expect(viewerNoContext.status).toBe(200);
-    const viewerNoContextItems = [
-      ...viewerNoContext.body.outgoing,
-      ...viewerNoContext.body.incoming,
-      ...viewerNoContext.body.peers
-    ];
-    expect(
-      viewerNoContextItems.some(
-        (item: { id: string }) => item.id === campaignRelationshipId
+      expect(viewerNoContext.status).toBe(200);
+      const viewerNoContextItems = getRelationshipItems(viewerNoContext.body);
+      expect(
+        viewerNoContextItems.some(
+          (item: { id: string }) => item.id === campaignRelationshipId
       )
     ).toBe(false);
 
@@ -1895,31 +1905,23 @@ describe("Relationships", () => {
       )
       .set("Authorization", `Bearer ${context.viewerToken}`);
 
-    expect(viewerWithCampaign.status).toBe(200);
-    const viewerWithCampaignItems = [
-      ...viewerWithCampaign.body.outgoing,
-      ...viewerWithCampaign.body.incoming,
-      ...viewerWithCampaign.body.peers
-    ];
-    expect(
-      viewerWithCampaignItems.some(
-        (item: { id: string }) => item.id === campaignRelationshipId
+      expect(viewerWithCampaign.status).toBe(200);
+      const viewerWithCampaignItems = getRelationshipItems(viewerWithCampaign.body);
+      expect(
+        viewerWithCampaignItems.some(
+          (item: { id: string }) => item.id === campaignRelationshipId
       )
     ).toBe(true);
 
-    const adminView = await request(app)
-      .get(`/api/entities/${entityAlphaId}/relationships`)
-      .set("Authorization", `Bearer ${context.token}`);
+      const adminView = await request(app)
+        .get(`/api/entities/${entityAlphaId}/relationships`)
+        .set("Authorization", `Bearer ${context.token}`);
 
-    expect(adminView.status).toBe(200);
-    const adminItems = [
-      ...adminView.body.outgoing,
-      ...adminView.body.incoming,
-      ...adminView.body.peers
-    ];
-    expect(
-      adminItems.some((item: { id: string }) => item.id === campaignRelationshipId)
-    ).toBe(true);
+      expect(adminView.status).toBe(200);
+      const adminItems = getRelationshipItems(adminView.body);
+      expect(
+        adminItems.some((item: { id: string }) => item.id === campaignRelationshipId)
+      ).toBe(true);
   });
 
   it("blocks relationship lists when the base entity is unreadable", async () => {

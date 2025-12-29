@@ -1177,6 +1177,7 @@ const buildLocationAccessFilter = async (
 };
 
 const noteTagPattern = /@\[(.+?)\]\((entity|location):([^)]+)\)/g;
+const sessionNoteReferencePattern = /@\[(.+?)\]\((entity|location):([^)]+)\)/g;
 
 const extractNoteTags = (body: string) => {
   noteTagPattern.lastIndex = 0;
@@ -1190,13 +1191,57 @@ const extractNoteTags = (body: string) => {
     tags.push({ tagType, targetId, label });
   }
   return tags;
+  };
+
+type SessionNoteReferenceInput = {
+  targetType: "entity" | "location";
+  targetId: string;
+  label: string;
 };
 
-const getAccessibleEntity = async (
-  user: User,
-  entityId: string,
-  campaignId?: string,
-  characterId?: string
+type SessionNoteContent = {
+  version: 1;
+  format: "markdown";
+  text: string;
+  references: SessionNoteReferenceInput[];
+};
+
+const extractSessionNoteReferences = (text: string) => {
+  sessionNoteReferencePattern.lastIndex = 0;
+  const references: SessionNoteReferenceInput[] = [];
+  if (!text) return references;
+  const seen = new Set<string>();
+  let match: RegExpExecArray | null = null;
+  while ((match = sessionNoteReferencePattern.exec(text))) {
+    const [, label, rawType, targetId] = match;
+    if (!label || !targetId) continue;
+    const targetType = rawType === "location" ? "location" : "entity";
+    const key = `${targetType}:${targetId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    references.push({ targetType, targetId, label });
+  }
+  return references;
+};
+
+const normalizeSessionNoteContent = (input: unknown): SessionNoteContent | null => {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as Partial<SessionNoteContent>;
+  if (typeof raw.text !== "string") return null;
+  const text = raw.text.replace(/\r\n/g, "\n");
+  return {
+    version: 1,
+    format: "markdown",
+    text,
+    references: extractSessionNoteReferences(text)
+  };
+};
+
+  const getAccessibleEntity = async (
+    user: User,
+    entityId: string,
+    campaignId?: string,
+    characterId?: string
 ) => {
   const entity = await prisma.entity.findUnique({
     where: { id: entityId },
@@ -1769,7 +1814,9 @@ export {
   canWriteEntity,
   canWriteLocation,
   getLabelFieldForEntity,
-  getReferenceResults
+  getReferenceResults,
+  extractSessionNoteReferences,
+  normalizeSessionNoteContent
 };
 
 export type {

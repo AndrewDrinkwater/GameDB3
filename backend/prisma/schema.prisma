@@ -104,6 +104,15 @@ enum NoteTagType {
   LOCATION
 }
 
+enum SessionTimelineEntryType {
+  NOTE_PUBLISHED
+}
+
+enum SessionNoteVisibility {
+  SHARED
+  PRIVATE
+}
+
 enum RelationshipStatus {
   ACTIVE
   EXPIRED
@@ -140,6 +149,8 @@ model User {
   refreshTokens      RefreshToken[]
   systemAudits       SystemAudit[]
   notesAuthored      Note[]              @relation("NoteAuthor")
+  sessionNoteDrafts  SessionNoteDraft[]
+  sessionNotesAuthored SessionNote[]     @relation("SessionNoteAuthor")
   createdRelationships Relationship[]    @relation("RelationshipCreator")
 }
 
@@ -168,6 +179,7 @@ model World {
   locations         Location[]
   relationshipTypes RelationshipType[]
   relationships     Relationship[]
+  sessions          Session[]
 
   @@index([primaryArchitectId])
 }
@@ -191,11 +203,95 @@ model Campaign {
   roster             CharacterCampaign[]
   characterCreators  CampaignCharacterCreator[]
   notes              Note[]
+  sessions           Session[]
 
   @@index([worldId])
   @@index([ownerId])
   @@index([gmUserId])
   @@index([createdById])
+}
+
+model Session {
+  id         String   @id @default(uuid())
+  worldId    String
+  campaignId String?
+  title      String
+  startedAt  DateTime?
+  endedAt    DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  world           World                 @relation(fields: [worldId], references: [id])
+  campaign        Campaign?             @relation(fields: [campaignId], references: [id])
+  notes           SessionNote[]
+  drafts          SessionNoteDraft[]
+  timelineEntries SessionTimelineEntry[]
+
+  @@index([worldId])
+  @@index([campaignId])
+}
+
+model SessionNote {
+  id        String   @id @default(uuid())
+  sessionId String
+  authorId  String
+  visibility SessionNoteVisibility @default(SHARED)
+  content   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session   Session               @relation(fields: [sessionId], references: [id])
+  author    User                  @relation("SessionNoteAuthor", fields: [authorId], references: [id])
+  references SessionNoteReference[]
+  timelineEntries SessionTimelineEntry[]
+
+  @@index([sessionId])
+  @@index([authorId])
+}
+
+model SessionNoteDraft {
+  id          String   @id @default(uuid())
+  sessionId   String
+  authorId    String
+  visibility  SessionNoteVisibility @default(SHARED)
+  content     Json
+  lastSavedAt DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  session Session @relation(fields: [sessionId], references: [id])
+  author  User    @relation(fields: [authorId], references: [id])
+
+  @@unique([sessionId, authorId])
+  @@index([authorId])
+}
+
+model SessionNoteReference {
+  id            String     @id @default(uuid())
+  sessionNoteId String
+  targetType    NoteTagType
+  targetId      String
+  label         String
+  createdAt     DateTime   @default(now())
+
+  sessionNote SessionNote @relation(fields: [sessionNoteId], references: [id])
+
+  @@index([sessionNoteId])
+  @@index([targetType, targetId])
+}
+
+model SessionTimelineEntry {
+  id        String                 @id @default(uuid())
+  sessionId String
+  type      SessionTimelineEntryType
+  noteId    String?
+  createdAt DateTime @default(now())
+
+  session Session     @relation(fields: [sessionId], references: [id])
+  note    SessionNote? @relation(fields: [noteId], references: [id])
+
+  @@index([sessionId])
+  @@index([noteId])
 }
 
 model EntityType {

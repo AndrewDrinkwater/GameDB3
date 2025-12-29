@@ -903,16 +903,22 @@ export const registerCoreRoutes = (app: express.Express) => {
         }
   
         if (user && !isAdmin(user)) {
-          const orFilters: Prisma.CharacterWhereInput[] = [
-            { playerId: user.id },
-            { world: { primaryArchitectId: user.id } },
-            { world: { architects: { some: { userId: user.id } } } },
-            { campaigns: { some: { campaign: { gmUserId: user.id } } } }
-          ];
-          if (isCampaignGm && campaign) {
-            orFilters.push({ worldId: campaign.worldId });
+          const restrictToOwn =
+            Boolean(campaignId) && !isCampaignGm;
+          if (restrictToOwn) {
+            filters.push({ playerId: user.id });
+          } else {
+            const orFilters: Prisma.CharacterWhereInput[] = [
+              { playerId: user.id },
+              { world: { primaryArchitectId: user.id } },
+              { world: { architects: { some: { userId: user.id } } } },
+              { campaigns: { some: { campaign: { gmUserId: user.id } } } }
+            ];
+            if (isCampaignGm && campaign) {
+              orFilters.push({ worldId: campaign.worldId });
+            }
+            filters.push({ OR: orFilters });
           }
-          filters.push({ OR: orFilters });
         }
   
       const whereClause: Prisma.CharacterWhereInput =
