@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ConditionBuilder from "./ConditionBuilder";
-import ColorPicker from "./ColorPicker";
 import EntityFormDesigner from "./EntityFormDesigner";
 import EntityAccessEditor from "./EntityAccessEditor";
 import EntitySidePanel from "./EntitySidePanel";
@@ -43,7 +42,7 @@ type SystemView = {
   fields: ViewField[];
 };
 
-type Choice = { value: string; label: string };
+type Choice = { value: string; label: string; order?: number; sortOrder?: number };
 
 type ConditionFieldOption = Choice & {
   fieldType?: string;
@@ -52,15 +51,6 @@ type ConditionFieldOption = Choice & {
   referenceScope?: string | null;
   referenceEntityTypeId?: string | null;
   allowMultiple?: boolean;
-};
-
-type EntityFieldChoice = {
-  id: string;
-  value: string;
-  label: string;
-  sortOrder?: number | null;
-  pillColor?: string | null;
-  textColor?: string | null;
 };
 
 type EntityFieldDefinition = {
@@ -75,7 +65,7 @@ type EntityFieldDefinition = {
   formSectionId?: string | null;
   formColumn?: number | null;
   conditions?: unknown;
-  choices?: EntityFieldChoice[];
+  choiceList?: { id: string; name: string; options: Choice[] } | null;
 };
 
 type EntityFormSection = {
@@ -257,21 +247,11 @@ export default function FormView({
     "info" | "config" | "relationships" | "access" | "notes" | "audit"
   >("info");
   const [entityTypeTab, setEntityTypeTab] = useState<"details" | "designer">("details");
-  const [fieldChoices, setFieldChoices] = useState<EntityFieldChoice[]>([]);
-  const [fieldChoicesLoading, setFieldChoicesLoading] = useState(false);
-  const [fieldChoicesError, setFieldChoicesError] = useState<string | null>(null);
   const [noteDirty, setNoteDirty] = useState(false);
   const [noteDiscardVersion, setNoteDiscardVersion] = useState(0);
   const [saveNotice, setSaveNotice] = useState<{ id: string; message: string } | null>(
     null
   );
-  const [newChoice, setNewChoice] = useState({
-    value: "",
-    label: "",
-    sortOrder: "",
-    pillColor: "",
-    textColor: ""
-  });
   const [isDirty, setIsDirty] = useState(false);
   const { showPopout } = usePopout();
   const initialSnapshotRef = useRef<string>("");
@@ -778,15 +758,20 @@ export default function FormView({
         EntityFieldDefinition & { fieldLabel?: string }
       >;
       if (!ignore) {
-        const sorted = [...data]
-          .map((field) => ({
-            ...field,
-            label: field.label ?? field.fieldLabel ?? field.fieldKey,
-            choices: field.choices
-              ? [...field.choices].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-              : field.choices
-          }))
-          .sort((a, b) => a.formOrder - b.formOrder);
+          const sorted = [...data]
+            .map((field) => ({
+              ...field,
+              label: field.label ?? field.fieldLabel ?? field.fieldKey,
+              choiceList: field.choiceList
+                ? {
+                    ...field.choiceList,
+                    options: [...field.choiceList.options].sort(
+                      (a, b) => (a.order ?? a.sortOrder ?? 0) - (b.order ?? b.sortOrder ?? 0)
+                    )
+                  }
+                : field.choiceList
+            }))
+            .sort((a, b) => a.formOrder - b.formOrder);
         setEntityFields(sorted);
       }
     };
@@ -832,56 +817,6 @@ export default function FormView({
     setEntityValues({});
     setEntityReferenceLabels({});
   }, [view, recordId, formData.entityTypeId, formData.locationTypeId]);
-
-  useEffect(() => {
-    let ignore = false;
-    if (!view || (view.entityKey !== "entity_fields" && view.entityKey !== "location_type_fields")) {
-      return;
-    }
-    if (recordId === "new" || formData.fieldType !== "CHOICE") {
-      setFieldChoices([]);
-      setFieldChoicesError(null);
-      setNewChoice({ value: "", label: "", sortOrder: "", pillColor: "", textColor: "" });
-      return;
-    }
-
-    const loadChoices = async () => {
-      setFieldChoicesLoading(true);
-      setFieldChoicesError(null);
-      try {
-        const endpoint =
-          view.entityKey === "location_type_fields"
-            ? `/api/location-type-field-choices?locationTypeFieldId=${recordId}`
-            : `/api/entity-field-choices?entityFieldId=${recordId}`;
-        const response = await fetch(endpoint, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (handleUnauthorized(response)) return;
-        if (!response.ok) {
-          throw new Error("Unable to load field choices.");
-        }
-        const data = (await response.json()) as EntityFieldChoice[];
-        if (!ignore) {
-          const sorted = [...data].sort(
-            (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
-          );
-          setFieldChoices(sorted);
-        }
-      } catch (err) {
-        if (!ignore) {
-          setFieldChoicesError(err instanceof Error ? err.message : "Unable to load field choices.");
-        }
-      } finally {
-        if (!ignore) setFieldChoicesLoading(false);
-      }
-    };
-
-    void loadChoices();
-
-    return () => {
-      ignore = true;
-    };
-  }, [view, recordId, formData.fieldType, token]);
 
   useEffect(() => {
     let ignore = false;
@@ -1197,20 +1132,20 @@ export default function FormView({
       if (!response.ok) return;
       const data = (await response.json()) as EntityFieldDefinition[];
         if (!ignore) {
-          setConditionFieldOptions(
-            data.map((field) => ({
-              value: field.fieldKey,
-              label: field.label,
-              fieldType: field.fieldType,
-              options: field.choices?.map((choice) => ({
-                value: choice.value,
-                label: choice.label
-              })),
-              referenceEntityKey:
-                field.fieldType === "ENTITY_REFERENCE" ? "entities" : undefined,
-              referenceEntityTypeId: field.referenceEntityTypeId ?? null
-            }))
-          );
+            setConditionFieldOptions(
+              data.map((field) => ({
+                value: field.fieldKey,
+                label: field.label,
+                fieldType: field.fieldType,
+                options: field.choiceList?.options?.map((option) => ({
+                  value: option.value,
+                  label: option.label
+                })),
+                referenceEntityKey:
+                  field.fieldType === "ENTITY_REFERENCE" ? "entities" : undefined,
+                referenceEntityTypeId: field.referenceEntityTypeId ?? null
+              }))
+            );
         }
       };
 
@@ -1397,18 +1332,18 @@ export default function FormView({
             readOnly={isDisabled}
           />
         ) : field.fieldType === "CHOICE" ? (
-          <select
-            value={value ? String(value) : ""}
-            onChange={(event) => handleEntityValueChange(field.fieldKey, event.target.value)}
-            disabled={isDisabled}
-          >
-            <option value="">Select...</option>
-            {(field.choices ?? []).map((choice) => (
-              <option key={choice.value} value={choice.value}>
-                {choice.label}
-              </option>
-            ))}
-          </select>
+            <select
+              value={value ? String(value) : ""}
+              onChange={(event) => handleEntityValueChange(field.fieldKey, event.target.value)}
+              disabled={isDisabled}
+            >
+              <option value="">Select...</option>
+              {(field.choiceList?.options ?? []).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
         ) : field.fieldType === "NUMBER" ? (
           <input
             type="number"
@@ -1478,8 +1413,18 @@ export default function FormView({
               contextCharacterId ? `&characterId=${contextCharacterId}` : ""
             }`
           : "";
+      const choiceListParams =
+        effectiveScope === "choice_list_world"
+          ? worldParamValue
+            ? `&worldId=${worldParamValue}`
+            : ""
+          : effectiveScope === "choice_list_pack"
+            ? typeof formData.packId === "string"
+              ? `&packId=${formData.packId}`
+              : ""
+            : "";
     const response = await fetch(
-      `/api/references?entityKey=${field.referenceEntityKey}&query=${encodeURIComponent(query)}${scopeParam}${contextParams}${gmWorldParam}${locationScopeParams}${locationAccessParams}`,
+      `/api/references?entityKey=${field.referenceEntityKey}&query=${encodeURIComponent(query)}${scopeParam}${contextParams}${gmWorldParam}${locationScopeParams}${locationAccessParams}${choiceListParams}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     if (handleUnauthorized(response)) return;
@@ -1487,117 +1432,6 @@ export default function FormView({
     const data = (await response.json()) as Array<{ id: string; label: string }>;
     const options = data.map((item) => ({ value: item.id, label: item.label }));
     setReferenceOptions((current) => ({ ...current, [field.fieldKey]: options }));
-  };
-
-  const isChoiceField =
-    (view?.entityKey === "entity_fields" || view?.entityKey === "location_type_fields") &&
-    formData.fieldType === "CHOICE";
-
-  const updateChoice = (choiceId: string, updates: Partial<EntityFieldChoice>) => {
-    setFieldChoices((current) =>
-      current.map((choice) => (choice.id === choiceId ? { ...choice, ...updates } : choice))
-    );
-  };
-
-  const saveChoice = async (choice: EntityFieldChoice) => {
-    try {
-      const endpoint =
-        view?.entityKey === "location_type_fields"
-          ? `/api/location-type-field-choices/${choice.id}`
-          : `/api/entity-field-choices/${choice.id}`;
-      const response = await fetch(endpoint, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          value: choice.value,
-          label: choice.label,
-          sortOrder: choice.sortOrder ?? null,
-          pillColor: choice.pillColor?.trim() || null,
-          textColor: choice.textColor?.trim() || null
-        })
-      });
-      if (handleUnauthorized(response)) return;
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? "Unable to save choice.");
-      }
-      const updated = (await response.json()) as EntityFieldChoice;
-      setFieldChoices((current) =>
-        [...current.map((item) => (item.id === updated.id ? updated : item))].sort(
-          (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
-        )
-      );
-    } catch (err) {
-      setFieldChoicesError(err instanceof Error ? err.message : "Unable to save choice.");
-    }
-  };
-
-  const deleteChoice = async (choiceId: string) => {
-    try {
-      const endpoint =
-        view?.entityKey === "location_type_fields"
-          ? `/api/location-type-field-choices/${choiceId}`
-          : `/api/entity-field-choices/${choiceId}`;
-      const response = await fetch(endpoint, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (handleUnauthorized(response)) return;
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? "Unable to delete choice.");
-      }
-      setFieldChoices((current) => current.filter((choice) => choice.id !== choiceId));
-    } catch (err) {
-      setFieldChoicesError(err instanceof Error ? err.message : "Unable to delete choice.");
-    }
-  };
-
-  const addChoice = async () => {
-    if (!recordId || recordId === "new") return;
-    if (!newChoice.value.trim() || !newChoice.label.trim()) {
-      setFieldChoicesError("Value and label are required.");
-      return;
-    }
-    try {
-      const endpoint =
-        view?.entityKey === "location_type_fields"
-          ? "/api/location-type-field-choices"
-          : "/api/entity-field-choices";
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          ...(view?.entityKey === "location_type_fields"
-            ? { locationTypeFieldId: recordId }
-            : { entityFieldId: recordId }),
-          value: newChoice.value.trim(),
-          label: newChoice.label.trim(),
-          sortOrder: newChoice.sortOrder ? Number(newChoice.sortOrder) : undefined,
-          pillColor: newChoice.pillColor.trim() || null,
-          textColor: newChoice.textColor.trim() || null
-        })
-      });
-      if (handleUnauthorized(response)) return;
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? "Unable to add choice.");
-      }
-      const created = (await response.json()) as EntityFieldChoice;
-      setFieldChoices((current) =>
-        [...current, created].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-      );
-          setNewChoice({ value: "", label: "", sortOrder: "", pillColor: "", textColor: "" });
-      setFieldChoicesError(null);
-    } catch (err) {
-      setFieldChoicesError(err instanceof Error ? err.message : "Unable to add choice.");
-    }
   };
 
     const handleEntityReferenceSearch = async (field: EntityFieldDefinition, query: string) => {
@@ -2057,19 +1891,13 @@ export default function FormView({
       sideBySideInfoFields.length > 0
         ? infoFields.filter((field) => field.fieldKey !== "worldId")
         : infoFields;
-    const customFieldRows: string[][] =
-      view.entityKey === "entity_field_choices"
-        ? [
-            ["entityFieldId", "value"],
-            ["label", "sortOrder"],
-            ["pillColor", "textColor"]
-          ]
-        : view.entityKey === "entity_fields"
+      const customFieldRows: string[][] =
+        view.entityKey === "entity_fields"
           ? [
               ["entityTypeId", "fieldKey"],
               ["label", "fieldType"],
               ["required", "referenceEntityTypeId"],
-              ["referenceLocationTypeKey"]
+              ["referenceLocationTypeKey", "choiceListId"]
             ]
           : [];
     const shouldUseCustomRows = !isEntityView && customFieldRows.length > 0;
@@ -2147,25 +1975,6 @@ export default function FormView({
             />
           </label>
         );
-      }
-
-      if (view?.entityKey === "entity_field_choices") {
-        if (field.fieldKey === "pillColor" || field.fieldKey === "textColor") {
-          const label =
-            field.fieldKey === "pillColor" ? "Pill colour" : "Text colour";
-          const placeholder = field.fieldKey === "pillColor" ? "#5b8def" : "#ffffff";
-          return (
-            <label key={field.fieldKey} className="form-view__field">
-              <span className="form-view__label">{label}</span>
-              <ColorPicker
-                value={typeof value === "string" ? value : ""}
-                placeholder={placeholder}
-                onChange={(next) => handleChange(field.fieldKey, next)}
-                disabled={field.readOnly || isFormReadOnly}
-              />
-            </label>
-          );
-        }
       }
 
       if (field.fieldType === "BOOLEAN") {
@@ -2485,150 +2294,6 @@ export default function FormView({
                   {shouldUseCustomRows ? customRemainingFields.map(renderField) : null}
                 </>
               )}
-              {isChoiceField && !isNew ? (
-                <div className="form-view__section">
-                  <h2>Field choices</h2>
-                {fieldChoicesError ? (
-                  <div className="form-view__hint">{fieldChoicesError}</div>
-                ) : null}
-                {fieldChoicesLoading ? (
-                  <div className="form-view__hint">Loading choices...</div>
-                ) : (
-                  <>
-                    <div className="field-choices__row field-choices__row--header">
-                      <span>Value</span>
-                      <span>Label</span>
-                      <span>Pill colour</span>
-                      <span>Text colour</span>
-                      <span>Sort</span>
-                      <span>Actions</span>
-                    </div>
-                    {fieldChoices.length === 0 ? (
-                      <div className="form-view__hint">No choices yet.</div>
-                    ) : (
-                      fieldChoices.map((choice) => (
-                        <div key={choice.id} className="field-choices__row">
-                            <input
-                              type="text"
-                              value={choice.value}
-                              onChange={(event) =>
-                                updateChoice(choice.id, { value: event.target.value })
-                              }
-                              disabled={!canEditRecord}
-                            />
-                            <input
-                              type="text"
-                              value={choice.label}
-                              onChange={(event) =>
-                                updateChoice(choice.id, { label: event.target.value })
-                              }
-                              disabled={!canEditRecord}
-                            />
-                            <ColorPicker
-                              value={choice.pillColor ?? ""}
-                              placeholder="#5b8def"
-                              onChange={(next) => updateChoice(choice.id, { pillColor: next })}
-                              disabled={!canEditRecord}
-                            />
-                            <ColorPicker
-                              value={choice.textColor ?? ""}
-                              placeholder="#ffffff"
-                              onChange={(next) => updateChoice(choice.id, { textColor: next })}
-                              disabled={!canEditRecord}
-                            />
-                            <input
-                              type="number"
-                              value={choice.sortOrder ?? ""}
-                              onChange={(event) =>
-                                updateChoice(choice.id, {
-                                  sortOrder: event.target.value ? Number(event.target.value) : null
-                              })
-                            }
-                            disabled={!canEditRecord}
-                          />
-                          <div className="field-choices__actions">
-                            {canEditRecord ? (
-                              <>
-                                <button
-                                  type="button"
-                                  className="ghost-button"
-                                  onClick={() => saveChoice(choice)}
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  type="button"
-                                  className="danger-button"
-                                  onClick={() => deleteChoice(choice.id)}
-                                >
-                                  Delete
-                                </button>
-                              </>
-                            ) : null}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                    {canEditRecord ? (
-                      <div className="field-choices__row field-choices__row--new">
-                          <input
-                            type="text"
-                            placeholder="Value"
-                            value={newChoice.value}
-                            onChange={(event) =>
-                              setNewChoice((current) => ({
-                                ...current,
-                                value: event.target.value
-                              }))
-                            }
-                          />
-                          <input
-                            type="text"
-                            placeholder="Label"
-                            value={newChoice.label}
-                            onChange={(event) =>
-                              setNewChoice((current) => ({
-                                ...current,
-                                label: event.target.value
-                              }))
-                            }
-                          />
-                          <ColorPicker
-                            value={newChoice.pillColor}
-                            placeholder="#5b8def"
-                            onChange={(next) =>
-                              setNewChoice((current) => ({ ...current, pillColor: next }))
-                            }
-                          />
-                          <ColorPicker
-                            value={newChoice.textColor}
-                            placeholder="#ffffff"
-                            onChange={(next) =>
-                              setNewChoice((current) => ({ ...current, textColor: next }))
-                            }
-                          />
-                          <input
-                            type="number"
-                            placeholder="Sort"
-                            value={newChoice.sortOrder}
-                            onChange={(event) =>
-                              setNewChoice((current) => ({
-                                ...current,
-                                sortOrder: event.target.value
-                              }))
-                            }
-                        />
-                        <div className="field-choices__actions">
-                          <button type="button" className="primary-button" onClick={addChoice}>
-                            Add
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
-                  </>
-                )}
-              </div>
-            ) : null}
             {isRecordView ? (
               <div className="form-view__section">
                 <h2>Fields</h2>

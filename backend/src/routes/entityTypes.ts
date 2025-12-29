@@ -134,8 +134,7 @@ export const registerEntityTypesRoutes = (app: express.Express) => {
   
     if (sourceType) {
       const sourceFields = await prisma.entityField.findMany({
-        where: { entityTypeId: sourceType.id },
-        include: { choices: true }
+        where: { entityTypeId: sourceType.id }
       });
   
       for (const field of sourceFields) {
@@ -157,22 +156,10 @@ export const registerEntityTypesRoutes = (app: express.Express) => {
             formColumn: field.formColumn ?? 1,
             referenceEntityTypeId: field.referenceEntityTypeId,
             referenceLocationTypeKey: field.referenceLocationTypeKey,
+            choiceListId: field.choiceListId ?? null,
             conditions: field.conditions ?? undefined
           }
         });
-  
-        if (field.choices.length > 0) {
-          await prisma.entityFieldChoice.createMany({
-            data: field.choices.map((choice) => ({
-              entityFieldId: createdField.id,
-              value: choice.value,
-              label: choice.label,
-              sortOrder: choice.sortOrder ?? undefined,
-              pillColor: choice.pillColor ?? undefined,
-              textColor: choice.textColor ?? undefined
-            }))
-          });
-        }
       }
     }
   
@@ -514,7 +501,7 @@ export const registerEntityTypesRoutes = (app: express.Express) => {
                 }
               })
         },
-        include: { choices: true },
+        include: { choiceList: { include: { options: true } } },
         orderBy: { formOrder: "asc" }
       });
       res.json(fields);
@@ -537,7 +524,7 @@ export const registerEntityTypesRoutes = (app: express.Express) => {
   
     const fields = await prisma.entityField.findMany({
       where: { entityTypeId },
-      include: { choices: true },
+      include: { choiceList: { include: { options: true } } },
       orderBy: { formOrder: "asc" }
     });
   
@@ -564,7 +551,8 @@ export const registerEntityTypesRoutes = (app: express.Express) => {
       formColumn,
       referenceEntityTypeId,
       referenceLocationTypeKey,
-      conditions
+      conditions,
+      choiceListId
     } = req.body as {
       entityTypeId?: string;
       fieldKey?: string;
@@ -579,6 +567,7 @@ export const registerEntityTypesRoutes = (app: express.Express) => {
       referenceEntityTypeId?: string;
       referenceLocationTypeKey?: string;
       conditions?: Prisma.InputJsonValue;
+      choiceListId?: string;
     };
   
     if (!entityTypeId || !fieldKey || !label || !fieldType) {
@@ -605,6 +594,25 @@ export const registerEntityTypesRoutes = (app: express.Express) => {
       return;
     }
   
+    let resolvedChoiceListId: string | null = choiceListId ?? null;
+    if (fieldType !== EntityFieldType.CHOICE) {
+      resolvedChoiceListId = null;
+    }
+    if (fieldType === EntityFieldType.CHOICE && !resolvedChoiceListId) {
+      res.status(400).json({ error: "choiceListId is required for choice fields." });
+      return;
+    }
+    if (resolvedChoiceListId) {
+      const choiceList = await prisma.choiceList.findUnique({
+        where: { id: resolvedChoiceListId },
+        select: { scope: true, worldId: true }
+      });
+      if (!choiceList || choiceList.scope !== "WORLD" || choiceList.worldId !== entityType.worldId) {
+        res.status(400).json({ error: "Choice list must belong to the entity type world." });
+        return;
+      }
+    }
+
     const field = await prisma.entityField.create({
       data: {
         entityTypeId,
@@ -619,6 +627,7 @@ export const registerEntityTypesRoutes = (app: express.Express) => {
         formColumn: formColumn ?? 1,
         referenceEntityTypeId,
         referenceLocationTypeKey,
+        choiceListId: resolvedChoiceListId,
         conditions: conditions ?? undefined
       }
     });
@@ -636,7 +645,7 @@ export const registerEntityTypesRoutes = (app: express.Express) => {
     const { id } = req.params;
     const field = await prisma.entityField.findUnique({
       where: { id },
-      include: { choices: true }
+      include: { choiceList: { include: { options: true } } }
     });
     if (!field) {
       res.status(404).json({ error: "Field not found." });
@@ -685,7 +694,8 @@ export const registerEntityTypesRoutes = (app: express.Express) => {
       formColumn,
       referenceEntityTypeId,
       referenceLocationTypeKey,
-      conditions
+      conditions,
+      choiceListId
     } = req.body as {
       fieldKey?: string;
       label?: string;
@@ -699,7 +709,31 @@ export const registerEntityTypesRoutes = (app: express.Express) => {
       referenceEntityTypeId?: string;
       referenceLocationTypeKey?: string;
       conditions?: Prisma.InputJsonValue;
+      choiceListId?: string;
     };
+
+    let resolvedChoiceListId: string | null | undefined = choiceListId ?? null;
+    if (fieldType && fieldType !== EntityFieldType.CHOICE) {
+      resolvedChoiceListId = null;
+    }
+    if (fieldType === EntityFieldType.CHOICE && !resolvedChoiceListId) {
+      res.status(400).json({ error: "choiceListId is required for choice fields." });
+      return;
+    }
+    if (resolvedChoiceListId) {
+      const entityType = await prisma.entityType.findUnique({
+        where: { id: existing.entityTypeId },
+        select: { worldId: true }
+      });
+      const choiceList = await prisma.choiceList.findUnique({
+        where: { id: resolvedChoiceListId },
+        select: { scope: true, worldId: true }
+      });
+      if (!entityType || !choiceList || choiceList.scope !== "WORLD" || choiceList.worldId !== entityType.worldId) {
+        res.status(400).json({ error: "Choice list must belong to the entity type world." });
+        return;
+      }
+    }
   
     const field = await prisma.entityField.update({
       where: { id },
@@ -715,6 +749,7 @@ export const registerEntityTypesRoutes = (app: express.Express) => {
         formColumn,
         referenceEntityTypeId,
         referenceLocationTypeKey,
+        choiceListId: resolvedChoiceListId,
         conditions: conditions ?? undefined
       }
     });
@@ -748,211 +783,5 @@ export const registerEntityTypesRoutes = (app: express.Express) => {
     res.json({ ok: true });
   });
 
-  app.get("/api/entity-field-choices", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-  
-    const entityFieldId = typeof req.query.entityFieldId === "string" ? req.query.entityFieldId : undefined;
-    const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
-    if (!entityFieldId) {
-      if (worldId && !isAdmin(user) && !(await isWorldArchitect(user.id, worldId))) {
-        res.status(403).json({ error: "Forbidden." });
-        return;
-      }
-  
-      const choices = await prisma.entityFieldChoice.findMany({
-        where: {
-          ...(worldId ? { entityField: { entityType: { worldId } } } : {}),
-          ...(isAdmin(user) || worldId
-            ? {}
-            : {
-                entityField: {
-                  entityType: {
-                    world: {
-                      OR: [
-                        { primaryArchitectId: user.id },
-                        { architects: { some: { userId: user.id } } }
-                      ]
-                    }
-                  }
-                }
-              })
-        },
-        orderBy: { sortOrder: "asc" }
-      });
-      res.json(choices);
-      return;
-    }
-  
-    const field = await prisma.entityField.findUnique({
-      where: { id: entityFieldId },
-      select: { entityTypeId: true }
-    });
-    if (!field) {
-      res.status(404).json({ error: "Field not found." });
-      return;
-    }
-  
-    if (!isAdmin(user) && !(await canAccessEntityType(user.id, field.entityTypeId))) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-  
-    const choices = await prisma.entityFieldChoice.findMany({
-      where: { entityFieldId },
-      orderBy: { sortOrder: "asc" }
-    });
-    res.json(choices);
-  });
-
-  app.get("/api/entity-field-choices/:id", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-  
-    const { id } = req.params;
-    const choice = await prisma.entityFieldChoice.findUnique({
-      where: { id },
-      include: { entityField: { select: { entityTypeId: true } } }
-    });
-    if (!choice) {
-      res.status(404).json({ error: "Choice not found." });
-      return;
-    }
-  
-    if (!isAdmin(user) && !(await canAccessEntityType(user.id, choice.entityField.entityTypeId))) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-  
-    const { entityField, ...choiceData } = choice;
-    res.json(choiceData);
-  });
-
-  app.post("/api/entity-field-choices", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-  
-    const { entityFieldId, value, label, sortOrder, pillColor, textColor } = req.body as {
-      entityFieldId?: string;
-      value?: string;
-      label?: string;
-      sortOrder?: number;
-      pillColor?: string | null;
-      textColor?: string | null;
-    };
-  
-    if (!entityFieldId || !value || !label) {
-      res.status(400).json({ error: "entityFieldId, value, and label are required." });
-      return;
-    }
-  
-    const field = await prisma.entityField.findUnique({
-      where: { id: entityFieldId },
-      select: { entityTypeId: true }
-    });
-    if (!field) {
-      res.status(404).json({ error: "Field not found." });
-      return;
-    }
-  
-    if (!isAdmin(user) && !(await canManageEntityType(user.id, field.entityTypeId))) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-  
-    try {
-      const choice = await prisma.entityFieldChoice.create({
-        data: {
-          entityFieldId,
-          value,
-          label,
-          sortOrder,
-          pillColor,
-          textColor
-        }
-      });
-  
-      res.status(201).json(choice);
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-        res.status(409).json({ error: "Choice value already exists for this field." });
-        return;
-      }
-      throw error;
-    }
-  });
-
-  app.put("/api/entity-field-choices/:id", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-  
-    const { id } = req.params;
-    const existing = await prisma.entityFieldChoice.findUnique({
-      where: { id },
-      select: { entityField: { select: { entityTypeId: true } } }
-    });
-    if (!existing) {
-      res.status(404).json({ error: "Choice not found." });
-      return;
-    }
-  
-    if (!isAdmin(user) && !(await canManageEntityType(user.id, existing.entityField.entityTypeId))) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-  
-    const { value, label, sortOrder, pillColor, textColor } = req.body as {
-      value?: string;
-      label?: string;
-      sortOrder?: number;
-      pillColor?: string | null;
-      textColor?: string | null;
-    };
-  
-    const choice = await prisma.entityFieldChoice.update({
-      where: { id },
-      data: { value, label, sortOrder, pillColor, textColor }
-    });
-  
-    res.json(choice);
-  });
-
-  app.delete("/api/entity-field-choices/:id", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-  
-    const { id } = req.params;
-    const existing = await prisma.entityFieldChoice.findUnique({
-      where: { id },
-      select: { entityField: { select: { entityTypeId: true } } }
-    });
-    if (!existing) {
-      res.status(404).json({ error: "Choice not found." });
-      return;
-    }
-  
-    if (!isAdmin(user) && !(await canManageEntityType(user.id, existing.entityField.entityTypeId))) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-  
-    await prisma.entityFieldChoice.delete({ where: { id } });
-    res.json({ ok: true });
-  });
 
 };

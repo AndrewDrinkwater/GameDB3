@@ -51,7 +51,7 @@ const emptyAddState: AddState = { query: "", options: [], open: false, loading: 
 
 const entityFieldTypeOptions: Choice[] = [
   { value: "TEXT", label: "Text" },
-  { value: "TEXTAREA", label: "Text Area" },
+  { value: "NUMBER", label: "Number" },
   { value: "BOOLEAN", label: "Boolean" },
   { value: "CHOICE", label: "Choice" },
   { value: "ENTITY_REFERENCE", label: "Entity Reference" },

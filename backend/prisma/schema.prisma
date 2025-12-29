@@ -60,7 +60,7 @@ enum LocationStatus {
 
 enum EntityFieldType {
   TEXT
-  TEXTAREA
+  NUMBER
   BOOLEAN
   CHOICE
   ENTITY_REFERENCE
@@ -69,12 +69,16 @@ enum EntityFieldType {
 
 enum LocationFieldType {
   TEXT
-  TEXTAREA
   NUMBER
   BOOLEAN
   CHOICE
   ENTITY_REFERENCE
   LOCATION_REFERENCE
+}
+
+enum ChoiceScope {
+  PACK
+  WORLD
 }
 
 enum EntityAccessType {
@@ -186,6 +190,7 @@ model World {
   relationshipTypes RelationshipType[]
   relationships     Relationship[]
   sessions          Session[]
+  choiceLists       ChoiceList[]
 
   @@index([primaryArchitectId])
 }
@@ -355,34 +360,19 @@ model LocationTypeField {
   required       Boolean          @default(false)
   defaultValue   Json?
   validationRules Json?
+  choiceListId   String?
   listOrder      Int              @default(0)
   formOrder      Int              @default(0)
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
   locationType LocationType              @relation(fields: [locationTypeId], references: [id])
-  choices      LocationTypeFieldChoice[]
   values       LocationFieldValue[]
+  choiceList   ChoiceList? @relation("LocationFieldChoiceList", fields: [choiceListId], references: [id])
 
   @@unique([locationTypeId, fieldKey])
   @@index([locationTypeId])
-}
-
-model LocationTypeFieldChoice {
-  id                 String   @id @default(uuid())
-  locationTypeFieldId String
-  value              String
-  label              String
-  sortOrder          Int?
-  pillColor          String?
-  textColor          String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-
-  field LocationTypeField @relation(fields: [locationTypeFieldId], references: [id])
-
-  @@unique([locationTypeFieldId, value])
-  @@index([locationTypeFieldId])
+  @@index([choiceListId])
 }
 
 model LocationTypeRule {
@@ -415,6 +405,7 @@ model EntityField {
   formColumn  Int            @default(1)
   referenceEntityTypeId String?
   referenceLocationTypeKey String?
+  choiceListId String?
   conditions  Json?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
@@ -422,11 +413,12 @@ model EntityField {
   entityType           EntityType       @relation(fields: [entityTypeId], references: [id])
   formSection          EntityFormSection? @relation(fields: [formSectionId], references: [id])
   referenceEntityType  EntityType?      @relation("EntityFieldReferenceType", fields: [referenceEntityTypeId], references: [id])
-  choices              EntityFieldChoice[]
   values               EntityFieldValue[]
+  choiceList          ChoiceList? @relation("EntityFieldChoiceList", fields: [choiceListId], references: [id])
 
   @@unique([entityTypeId, fieldKey])
   @@index([entityTypeId])
+  @@index([choiceListId])
 }
 
 model EntityFormSection {
@@ -442,6 +434,45 @@ model EntityFormSection {
   fields     EntityField[]
 
   @@index([entityTypeId])
+}
+
+model ChoiceList {
+  id          String      @id @default(uuid())
+  name        String
+  description String?
+  scope       ChoiceScope
+  packId      String?
+  worldId     String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  pack  Pack?  @relation(fields: [packId], references: [id])
+  world World? @relation(fields: [worldId], references: [id])
+
+  options                ChoiceOption[]
+  entityTemplateFields   EntityTypeTemplateField[] @relation("EntityTemplateChoiceList")
+  locationTemplateFields LocationTypeTemplateField[] @relation("LocationTemplateChoiceList")
+  entityFields           EntityField[] @relation("EntityFieldChoiceList")
+  locationFields         LocationTypeField[] @relation("LocationFieldChoiceList")
+
+  @@index([packId])
+  @@index([worldId])
+}
+
+model ChoiceOption {
+  id           String   @id @default(uuid())
+  choiceListId String
+  value        String
+  label        String
+  order        Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  choiceList ChoiceList @relation(fields: [choiceListId], references: [id])
+
+  @@unique([choiceListId, value])
+  @@index([choiceListId])
 }
 
 model UserListViewPreference {
@@ -475,22 +506,6 @@ model EntityTypeListViewDefault {
   updatedBy  User?      @relation("EntityTypeListDefaults", fields: [updatedById], references: [id])
 }
 
-model EntityFieldChoice {
-  id            String   @id @default(uuid())
-  entityFieldId String
-  value         String
-  label         String
-  sortOrder     Int?
-  pillColor     String?
-  textColor     String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  entityField EntityField @relation(fields: [entityFieldId], references: [id])
-
-  @@unique([entityFieldId, value])
-  @@index([entityFieldId])
-}
 
 model Entity {
   id           String   @id @default(uuid())
@@ -632,6 +647,7 @@ model Pack {
   locationTypeTemplates   LocationTypeTemplate[]
   locationTypeRuleTemplates LocationTypeRuleTemplate[]
   relationshipTypeTemplates RelationshipTypeTemplate[]
+  choiceLists               ChoiceList[]
 
   @@index([createdById])
 }
@@ -660,15 +676,17 @@ model EntityTypeTemplateField {
   fieldType      EntityFieldType
   required       Boolean        @default(false)
   defaultEnabled Boolean        @default(true)
-  choices        Json?
+  choiceListId   String?
   validationRules Json?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
   template EntityTypeTemplate @relation(fields: [templateId], references: [id])
+  choiceList ChoiceList? @relation("EntityTemplateChoiceList", fields: [choiceListId], references: [id])
 
   @@unique([templateId, fieldKey])
   @@index([templateId])
+  @@index([choiceListId])
 }
 
 model LocationTypeTemplate {
@@ -696,15 +714,17 @@ model LocationTypeTemplateField {
   fieldType      LocationFieldType
   required       Boolean          @default(false)
   defaultEnabled Boolean          @default(true)
-  choices        Json?
+  choiceListId   String?
   validationRules Json?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
   template LocationTypeTemplate @relation(fields: [templateId], references: [id])
+  choiceList ChoiceList? @relation("LocationTemplateChoiceList", fields: [choiceListId], references: [id])
 
   @@unique([templateId, fieldKey])
   @@index([templateId])
+  @@index([choiceListId])
 }
 
 model LocationTypeRuleTemplate {

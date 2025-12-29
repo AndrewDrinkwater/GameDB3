@@ -156,14 +156,6 @@ export const registerLocationsRoutes = (app: express.Express) => {
         } else {
           valueFilter.valueBoolean = boolValue;
         }
-      } else if (fieldType === LocationFieldType.TEXTAREA) {
-        if (rule.operator === "contains") {
-          valueFilter.valueText = { contains: value, mode: "insensitive" };
-        } else if (rule.operator === "not_equals") {
-          valueFilter.valueText = { not: value };
-        } else {
-          valueFilter.valueText = value;
-        }
       } else if (fieldType === LocationFieldType.NUMBER) {
         const numberValue = Number(value);
         if (!Number.isFinite(numberValue)) return;
@@ -326,7 +318,7 @@ export const registerLocationsRoutes = (app: express.Express) => {
   
     const fields: LocationFieldRecord[] = await prisma.locationTypeField.findMany({
       where: { locationTypeId },
-      include: { choices: true }
+      include: { choiceList: { include: { options: true } } }
     });
     const fieldMap = new Map(fields.map((field) => [field.fieldKey, field]));
   
@@ -386,6 +378,36 @@ export const registerLocationsRoutes = (app: express.Express) => {
         return;
       }
     }
+
+    const invalidChoices: string[] = [];
+    const invalidNumbers: string[] = [];
+    if (fieldValues) {
+      for (const [fieldKey, rawValue] of Object.entries(fieldValues)) {
+        const field = fieldMap.get(fieldKey);
+        if (!field) continue;
+        if (field.fieldType === LocationFieldType.CHOICE && rawValue !== null && rawValue !== undefined && rawValue !== "") {
+          const options = field.choiceList?.options ?? [];
+          const allowed = new Set(options.filter((opt) => opt.isActive).map((opt) => opt.value));
+          if (!field.choiceList || !allowed.has(String(rawValue))) {
+            invalidChoices.push(fieldKey);
+          }
+        }
+        if (field.fieldType === LocationFieldType.NUMBER && rawValue !== null && rawValue !== undefined && rawValue !== "") {
+          const numericValue = Number(rawValue);
+          if (Number.isNaN(numericValue)) {
+            invalidNumbers.push(fieldKey);
+          }
+        }
+      }
+    }
+    if (invalidChoices.length > 0) {
+      res.status(400).json({ error: `Invalid choice values for: ${invalidChoices.join(", ")}` });
+      return;
+    }
+    if (invalidNumbers.length > 0) {
+      res.status(400).json({ error: `Invalid number values for: ${invalidNumbers.join(", ")}` });
+      return;
+    }
   
     const created = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const location = await tx.location.create({
@@ -417,11 +439,6 @@ export const registerLocationsRoutes = (app: express.Express) => {
             field.fieldType === LocationFieldType.LOCATION_REFERENCE
           ) {
             valuePayload.valueString =
-              rawValue === null || rawValue === undefined || rawValue === ""
-                ? null
-                : String(rawValue);
-          } else if (field.fieldType === LocationFieldType.TEXTAREA) {
-            valuePayload.valueText =
               rawValue === null || rawValue === undefined || rawValue === ""
                 ? null
                 : String(rawValue);
@@ -701,7 +718,7 @@ export const registerLocationsRoutes = (app: express.Express) => {
   
     const fields: LocationFieldRecord[] = await prisma.locationTypeField.findMany({
       where: { locationTypeId: location.locationTypeId },
-      include: { choices: true }
+      include: { choiceList: { include: { options: true } } }
     });
     const fieldMap = new Map(fields.map((field) => [field.fieldKey, field]));
     const storedValueMap = new Map(
@@ -789,11 +806,6 @@ export const registerLocationsRoutes = (app: express.Express) => {
           field.fieldType === LocationFieldType.ENTITY_REFERENCE ||
           field.fieldType === LocationFieldType.LOCATION_REFERENCE
         ) {
-          next =
-            rawValue === null || rawValue === undefined || rawValue === ""
-              ? null
-              : String(rawValue);
-        } else if (field.fieldType === LocationFieldType.TEXTAREA) {
           next =
             rawValue === null || rawValue === undefined || rawValue === ""
               ? null
@@ -904,7 +916,37 @@ export const registerLocationsRoutes = (app: express.Express) => {
         return;
       }
     }
-  
+
+    const invalidChoices: string[] = [];
+    const invalidNumbers: string[] = [];
+    if (fieldValues) {
+      for (const [fieldKey, rawValue] of Object.entries(fieldValues)) {
+        const field = fieldMap.get(fieldKey);
+        if (!field) continue;
+        if (field.fieldType === LocationFieldType.CHOICE && rawValue !== null && rawValue !== undefined && rawValue !== "") {
+          const options = field.choiceList?.options ?? [];
+          const allowed = new Set(options.filter((opt) => opt.isActive).map((opt) => opt.value));
+          if (!field.choiceList || !allowed.has(String(rawValue))) {
+            invalidChoices.push(fieldKey);
+          }
+        }
+        if (field.fieldType === LocationFieldType.NUMBER && rawValue !== null && rawValue !== undefined && rawValue !== "") {
+          const numericValue = Number(rawValue);
+          if (Number.isNaN(numericValue)) {
+            invalidNumbers.push(fieldKey);
+          }
+        }
+      }
+    }
+    if (invalidChoices.length > 0) {
+      res.status(400).json({ error: `Invalid choice values for: ${invalidChoices.join(", ")}` });
+      return;
+    }
+    if (invalidNumbers.length > 0) {
+      res.status(400).json({ error: `Invalid number values for: ${invalidNumbers.join(", ")}` });
+      return;
+    }
+
     const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const locationRecord = await tx.location.update({
         where: { id },
@@ -937,11 +979,6 @@ export const registerLocationsRoutes = (app: express.Express) => {
               rawValue === null || rawValue === undefined || rawValue === ""
                 ? null
                 : String(rawValue);
-          } else if (field.fieldType === LocationFieldType.TEXTAREA) {
-            valueData.valueText =
-              rawValue === null || rawValue === undefined || rawValue === ""
-                ? null
-                : String(rawValue);
           } else if (field.fieldType === LocationFieldType.BOOLEAN) {
             valueData.valueBoolean = Boolean(rawValue);
           } else if (field.fieldType === LocationFieldType.NUMBER) {
@@ -955,7 +992,6 @@ export const registerLocationsRoutes = (app: express.Express) => {
   
           if (
             valueData.valueString === null &&
-            valueData.valueText === null &&
             valueData.valueBoolean === null &&
             valueData.valueNumber === null &&
             valueData.valueJson === undefined

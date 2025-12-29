@@ -24,7 +24,7 @@ export const registerCoreRoutes = (app: express.Express) => {
       > = {
         entity_field_type: [
           { value: "TEXT", label: "Single line text", sortOrder: 1 },
-          { value: "TEXTAREA", label: "Multi line text", sortOrder: 2 },
+          { value: "NUMBER", label: "Number", sortOrder: 2 },
           { value: "BOOLEAN", label: "Boolean", sortOrder: 3 },
           { value: "CHOICE", label: "Choice", sortOrder: 4 },
           { value: "ENTITY_REFERENCE", label: "Reference (Entity)", sortOrder: 5 },
@@ -45,12 +45,11 @@ export const registerCoreRoutes = (app: express.Express) => {
         ],
         location_field_type: [
           { value: "TEXT", label: "Single line text", sortOrder: 1 },
-          { value: "TEXTAREA", label: "Multi line text", sortOrder: 2 },
-          { value: "NUMBER", label: "Number", sortOrder: 3 },
-          { value: "BOOLEAN", label: "Boolean", sortOrder: 4 },
-          { value: "CHOICE", label: "Choice", sortOrder: 5 },
-          { value: "ENTITY_REFERENCE", label: "Reference (Entity)", sortOrder: 6 },
-          { value: "LOCATION_REFERENCE", label: "Reference (Location)", sortOrder: 7 }
+          { value: "NUMBER", label: "Number", sortOrder: 2 },
+          { value: "BOOLEAN", label: "Boolean", sortOrder: 3 },
+          { value: "CHOICE", label: "Choice", sortOrder: 4 },
+          { value: "ENTITY_REFERENCE", label: "Reference (Entity)", sortOrder: 5 },
+          { value: "LOCATION_REFERENCE", label: "Reference (Location)", sortOrder: 6 }
         ]
       };
   
@@ -953,6 +952,7 @@ export const registerCoreRoutes = (app: express.Express) => {
     const idsParam = typeof req.query.ids === "string" ? req.query.ids : undefined;
     const scope = typeof req.query.scope === "string" ? req.query.scope : undefined;
     const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+    const packId = typeof req.query.packId === "string" ? req.query.packId : undefined;
     const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
     const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
     const entityTypeId = typeof req.query.entityTypeId === "string" ? req.query.entityTypeId : undefined;
@@ -1237,6 +1237,67 @@ export const registerCoreRoutes = (app: express.Express) => {
         };
       });
   
+      res.json(results);
+      return;
+    }
+
+    if (entityKey === "choice_lists") {
+      const labelField = await getLabelFieldForEntity(entityKey);
+      const baseClause: Prisma.ChoiceListWhereInput = ids
+        ? { id: { in: ids } }
+        : queryValue
+          ? { name: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
+          : {};
+
+      const filters: Prisma.ChoiceListWhereInput[] = [baseClause];
+
+      if (packId) {
+        filters.push({ packId, scope: "PACK" });
+      }
+      if (worldId) {
+        filters.push({ worldId, scope: "WORLD" });
+      }
+      if (scope === "pack" || scope === "choice_list_pack") {
+        filters.push({ scope: "PACK" });
+      }
+      if (scope === "world" || scope === "choice_list_world") {
+        filters.push({ scope: "WORLD" });
+      }
+
+      if (!isAdmin(user)) {
+        if (!worldId) {
+          res.json([]);
+          return;
+        }
+        const canAccess = await isWorldArchitect(user.id, worldId);
+        if (!canAccess) {
+          res.status(403).json({ error: "Forbidden." });
+          return;
+        }
+        filters.push({ scope: "WORLD", worldId });
+      }
+
+      const whereClause: Prisma.ChoiceListWhereInput =
+        filters.length > 1 ? { AND: filters } : baseClause;
+
+      const select: Record<string, boolean> = { id: true };
+      select[labelField] = true;
+
+      const lists = await prisma.choiceList.findMany({
+        where: whereClause,
+        select: select as Record<string, true>,
+        orderBy: { name: "asc" },
+        take: 25
+      });
+
+      const results = lists.map((list) => {
+        const labelValue = (list as Record<string, unknown>)[labelField];
+        return {
+          id: list.id,
+          label: labelValue ? String(labelValue) : list.id
+        };
+      });
+
       res.json(results);
       return;
     }
@@ -1869,37 +1930,6 @@ export const registerCoreRoutes = (app: express.Express) => {
         }
         break;
       }
-      case "entity_field_choices": {
-        let resolvedEntityFieldId = entityFieldId;
-        if (recordId) {
-          const choice = await prisma.entityFieldChoice.findUnique({
-            where: { id: recordId },
-            select: { entityFieldId: true }
-          });
-          if (!choice) {
-            res.status(404).json({ error: "Choice not found." });
-            return;
-          }
-          resolvedEntityFieldId = choice.entityFieldId;
-        }
-        if (resolvedEntityFieldId) {
-          const field = await prisma.entityField.findUnique({
-            where: { id: resolvedEntityFieldId },
-            select: { entityTypeId: true }
-          });
-          if (!field) {
-            res.status(404).json({ error: "Entity field not found." });
-            return;
-          }
-          const canManage = admin || (await canManageEntityType(user.id, field.entityTypeId));
-          canCreate = canManage;
-          if (recordId) {
-            canEdit = canManage;
-            canDelete = canManage;
-          }
-        }
-        break;
-      }
       case "relationship_type_rules": {
         if (recordId) {
           const rule = await prisma.relationshipTypeRule.findUnique({
@@ -1946,32 +1976,50 @@ export const registerCoreRoutes = (app: express.Express) => {
         }
         break;
       }
-      case "location_type_field_choices": {
-        if (locationTypeFieldId) {
-          const field = await prisma.locationTypeField.findUnique({
-            where: { id: locationTypeFieldId },
-            select: { locationType: { select: { worldId: true } } }
-          });
-          if (!field) {
-            res.status(404).json({ error: "Location field not found." });
-            return;
-          }
-          const canManage = admin || (await isWorldArchitect(user.id, field.locationType.worldId));
-          canCreate = canManage;
-        }
+      case "choice_lists": {
         if (recordId) {
-          const choice = await prisma.locationTypeFieldChoice.findUnique({
+          const list = await prisma.choiceList.findUnique({
             where: { id: recordId },
-            select: { field: { select: { locationType: { select: { worldId: true } } } } }
+            select: { scope: true, worldId: true }
           });
-          if (!choice) {
-            res.status(404).json({ error: "Location field choice not found." });
+          if (!list) {
+            res.status(404).json({ error: "Choice list not found." });
             return;
           }
           const canManage =
-            admin || (await isWorldArchitect(user.id, choice.field.locationType.worldId));
+            admin || (list.scope === "WORLD" && list.worldId && (await isWorldArchitect(user.id, list.worldId)));
           canEdit = canManage;
           canDelete = canManage;
+        }
+        if (worldId) {
+          canCreate = admin || (await isWorldArchitect(user.id, worldId));
+        } else {
+          canCreate = admin;
+        }
+        break;
+      }
+      case "choice_options": {
+        if (recordId) {
+          const option = await prisma.choiceOption.findUnique({
+            where: { id: recordId },
+            include: { choiceList: { select: { scope: true, worldId: true } } }
+          });
+          if (!option) {
+            res.status(404).json({ error: "Choice option not found." });
+            return;
+          }
+          const canManage =
+            admin ||
+            (option.choiceList.scope === "WORLD" &&
+              option.choiceList.worldId &&
+              (await isWorldArchitect(user.id, option.choiceList.worldId)));
+          canEdit = canManage;
+          canDelete = canManage;
+        }
+        if (worldId) {
+          canCreate = admin || (await isWorldArchitect(user.id, worldId));
+        } else {
+          canCreate = admin;
         }
         break;
       }

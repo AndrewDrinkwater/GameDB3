@@ -2,6 +2,7 @@ import express from "express";
 import { registerAuthRoutes } from "./auth";
 import { registerCampaignsRoutes } from "./campaigns";
 import { registerCharactersRoutes } from "./characters";
+import { registerChoiceRoutes } from "./choices";
 import { registerCoreRoutes } from "./core";
 import { registerEntitiesRoutes } from "./entities";
 import { registerEntityTypesRoutes } from "./entityTypes";
@@ -26,6 +27,7 @@ export const registerRoutes = (app: express.Express) => {
   registerWorldsRoutes(app);
   registerCampaignsRoutes(app);
   registerCharactersRoutes(app);
+  registerChoiceRoutes(app);
   registerEntityTypesRoutes(app);
   registerLocationTypesRoutes(app);
   registerLocationsRoutes(app);

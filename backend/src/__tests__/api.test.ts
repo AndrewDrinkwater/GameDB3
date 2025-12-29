@@ -30,7 +30,8 @@ type TestContext = {
   mentionRestrictedTargetEntityId: string;
   personaEntityTypeId: string;
   personaEntityFieldId: string;
-  personaChoiceId: string;
+  personaChoiceListId: string;
+  personaChoiceOptionId: string;
   locationTypeId: string;
   locationId: string;
 };
@@ -210,9 +211,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (context.entityFieldId) {
-    await prisma.entityFieldChoice.deleteMany({
-      where: { entityFieldId: context.entityFieldId }
-    });
     await prisma.entityField.delete({ where: { id: context.entityFieldId } }).catch(() => undefined);
   }
   if (context.entityTypeId) {
@@ -271,8 +269,11 @@ afterAll(async () => {
       }
     });
   }
-  if (context.personaChoiceId) {
-    await prisma.entityFieldChoice.delete({ where: { id: context.personaChoiceId } }).catch(() => undefined);
+  if (context.personaChoiceOptionId) {
+    await prisma.choiceOption.delete({ where: { id: context.personaChoiceOptionId } }).catch(() => undefined);
+  }
+  if (context.personaChoiceListId) {
+    await prisma.choiceList.delete({ where: { id: context.personaChoiceListId } }).catch(() => undefined);
   }
   if (context.personaEntityFieldId) {
     await prisma.entityField.delete({ where: { id: context.personaEntityFieldId } }).catch(() => undefined);
@@ -295,9 +296,6 @@ afterAll(async () => {
           { childTypeId: context.locationTypeId }
         ]
       }
-    });
-    await prisma.locationTypeFieldChoice.deleteMany({
-      where: { field: { locationTypeId: context.locationTypeId } }
     });
     await prisma.locationTypeField.deleteMany({ where: { locationTypeId: context.locationTypeId } });
     await prisma.locationType.delete({ where: { id: context.locationTypeId } }).catch(() => undefined);
@@ -707,7 +705,6 @@ describe("Entity type and field permissions", () => {
     });
     const fieldIds = fields.map((field) => field.id);
     if (fieldIds.length > 0) {
-      await prisma.entityFieldChoice.deleteMany({ where: { entityFieldId: { in: fieldIds } } });
       await prisma.entityFieldValue.deleteMany({ where: { fieldId: { in: fieldIds } } });
       await prisma.entityField.deleteMany({ where: { id: { in: fieldIds } } });
     }
@@ -756,6 +753,30 @@ describe("Entity type and field permissions", () => {
   });
 
   it("allows architects to create fields and choices", async () => {
+    const listResponse = await request(app)
+      .post("/api/choice-lists")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({
+        name: "Test Choices",
+        scope: "WORLD",
+        worldId: context.worldId
+      });
+
+    expect(listResponse.status).toBe(201);
+    context.personaChoiceListId = listResponse.body.id;
+
+    const optionResponse = await request(app)
+      .post("/api/choice-options")
+      .set("Authorization", `Bearer ${context.architectToken}`)
+      .send({
+        choiceListId: context.personaChoiceListId,
+        value: "alpha",
+        label: "Alpha"
+      });
+
+    expect(optionResponse.status).toBe(201);
+    context.personaChoiceOptionId = optionResponse.body.id;
+
     const fieldResponse = await request(app)
       .post("/api/entity-fields")
       .set("Authorization", `Bearer ${context.architectToken}`)
@@ -763,23 +784,12 @@ describe("Entity type and field permissions", () => {
         entityTypeId: context.personaEntityTypeId,
         fieldKey: "choice_field",
         label: "Choice Field",
-        fieldType: "CHOICE"
+        fieldType: "CHOICE",
+        choiceListId: context.personaChoiceListId
       });
 
     expect(fieldResponse.status).toBe(201);
     context.personaEntityFieldId = fieldResponse.body.id;
-
-    const choiceResponse = await request(app)
-      .post("/api/entity-field-choices")
-      .set("Authorization", `Bearer ${context.architectToken}`)
-      .send({
-        entityFieldId: context.personaEntityFieldId,
-        value: "alpha",
-        label: "Alpha"
-      });
-
-    expect(choiceResponse.status).toBe(201);
-    context.personaChoiceId = choiceResponse.body.id;
   });
 
   it("blocks viewers from creating fields and choices", async () => {
@@ -795,16 +805,16 @@ describe("Entity type and field permissions", () => {
 
     expect(fieldResponse.status).toBe(403);
 
-    const choiceResponse = await request(app)
-      .post("/api/entity-field-choices")
+    const listResponse = await request(app)
+      .post("/api/choice-lists")
       .set("Authorization", `Bearer ${context.viewerToken}`)
       .send({
-        entityFieldId: context.personaEntityFieldId,
-        value: "viewer",
-        label: "Viewer"
+        name: "Viewer Choices",
+        scope: "WORLD",
+        worldId: context.worldId
       });
 
-    expect(choiceResponse.status).toBe(403);
+    expect(listResponse.status).toBe(403);
   });
 });
 
@@ -1180,9 +1190,6 @@ describe("Location types, fields, and rules", () => {
     }
 
     if (createdFieldIds.length > 0) {
-      await prisma.locationTypeFieldChoice.deleteMany({
-        where: { locationTypeFieldId: { in: createdFieldIds } }
-      });
       await prisma.locationTypeField.deleteMany({
         where: { id: { in: createdFieldIds } }
       });

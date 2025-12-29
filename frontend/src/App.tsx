@@ -47,11 +47,8 @@ const viewRegistry: Record<string, ViewConfig> = {
   characters: { listKey: "characters.list", formKey: "characters.form", label: "Characters" },
   entity_types: { listKey: "entity_types.list", formKey: "entity_types.form", label: "Entity Types" },
   entity_fields: { listKey: "entity_fields.list", formKey: "entity_fields.form", label: "Entity Fields" },
-  entity_field_choices: {
-    listKey: "entity_field_choices.list",
-    formKey: "entity_field_choices.form",
-    label: "Entity Field Choices"
-  },
+  choice_lists: { listKey: "choice_lists.list", formKey: "choice_lists.form", label: "Choice Lists" },
+  choice_options: { listKey: "choice_options.list", formKey: "choice_options.form", label: "Choice Options" },
   relationship_types: {
     listKey: "relationship_types.list",
     formKey: "relationship_types.form",
@@ -72,11 +69,6 @@ const viewRegistry: Record<string, ViewConfig> = {
     listKey: "location_type_fields.list",
     formKey: "location_type_fields.form",
     label: "Location Fields"
-  },
-  location_type_field_choices: {
-    listKey: "location_type_field_choices.list",
-    formKey: "location_type_field_choices.form",
-    label: "Location Field Choices"
   },
   location_type_rules: {
     listKey: "location_type_rules.list",
@@ -1790,26 +1782,35 @@ function AppShell() {
                                 >
                                   Entity Types
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    navigateWithGuard("/list/entity_fields");
-                                    handleSidebarSelect();
-                                  }}
-                                >
-                                  Entity Fields
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    navigateWithGuard("/list/entity_field_choices");
-                                    handleSidebarSelect();
-                                  }}
-                                >
-                                  Field Choices
-                                </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigateWithGuard("/list/entity_fields");
+                                      handleSidebarSelect();
+                                    }}
+                                  >
+                                    Entity Fields
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigateWithGuard("/list/choice_lists");
+                                      handleSidebarSelect();
+                                    }}
+                                  >
+                                    Choice Lists
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigateWithGuard("/list/choice_options");
+                                      handleSidebarSelect();
+                                    }}
+                                  >
+                                    Choice Options
+                                  </button>
+                                </div>
                               </div>
-                            </div>
                             <div className="sidebar__subsection">
                               <span className="sidebar__subsection-title">Relationship Admin</span>
                               <div className="sidebar__subsection-body">
@@ -1854,23 +1855,14 @@ function AppShell() {
                                 >
                                   Location Fields
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    navigateWithGuard("/list/location_type_field_choices");
-                                    handleSidebarSelect();
-                                  }}
-                                >
-                                  Location Field Choices
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    navigateWithGuard("/list/location_type_rules");
-                                    handleSidebarSelect();
-                                  }}
-                                >
-                                  Location Rules
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigateWithGuard("/list/location_type_rules");
+                                      handleSidebarSelect();
+                                    }}
+                                  >
+                                    Location Rules
                                 </button>
                                 <button
                                   type="button"

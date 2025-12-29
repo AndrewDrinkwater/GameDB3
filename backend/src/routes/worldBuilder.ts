@@ -9,13 +9,7 @@ type BuilderEntityField = {
   fieldType: EntityFieldType;
   required?: boolean;
   enabled: boolean;
-  choices?: Array<{
-    value: string;
-    label: string;
-    sortOrder?: number;
-    pillColor?: string;
-    textColor?: string;
-  }>;
+  choiceListKey?: string | null;
 };
 
 type BuilderEntityType = {
@@ -31,13 +25,7 @@ type BuilderLocationField = {
   fieldType: LocationFieldType;
   required?: boolean;
   enabled: boolean;
-  choices?: Array<{
-    value: string;
-    label: string;
-    sortOrder?: number;
-    pillColor?: string;
-    textColor?: string;
-  }>;
+  choiceListKey?: string | null;
 };
 
 type BuilderLocationType = {
@@ -71,6 +59,20 @@ type BuilderRelationshipType = {
   pastToLabel?: string;
   enabled: boolean;
   roleMappings: BuilderRelationshipMapping[];
+};
+
+type BuilderChoiceOption = {
+  value: string;
+  label: string;
+  order?: number;
+  isActive?: boolean;
+};
+
+type BuilderChoiceList = {
+  key: string;
+  name: string;
+  description?: string;
+  options: BuilderChoiceOption[];
 };
 
 const ensureArchitectOnly = async (req: AuthRequest, res: express.Response) => {
@@ -115,8 +117,9 @@ export const registerWorldBuilderRoutes = (app: express.Express) => {
     const pack = await prisma.pack.findUnique({
       where: { id: req.params.id },
       include: {
-        entityTypeTemplates: { include: { fields: true } },
-        locationTypeTemplates: { include: { fields: true } },
+        choiceLists: { include: { options: true } },
+        entityTypeTemplates: { include: { fields: { include: { choiceList: true } } } },
+        locationTypeTemplates: { include: { fields: { include: { choiceList: true } } } },
         locationTypeRuleTemplates: true,
         relationshipTypeTemplates: { include: { roles: true } }
       }
@@ -139,10 +142,11 @@ export const registerWorldBuilderRoutes = (app: express.Express) => {
       return;
     }
 
-    const { worldId, packId, entityTypes, locationTypes, locationRules, relationshipTypes } =
+    const { worldId, packId, choiceLists, entityTypes, locationTypes, locationRules, relationshipTypes } =
       req.body as {
         worldId?: string;
         packId?: string;
+        choiceLists?: BuilderChoiceList[];
         entityTypes?: BuilderEntityType[];
         locationTypes?: BuilderLocationType[];
         locationRules?: BuilderLocationRule[];
@@ -166,6 +170,7 @@ export const registerWorldBuilderRoutes = (app: express.Express) => {
       return;
     }
 
+    const safeChoiceLists = Array.isArray(choiceLists) ? choiceLists : [];
     const safeEntityTypes = Array.isArray(entityTypes) ? entityTypes : [];
     const safeLocationTypes = Array.isArray(locationTypes) ? locationTypes : [];
     const safeLocationRules = Array.isArray(locationRules) ? locationRules : [];
@@ -175,6 +180,32 @@ export const registerWorldBuilderRoutes = (app: express.Express) => {
       const result = await prisma.$transaction(async (tx) => {
         const entityTypeMap = new Map<string, string>();
         const locationTypeMap = new Map<string, string>();
+
+        const choiceListMap = new Map<string, string>();
+
+        for (const list of safeChoiceLists) {
+          const createdList = await tx.choiceList.create({
+            data: {
+              name: list.name,
+              description: list.description ?? null,
+              scope: "WORLD",
+              worldId
+            }
+          });
+          choiceListMap.set(list.key, createdList.id);
+
+          if (list.options && list.options.length > 0) {
+            await tx.choiceOption.createMany({
+              data: list.options.map((option, index) => ({
+                choiceListId: createdList.id,
+                value: option.value,
+                label: option.label,
+                order: option.order ?? index,
+                isActive: option.isActive ?? true
+              }))
+            });
+          }
+        }
 
         for (const entry of safeEntityTypes) {
           const created = await tx.entityType.create({
@@ -199,7 +230,14 @@ export const registerWorldBuilderRoutes = (app: express.Express) => {
 
           for (const field of entry.fields ?? []) {
             if (!field.enabled) continue;
-            const createdField = await tx.entityField.create({
+            const choiceListId =
+              field.fieldType === EntityFieldType.CHOICE && field.choiceListKey
+                ? choiceListMap.get(field.choiceListKey) ?? null
+                : null;
+            if (field.fieldType === EntityFieldType.CHOICE && !choiceListId) {
+              throw new Error(`Choice list missing for entity field ${field.fieldKey}`);
+            }
+            await tx.entityField.create({
               data: {
                 entityTypeId: created.id,
                 fieldKey: field.fieldKey,
@@ -209,22 +247,10 @@ export const registerWorldBuilderRoutes = (app: express.Express) => {
                 listOrder: 0,
                 formOrder: 0,
                 formSectionId: section.id,
-                formColumn: 1
+                formColumn: 1,
+                choiceListId
               }
             });
-
-            if (field.choices && field.choices.length > 0) {
-              await tx.entityFieldChoice.createMany({
-                data: field.choices.map((choice) => ({
-                  entityFieldId: createdField.id,
-                  value: choice.value,
-                  label: choice.label,
-                  sortOrder: choice.sortOrder,
-                  pillColor: choice.pillColor,
-                  textColor: choice.textColor
-                }))
-              });
-            }
           }
         }
 
@@ -240,7 +266,14 @@ export const registerWorldBuilderRoutes = (app: express.Express) => {
 
           for (const field of entry.fields ?? []) {
             if (!field.enabled) continue;
-            const createdField = await tx.locationTypeField.create({
+            const choiceListId =
+              field.fieldType === LocationFieldType.CHOICE && field.choiceListKey
+                ? choiceListMap.get(field.choiceListKey) ?? null
+                : null;
+            if (field.fieldType === LocationFieldType.CHOICE && !choiceListId) {
+              throw new Error(`Choice list missing for location field ${field.fieldKey}`);
+            }
+            await tx.locationTypeField.create({
               data: {
                 locationTypeId: created.id,
                 fieldKey: field.fieldKey,
@@ -248,22 +281,10 @@ export const registerWorldBuilderRoutes = (app: express.Express) => {
                 fieldType: field.fieldType,
                 required: Boolean(field.required),
                 listOrder: 0,
-                formOrder: 0
+                formOrder: 0,
+                choiceListId
               }
             });
-
-            if (field.choices && field.choices.length > 0) {
-              await tx.locationTypeFieldChoice.createMany({
-                data: field.choices.map((choice) => ({
-                  locationTypeFieldId: createdField.id,
-                  value: choice.value,
-                  label: choice.label,
-                  sortOrder: choice.sortOrder,
-                  pillColor: choice.pillColor,
-                  textColor: choice.textColor
-                }))
-              });
-            }
           }
         }
 

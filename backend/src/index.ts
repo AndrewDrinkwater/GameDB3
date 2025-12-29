@@ -5,8 +5,10 @@ const port = process.env.PORT ? Number(process.env.PORT) : 4000;
 
 if (process.env.NODE_ENV !== "test") {
   void backfillSeededViews([
-    "entity_field_choices.list",
-    "entity_field_choices.form",
+    "choice_lists.list",
+    "choice_lists.form",
+    "choice_options.list",
+    "choice_options.form",
     "location_types.list",
     "location_types.form",
     "relationship_types.list",

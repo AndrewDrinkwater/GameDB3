@@ -359,7 +359,9 @@ const canCreateCharacterInCampaign = async (userId: string, campaignId: string) 
   return Boolean(allowed);
 };
 
-type EntityFieldRecord = Prisma.EntityFieldGetPayload<{ include: { choices: true } }>;
+type EntityFieldRecord = Prisma.EntityFieldGetPayload<{
+  include: { choiceList: { include: { options: true } } };
+}>;
 
 type EntityFieldValueWrite = {
   entityId: string;
@@ -378,7 +380,9 @@ type EntityAccessEntry = {
   scopeId?: string | null;
 };
 
-type LocationFieldRecord = Prisma.LocationTypeFieldGetPayload<{ include: { choices: true } }>;
+type LocationFieldRecord = Prisma.LocationTypeFieldGetPayload<{
+  include: { choiceList: { include: { options: true } } };
+}>;
 
 type LocationFieldValueWrite = {
   locationId: string;
@@ -749,39 +753,75 @@ const entityViewSeeds: Record<string, ViewSeed> = {
         referenceEntityKey: "location_types",
         referenceScope: "location_type"
       },
-      { fieldKey: "conditions", label: "Visibility Conditions", fieldType: SystemFieldType.TEXTAREA, listOrder: 8, formOrder: 8 }
+      {
+        fieldKey: "choiceListId",
+        label: "Choice List",
+        fieldType: SystemFieldType.REFERENCE,
+        listOrder: 8,
+        formOrder: 8,
+        referenceEntityKey: "choice_lists",
+        referenceScope: "choice_list_world"
+      },
+      { fieldKey: "conditions", label: "Visibility Conditions", fieldType: SystemFieldType.TEXTAREA, listOrder: 9, formOrder: 9 }
     ]
   },
-  "entity_field_choices.list": {
-    key: "entity_field_choices.list",
-    title: "Entity Field Choices",
-    entityKey: "entity_field_choices",
+  "choice_lists.list": {
+    key: "choice_lists.list",
+    title: "Choice Lists",
+    entityKey: "choice_lists",
     viewType: SystemViewType.LIST,
-    endpoint: "/api/entity-field-choices",
+    endpoint: "/api/choice-lists",
     adminOnly: false,
     fields: [
-      { fieldKey: "entityFieldId", label: "Field", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "entity_fields" },
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
+      { fieldKey: "scope", label: "Scope", fieldType: SystemFieldType.SELECT, listOrder: 2, formOrder: 2, optionsListKey: "choice_scope" },
+      { fieldKey: "packId", label: "Pack", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, referenceEntityKey: "packs" },
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 4, formOrder: 4, referenceEntityKey: "worlds" }
+    ]
+  },
+  "choice_lists.form": {
+    key: "choice_lists.form",
+    title: "Choice List",
+    entityKey: "choice_lists",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/choice-lists",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
+      { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 2, formOrder: 2 },
+      { fieldKey: "scope", label: "Scope", fieldType: SystemFieldType.SELECT, listOrder: 3, formOrder: 3, required: true, optionsListKey: "choice_scope" },
+      { fieldKey: "packId", label: "Pack", fieldType: SystemFieldType.REFERENCE, listOrder: 4, formOrder: 4, referenceEntityKey: "packs" },
+      { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 5, formOrder: 5, referenceEntityKey: "worlds" }
+    ]
+  },
+  "choice_options.list": {
+    key: "choice_options.list",
+    title: "Choice Options",
+    entityKey: "choice_options",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/choice-options",
+    adminOnly: false,
+    fields: [
+      { fieldKey: "choiceListId", label: "Choice List", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "choice_lists" },
       { fieldKey: "value", label: "Value", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2 },
       { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
-      { fieldKey: "pillColor", label: "Pill Colour", fieldType: SystemFieldType.TEXT, listOrder: 4, formOrder: 4 },
-      { fieldKey: "textColor", label: "Text Colour", fieldType: SystemFieldType.TEXT, listOrder: 5, formOrder: 5 },
-      { fieldKey: "sortOrder", label: "Sort", fieldType: SystemFieldType.NUMBER, listOrder: 6, formOrder: 6 }
+      { fieldKey: "order", label: "Order", fieldType: SystemFieldType.NUMBER, listOrder: 4, formOrder: 4 },
+      { fieldKey: "isActive", label: "Active", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 }
     ]
   },
-  "entity_field_choices.form": {
-    key: "entity_field_choices.form",
-    title: "Entity Field Choice",
-    entityKey: "entity_field_choices",
+  "choice_options.form": {
+    key: "choice_options.form",
+    title: "Choice Option",
+    entityKey: "choice_options",
     viewType: SystemViewType.FORM,
-    endpoint: "/api/entity-field-choices",
+    endpoint: "/api/choice-options",
     adminOnly: false,
     fields: [
-      { fieldKey: "entityFieldId", label: "Field", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "entity_fields" },
+      { fieldKey: "choiceListId", label: "Choice List", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "choice_lists" },
       { fieldKey: "value", label: "Value", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2, required: true },
       { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true },
-      { fieldKey: "pillColor", label: "Pill Colour", fieldType: SystemFieldType.TEXT, listOrder: 4, formOrder: 4 },
-      { fieldKey: "textColor", label: "Text Colour", fieldType: SystemFieldType.TEXT, listOrder: 5, formOrder: 5 },
-      { fieldKey: "sortOrder", label: "Sort", fieldType: SystemFieldType.NUMBER, listOrder: 6, formOrder: 6 }
+      { fieldKey: "order", label: "Order", fieldType: SystemFieldType.NUMBER, listOrder: 4, formOrder: 4 },
+      { fieldKey: "isActive", label: "Active", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 }
     ]
   },
   "entities.list": {
@@ -931,38 +971,19 @@ const entityViewSeeds: Record<string, ViewSeed> = {
       { fieldKey: "fieldLabel", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true },
       { fieldKey: "fieldType", label: "Field Type", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 4, required: true, optionsListKey: "location_field_type" },
       { fieldKey: "required", label: "Required", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 },
-      { fieldKey: "listOrder", label: "List Order", fieldType: SystemFieldType.NUMBER, listOrder: 6, formOrder: 6 },
-      { fieldKey: "formOrder", label: "Form Order", fieldType: SystemFieldType.NUMBER, listOrder: 7, formOrder: 7 },
-      { fieldKey: "defaultValue", label: "Default Value", fieldType: SystemFieldType.TEXTAREA, listOrder: 8, formOrder: 8 },
-      { fieldKey: "validationRules", label: "Validation Rules", fieldType: SystemFieldType.TEXTAREA, listOrder: 9, formOrder: 9 }
-    ]
-  },
-  "location_type_field_choices.list": {
-    key: "location_type_field_choices.list",
-    title: "Location Field Choices",
-    entityKey: "location_type_field_choices",
-    viewType: SystemViewType.LIST,
-    endpoint: "/api/location-type-field-choices",
-    adminOnly: false,
-    fields: [
-      { fieldKey: "locationTypeFieldId", label: "Field", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "location_type_fields" },
-      { fieldKey: "value", label: "Value", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2 },
-      { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
-      { fieldKey: "sortOrder", label: "Sort", fieldType: SystemFieldType.NUMBER, listOrder: 4, formOrder: 4 }
-    ]
-  },
-  "location_type_field_choices.form": {
-    key: "location_type_field_choices.form",
-    title: "Location Field Choice",
-    entityKey: "location_type_field_choices",
-    viewType: SystemViewType.FORM,
-    endpoint: "/api/location-type-field-choices",
-    adminOnly: false,
-    fields: [
-      { fieldKey: "locationTypeFieldId", label: "Field", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "location_type_fields" },
-      { fieldKey: "value", label: "Value", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2, required: true },
-      { fieldKey: "label", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true },
-      { fieldKey: "sortOrder", label: "Sort", fieldType: SystemFieldType.NUMBER, listOrder: 4, formOrder: 4 }
+      {
+        fieldKey: "choiceListId",
+        label: "Choice List",
+        fieldType: SystemFieldType.REFERENCE,
+        listOrder: 6,
+        formOrder: 6,
+        referenceEntityKey: "choice_lists",
+        referenceScope: "choice_list_world"
+      },
+      { fieldKey: "listOrder", label: "List Order", fieldType: SystemFieldType.NUMBER, listOrder: 7, formOrder: 7 },
+      { fieldKey: "formOrder", label: "Form Order", fieldType: SystemFieldType.NUMBER, listOrder: 8, formOrder: 8 },
+      { fieldKey: "defaultValue", label: "Default Value", fieldType: SystemFieldType.TEXTAREA, listOrder: 9, formOrder: 9 },
+      { fieldKey: "validationRules", label: "Validation Rules", fieldType: SystemFieldType.TEXTAREA, listOrder: 10, formOrder: 10 }
     ]
   },
   "location_type_rules.list": {
@@ -1107,7 +1128,7 @@ const entityViewSeeds: Record<string, ViewSeed> = {
       { fieldKey: "fieldType", label: "Type", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 4, required: true, optionsListKey: "entity_field_type" },
       { fieldKey: "required", label: "Required", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 },
       { fieldKey: "defaultEnabled", label: "Enabled", fieldType: SystemFieldType.BOOLEAN, listOrder: 6, formOrder: 6 },
-      { fieldKey: "choices", label: "Choices (JSON)", fieldType: SystemFieldType.TEXTAREA, listOrder: 7, formOrder: 7 },
+      { fieldKey: "choiceListId", label: "Choice List", fieldType: SystemFieldType.REFERENCE, listOrder: 7, formOrder: 7, referenceEntityKey: "choice_lists", referenceScope: "choice_list_pack" },
       { fieldKey: "validationRules", label: "Validation (JSON)", fieldType: SystemFieldType.TEXTAREA, listOrder: 8, formOrder: 8 }
     ]
   },
@@ -1168,7 +1189,7 @@ const entityViewSeeds: Record<string, ViewSeed> = {
       { fieldKey: "fieldType", label: "Type", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 4, required: true, optionsListKey: "location_field_type" },
       { fieldKey: "required", label: "Required", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 },
       { fieldKey: "defaultEnabled", label: "Enabled", fieldType: SystemFieldType.BOOLEAN, listOrder: 6, formOrder: 6 },
-      { fieldKey: "choices", label: "Choices (JSON)", fieldType: SystemFieldType.TEXTAREA, listOrder: 7, formOrder: 7 },
+      { fieldKey: "choiceListId", label: "Choice List", fieldType: SystemFieldType.REFERENCE, listOrder: 7, formOrder: 7, referenceEntityKey: "choice_lists", referenceScope: "choice_list_pack" },
       { fieldKey: "validationRules", label: "Validation (JSON)", fieldType: SystemFieldType.TEXTAREA, listOrder: 8, formOrder: 8 }
     ]
   },
@@ -1641,15 +1662,18 @@ const logSystemAudit = async (
 const normalizeEntityValue = (
   fieldType: EntityFieldType,
   rawValue: unknown
-): string | boolean | null => {
+): string | number | boolean | null => {
   if (
     fieldType === EntityFieldType.TEXT ||
-    fieldType === EntityFieldType.TEXTAREA ||
     fieldType === EntityFieldType.CHOICE ||
     fieldType === EntityFieldType.ENTITY_REFERENCE ||
     fieldType === EntityFieldType.LOCATION_REFERENCE
   ) {
     return rawValue ? String(rawValue) : null;
+  }
+  if (fieldType === EntityFieldType.NUMBER) {
+    const parsed = rawValue === null || rawValue === undefined ? null : Number(rawValue);
+    return Number.isNaN(parsed) ? null : parsed;
   }
   if (fieldType === EntityFieldType.BOOLEAN) {
     return Boolean(rawValue);
@@ -1663,7 +1687,10 @@ const getStoredEntityValue = (value: {
   valueBoolean: boolean | null;
   valueNumber: number | null;
   valueJson: Prisma.JsonValue;
-}): string | boolean | null => {
+}): string | number | boolean | null => {
+  if (value.valueNumber !== null && value.valueNumber !== undefined) {
+    return value.valueNumber;
+  }
   if (value.valueString !== null && value.valueString !== undefined) {
     return value.valueString;
   }
@@ -1672,9 +1699,6 @@ const getStoredEntityValue = (value: {
   }
   if (value.valueBoolean !== null && value.valueBoolean !== undefined) {
     return value.valueBoolean;
-  }
-  if (value.valueNumber !== null && value.valueNumber !== undefined) {
-    return String(value.valueNumber);
   }
   if (value.valueJson !== null && value.valueJson !== undefined) {
     return JSON.stringify(value.valueJson);
@@ -1777,14 +1801,12 @@ const canWriteLocation = async (
 const getLabelFieldForEntity = async (entityKey: string) => {
   const defaults: Record<string, string> = {
     entity_fields: "label",
-    entity_field_choices: "label",
     entity_types: "name",
     entities: "name",
     relationship_types: "name",
     location_types: "name",
     locations: "name",
     location_type_fields: "fieldLabel",
-    location_type_field_choices: "label",
     packs: "name",
     entity_type_templates: "name",
     entity_type_template_fields: "fieldLabel",
@@ -1792,18 +1814,18 @@ const getLabelFieldForEntity = async (entityKey: string) => {
     location_type_template_fields: "fieldLabel",
     location_type_rule_templates: "id",
     relationship_type_templates: "name",
-    relationship_type_template_roles: "fromRole"
+    relationship_type_template_roles: "fromRole",
+    choice_lists: "name",
+    choice_options: "label"
   };
   const allowed: Record<string, string[]> = {
     entity_fields: ["label", "fieldKey"],
-    entity_field_choices: ["label", "value"],
     entity_types: ["name"],
     entities: ["name"],
     relationship_types: ["name"],
     location_types: ["name"],
     locations: ["name"],
     location_type_fields: ["fieldLabel", "fieldKey"],
-    location_type_field_choices: ["label", "value"],
     packs: ["name"],
     entity_type_templates: ["name"],
     entity_type_template_fields: ["fieldLabel", "fieldKey"],
@@ -1811,7 +1833,9 @@ const getLabelFieldForEntity = async (entityKey: string) => {
     location_type_template_fields: ["fieldLabel", "fieldKey"],
     location_type_rule_templates: ["id"],
     relationship_type_templates: ["name"],
-    relationship_type_template_roles: ["fromRole", "toRole"]
+    relationship_type_template_roles: ["fromRole", "toRole"],
+    choice_lists: ["name"],
+    choice_options: ["label", "value"]
   };
 
   const entry = await prisma.systemDictionary.findFirst({
@@ -2085,32 +2109,6 @@ const getReferenceResults = async (entityKey: string, query?: string, ids?: stri
       return {
         id: field.id,
         label: labelValue ? String(labelValue) : field.id
-      };
-    });
-  }
-
-  if (entityKey === "location_type_field_choices") {
-    const whereClause: Prisma.LocationTypeFieldChoiceWhereInput = ids
-      ? { id: { in: ids } }
-      : queryValue
-        ? { label: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
-        : {};
-
-    const select: Record<string, boolean> = { id: true };
-    select[labelField] = true;
-
-    const choices = await prisma.locationTypeFieldChoice.findMany({
-      where: whereClause,
-      select: select as { id: true },
-      orderBy: { label: "asc" },
-      take: 25
-    });
-
-    return choices.map((choice) => {
-      const labelValue = (choice as Record<string, unknown>)[labelField];
-      return {
-        id: choice.id,
-        label: labelValue ? String(labelValue) : choice.id
       };
     });
   }

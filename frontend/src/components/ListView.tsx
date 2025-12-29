@@ -274,30 +274,27 @@ export default function ListView({
         if (view.entityKey === "entity_types" && contextWorldId) {
           params.set("worldId", contextWorldId);
         }
-        if (view.entityKey === "entity_fields" && contextWorldId) {
-          params.set("worldId", contextWorldId);
-        }
-        if (view.entityKey === "entity_field_choices" && contextWorldId) {
-          params.set("worldId", contextWorldId);
-        }
-        if (view.entityKey === "relationship_types" && contextWorldId) {
-          params.set("worldId", contextWorldId);
-        }
-        if (view.entityKey === "relationship_type_rules" && contextWorldId) {
-          params.set("worldId", contextWorldId);
-        }
+      if (view.entityKey === "entity_fields" && contextWorldId) {
+        params.set("worldId", contextWorldId);
+      }
+      if (view.entityKey === "choice_lists" && contextWorldId) {
+        params.set("worldId", contextWorldId);
+      }
+      if (view.entityKey === "relationship_types" && contextWorldId) {
+        params.set("worldId", contextWorldId);
+      }
+      if (view.entityKey === "relationship_type_rules" && contextWorldId) {
+        params.set("worldId", contextWorldId);
+      }
         if (view.entityKey === "location_types" && contextWorldId) {
           params.set("worldId", contextWorldId);
         }
-        if (view.entityKey === "location_type_fields" && contextWorldId) {
-          params.set("worldId", contextWorldId);
-        }
-        if (view.entityKey === "location_type_field_choices" && contextWorldId) {
-          params.set("worldId", contextWorldId);
-        }
-        if (view.entityKey === "location_type_rules" && contextWorldId) {
-          params.set("worldId", contextWorldId);
-        }
+      if (view.entityKey === "location_type_fields" && contextWorldId) {
+        params.set("worldId", contextWorldId);
+      }
+      if (view.entityKey === "location_type_rules" && contextWorldId) {
+        params.set("worldId", contextWorldId);
+      }
         if (view.entityKey === "campaigns") {
           if (contextWorldId) params.set("worldId", contextWorldId);
           if (contextCampaignId) params.set("campaignId", contextCampaignId);

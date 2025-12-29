@@ -266,9 +266,6 @@ export const registerWorldsRoutes = (app: express.Express) => {
       }
   
       if (entityTypeIds.length > 0) {
-        await tx.entityFieldChoice.deleteMany({
-          where: { entityField: { entityTypeId: { in: entityTypeIds } } }
-        });
         await tx.entityField.deleteMany({ where: { entityTypeId: { in: entityTypeIds } } });
         await tx.entityFormSection.deleteMany({ where: { entityTypeId: { in: entityTypeIds } } });
         await tx.entityType.deleteMany({ where: { id: { in: entityTypeIds } } });
@@ -281,6 +278,9 @@ export const registerWorldsRoutes = (app: express.Express) => {
       if (campaignIds.length > 0) {
         await tx.campaign.deleteMany({ where: { id: { in: campaignIds } } });
       }
+
+      await tx.choiceOption.deleteMany({ where: { choiceList: { worldId: id } } });
+      await tx.choiceList.deleteMany({ where: { worldId: id } });
   
       await tx.worldDelegate.deleteMany({ where: { worldId: id } });
       await tx.worldArchitect.deleteMany({ where: { worldId: id } });

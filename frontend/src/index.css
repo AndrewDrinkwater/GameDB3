@@ -4097,6 +4097,28 @@ body {
   align-items: center;
 }
 
+.world-builder__choice-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 0.6rem;
+  border: 1px dashed color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 45%, transparent);
+}
+
+.world-builder__choice-options {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.world-builder__choice-row {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  align-items: center;
+}
+
 .world-builder__field-row {
   display: grid;
   gap: 0.8rem;

@@ -151,13 +151,15 @@ export const registerEntitiesRoutes = (app: express.Express) => {
         } else {
           valueFilter.valueBoolean = boolValue;
         }
-      } else if (fieldType === EntityFieldType.TEXTAREA) {
-        if (rule.operator === "contains") {
-          valueFilter.valueText = { contains: value, mode: "insensitive" };
-        } else if (rule.operator === "not_equals") {
-          valueFilter.valueText = { not: value };
+      } else if (fieldType === EntityFieldType.NUMBER) {
+        const numericValue = Number(value);
+        if (Number.isNaN(numericValue)) {
+          return;
+        }
+        if (rule.operator === "not_equals") {
+          valueFilter.valueNumber = { not: numericValue };
         } else {
-          valueFilter.valueText = value;
+          valueFilter.valueNumber = numericValue;
         }
       } else {
         if (rule.operator === "contains") {
@@ -317,7 +319,7 @@ export const registerEntitiesRoutes = (app: express.Express) => {
   
     const fields: EntityFieldRecord[] = await prisma.entityField.findMany({
       where: { entityTypeId },
-      include: { choices: true }
+      include: { choiceList: { include: { options: true } } }
     });
     const fieldMap = new Map(fields.map((field) => [field.fieldKey, field]));
   
@@ -377,6 +379,36 @@ export const registerEntitiesRoutes = (app: express.Express) => {
         return;
       }
     }
+
+    const invalidChoices: string[] = [];
+    const invalidNumbers: string[] = [];
+    if (fieldValues) {
+      for (const [fieldKey, rawValue] of Object.entries(fieldValues)) {
+        const field = fieldMap.get(fieldKey);
+        if (!field) continue;
+        if (field.fieldType === EntityFieldType.CHOICE && rawValue !== null && rawValue !== undefined && rawValue !== "") {
+          const options = field.choiceList?.options ?? [];
+          const allowed = new Set(options.filter((opt) => opt.isActive).map((opt) => opt.value));
+          if (!field.choiceList || !allowed.has(String(rawValue))) {
+            invalidChoices.push(fieldKey);
+          }
+        }
+        if (field.fieldType === EntityFieldType.NUMBER && rawValue !== null && rawValue !== undefined && rawValue !== "") {
+          const numericValue = Number(rawValue);
+          if (Number.isNaN(numericValue)) {
+            invalidNumbers.push(fieldKey);
+          }
+        }
+      }
+    }
+    if (invalidChoices.length > 0) {
+      res.status(400).json({ error: `Invalid choice values for: ${invalidChoices.join(", ")}` });
+      return;
+    }
+    if (invalidNumbers.length > 0) {
+      res.status(400).json({ error: `Invalid number values for: ${invalidNumbers.join(", ")}` });
+      return;
+    }
   
     const created = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const entity = await tx.entity.create({
@@ -401,8 +433,12 @@ export const registerEntitiesRoutes = (app: express.Express) => {
   
           if (field.fieldType === EntityFieldType.TEXT || field.fieldType === EntityFieldType.CHOICE) {
             valuePayload.valueString = rawValue ? String(rawValue) : null;
-          } else if (field.fieldType === EntityFieldType.TEXTAREA) {
-            valuePayload.valueText = rawValue ? String(rawValue) : null;
+          } else if (field.fieldType === EntityFieldType.NUMBER) {
+            const numericValue =
+              rawValue === null || rawValue === undefined || rawValue === ""
+                ? null
+                : Number(rawValue);
+            valuePayload.valueNumber = Number.isNaN(numericValue) ? null : numericValue;
           } else if (field.fieldType === EntityFieldType.BOOLEAN) {
             valuePayload.valueBoolean = Boolean(rawValue);
           } else if (
@@ -702,7 +738,7 @@ export const registerEntitiesRoutes = (app: express.Express) => {
   
       const fields: EntityFieldRecord[] = await prisma.entityField.findMany({
         where: { entityTypeId: entity.entityTypeId },
-        include: { choices: true }
+        include: { choiceList: { include: { options: true } } }
       });
       const fieldMap = new Map(fields.map((field) => [field.fieldKey, field]));
   
@@ -752,14 +788,44 @@ export const registerEntitiesRoutes = (app: express.Express) => {
           return;
         }
       }
+  
+      const invalidChoices: string[] = [];
+      const invalidNumbers: string[] = [];
+      if (fieldValues) {
+        for (const [fieldKey, rawValue] of Object.entries(fieldValues)) {
+          const field = fieldMap.get(fieldKey);
+          if (!field) continue;
+          if (field.fieldType === EntityFieldType.CHOICE && rawValue !== null && rawValue !== undefined && rawValue !== "") {
+            const options = field.choiceList?.options ?? [];
+            const allowed = new Set(options.filter((opt) => opt.isActive).map((opt) => opt.value));
+            if (!field.choiceList || !allowed.has(String(rawValue))) {
+              invalidChoices.push(fieldKey);
+            }
+          }
+          if (field.fieldType === EntityFieldType.NUMBER && rawValue !== null && rawValue !== undefined && rawValue !== "") {
+            const numericValue = Number(rawValue);
+            if (Number.isNaN(numericValue)) {
+              invalidNumbers.push(fieldKey);
+            }
+          }
+        }
+      }
+      if (invalidChoices.length > 0) {
+        res.status(400).json({ error: `Invalid choice values for: ${invalidChoices.join(", ")}` });
+        return;
+      }
+      if (invalidNumbers.length > 0) {
+        res.status(400).json({ error: `Invalid number values for: ${invalidNumbers.join(", ")}` });
+        return;
+      }
       const storedValueMap = new Map(
         entity.values.map((value) => [value.fieldId, getStoredEntityValue(value)])
       );
       const changes: Array<{
         fieldKey: string;
         label: string;
-        from: string | boolean | null;
-        to: string | boolean | null;
+        from: string | number | boolean | null;
+        to: string | number | boolean | null;
       }> = [];
   
       if (name !== undefined && name !== entity.name) {
@@ -852,8 +918,12 @@ export const registerEntitiesRoutes = (app: express.Express) => {
   
           if (field.fieldType === EntityFieldType.TEXT || field.fieldType === EntityFieldType.CHOICE) {
             valueData.valueString = rawValue ? String(rawValue) : null;
-          } else if (field.fieldType === EntityFieldType.TEXTAREA) {
-            valueData.valueText = rawValue ? String(rawValue) : null;
+          } else if (field.fieldType === EntityFieldType.NUMBER) {
+            const numericValue =
+              rawValue === null || rawValue === undefined || rawValue === ""
+                ? null
+                : Number(rawValue);
+            valueData.valueNumber = Number.isNaN(numericValue) ? null : numericValue;
           } else if (field.fieldType === EntityFieldType.BOOLEAN) {
             valueData.valueBoolean = Boolean(rawValue);
           } else if (
@@ -865,7 +935,6 @@ export const registerEntitiesRoutes = (app: express.Express) => {
   
           if (
             valueData.valueString === null &&
-            valueData.valueText === null &&
             valueData.valueBoolean === null &&
             valueData.valueNumber === null &&
             valueData.valueJson === undefined

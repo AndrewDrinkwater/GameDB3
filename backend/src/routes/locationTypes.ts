@@ -261,7 +261,7 @@ export const registerLocationTypesRoutes = (app: express.Express) => {
                 }
               })
         },
-        include: { choices: true },
+        include: { choiceList: { include: { options: true } } },
         orderBy: { formOrder: "asc" }
       });
       res.json(fields);
@@ -284,7 +284,7 @@ export const registerLocationTypesRoutes = (app: express.Express) => {
 
     const fields = await prisma.locationTypeField.findMany({
       where: { locationTypeId },
-      include: { choices: true },
+      include: { choiceList: { include: { options: true } } },
       orderBy: { formOrder: "asc" }
     });
 
@@ -301,7 +301,10 @@ export const registerLocationTypesRoutes = (app: express.Express) => {
     const { id } = req.params;
     const field = await prisma.locationTypeField.findUnique({
       where: { id },
-      include: { locationType: { select: { worldId: true } } }
+      include: {
+        locationType: { select: { worldId: true } },
+        choiceList: { include: { options: true } }
+      }
     });
     if (!field) {
       res.status(404).json({ error: "Location field not found." });
@@ -332,6 +335,7 @@ export const registerLocationTypesRoutes = (app: express.Express) => {
       required,
       defaultValue,
       validationRules,
+      choiceListId,
       listOrder,
       formOrder
     } = req.body as {
@@ -342,6 +346,7 @@ export const registerLocationTypesRoutes = (app: express.Express) => {
       required?: boolean;
       defaultValue?: Prisma.InputJsonValue;
       validationRules?: Prisma.InputJsonValue;
+      choiceListId?: string;
       listOrder?: number;
       formOrder?: number;
     };
@@ -365,6 +370,25 @@ export const registerLocationTypesRoutes = (app: express.Express) => {
       return;
     }
 
+    let resolvedChoiceListId: string | null = choiceListId ?? null;
+    if (fieldType !== LocationFieldType.CHOICE) {
+      resolvedChoiceListId = null;
+    }
+    if (fieldType === LocationFieldType.CHOICE && !resolvedChoiceListId) {
+      res.status(400).json({ error: "choiceListId is required for choice fields." });
+      return;
+    }
+    if (resolvedChoiceListId) {
+      const choiceList = await prisma.choiceList.findUnique({
+        where: { id: resolvedChoiceListId },
+        select: { scope: true, worldId: true }
+      });
+      if (!choiceList || choiceList.scope !== "WORLD" || choiceList.worldId !== locationType.worldId) {
+        res.status(400).json({ error: "Choice list must belong to the location type world." });
+        return;
+      }
+    }
+
     try {
       const field = await prisma.locationTypeField.create({
         data: {
@@ -375,6 +399,7 @@ export const registerLocationTypesRoutes = (app: express.Express) => {
           required: Boolean(required),
           defaultValue: defaultValue ?? undefined,
           validationRules: validationRules ?? undefined,
+          choiceListId: resolvedChoiceListId,
           listOrder: listOrder ?? 0,
           formOrder: formOrder ?? 0
         }
@@ -418,6 +443,7 @@ export const registerLocationTypesRoutes = (app: express.Express) => {
       required,
       defaultValue,
       validationRules,
+      choiceListId,
       listOrder,
       formOrder
     } = req.body as {
@@ -427,9 +453,29 @@ export const registerLocationTypesRoutes = (app: express.Express) => {
       required?: boolean;
       defaultValue?: Prisma.InputJsonValue;
       validationRules?: Prisma.InputJsonValue;
+      choiceListId?: string;
       listOrder?: number;
       formOrder?: number;
     };
+
+    let resolvedChoiceListId: string | null | undefined = choiceListId ?? null;
+    if (fieldType && fieldType !== LocationFieldType.CHOICE) {
+      resolvedChoiceListId = null;
+    }
+    if (fieldType === LocationFieldType.CHOICE && !resolvedChoiceListId) {
+      res.status(400).json({ error: "choiceListId is required for choice fields." });
+      return;
+    }
+    if (resolvedChoiceListId) {
+      const choiceList = await prisma.choiceList.findUnique({
+        where: { id: resolvedChoiceListId },
+        select: { scope: true, worldId: true }
+      });
+      if (!choiceList || choiceList.scope !== "WORLD" || choiceList.worldId !== existing.locationType.worldId) {
+        res.status(400).json({ error: "Choice list must belong to the location type world." });
+        return;
+      }
+    }
 
     const field = await prisma.locationTypeField.update({
       where: { id },
@@ -440,6 +486,7 @@ export const registerLocationTypesRoutes = (app: express.Express) => {
         required,
         defaultValue: defaultValue ?? undefined,
         validationRules: validationRules ?? undefined,
+        choiceListId: resolvedChoiceListId,
         listOrder,
         formOrder
       }
@@ -474,213 +521,6 @@ export const registerLocationTypesRoutes = (app: express.Express) => {
     res.json({ ok: true });
   });
 
-  app.get("/api/location-type-field-choices", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-
-    const locationTypeFieldId =
-      typeof req.query.locationTypeFieldId === "string" ? req.query.locationTypeFieldId : undefined;
-    const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
-    if (!locationTypeFieldId) {
-      if (worldId && !isAdmin(user) && !(await isWorldArchitect(user.id, worldId))) {
-        res.status(403).json({ error: "Forbidden." });
-        return;
-      }
-
-      const choices = await prisma.locationTypeFieldChoice.findMany({
-        where: {
-          ...(worldId ? { field: { locationType: { worldId } } } : {}),
-          ...(isAdmin(user) || worldId
-            ? {}
-            : {
-                field: {
-                  locationType: {
-                    world: {
-                      OR: [
-                        { primaryArchitectId: user.id },
-                        { architects: { some: { userId: user.id } } }
-                      ]
-                    }
-                  }
-                }
-              })
-        },
-        orderBy: { sortOrder: "asc" }
-      });
-      res.json(choices);
-      return;
-    }
-
-    const field = await prisma.locationTypeField.findUnique({
-      where: { id: locationTypeFieldId },
-      select: { locationType: { select: { worldId: true } } }
-    });
-    if (!field) {
-      res.status(404).json({ error: "Field not found." });
-      return;
-    }
-
-    if (!isAdmin(user) && !(await canAccessWorld(user.id, field.locationType.worldId))) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-
-    const choices = await prisma.locationTypeFieldChoice.findMany({
-      where: { locationTypeFieldId },
-      orderBy: { sortOrder: "asc" }
-    });
-    res.json(choices);
-  });
-
-  app.get("/api/location-type-field-choices/:id", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-
-    const { id } = req.params;
-    const choice = await prisma.locationTypeFieldChoice.findUnique({
-      where: { id },
-      include: { field: { select: { locationType: { select: { worldId: true } } } } }
-    });
-    if (!choice) {
-      res.status(404).json({ error: "Choice not found." });
-      return;
-    }
-
-    if (!isAdmin(user) && !(await canAccessWorld(user.id, choice.field.locationType.worldId))) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-
-    const { field, ...choiceData } = choice;
-    res.json(choiceData);
-  });
-
-  app.post("/api/location-type-field-choices", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-
-    const { locationTypeFieldId, value, label, sortOrder, pillColor, textColor } = req.body as {
-      locationTypeFieldId?: string;
-      value?: string;
-      label?: string;
-      sortOrder?: number;
-      pillColor?: string | null;
-      textColor?: string | null;
-    };
-
-    if (!locationTypeFieldId || !value || !label) {
-      res.status(400).json({ error: "locationTypeFieldId, value, and label are required." });
-      return;
-    }
-
-    const field = await prisma.locationTypeField.findUnique({
-      where: { id: locationTypeFieldId },
-      select: { locationType: { select: { worldId: true } } }
-    });
-    if (!field) {
-      res.status(404).json({ error: "Field not found." });
-      return;
-    }
-
-    if (!isAdmin(user) && !(await isWorldArchitect(user.id, field.locationType.worldId))) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-
-    try {
-      const choice = await prisma.locationTypeFieldChoice.create({
-        data: {
-          locationTypeFieldId,
-          value,
-          label,
-          sortOrder,
-          pillColor,
-          textColor
-        }
-      });
-
-      res.status(201).json(choice);
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-        res.status(409).json({ error: "Choice value already exists for this field." });
-        return;
-      }
-      throw error;
-    }
-  });
-
-  app.put("/api/location-type-field-choices/:id", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-
-    const { id } = req.params;
-    const existing = await prisma.locationTypeFieldChoice.findUnique({
-      where: { id },
-      select: { field: { select: { locationType: { select: { worldId: true } } } } }
-    });
-    if (!existing) {
-      res.status(404).json({ error: "Choice not found." });
-      return;
-    }
-
-    if (!isAdmin(user) && !(await isWorldArchitect(user.id, existing.field.locationType.worldId))) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-
-    const { value, label, sortOrder, pillColor, textColor } = req.body as {
-      value?: string;
-      label?: string;
-      sortOrder?: number;
-      pillColor?: string | null;
-      textColor?: string | null;
-    };
-
-    const choice = await prisma.locationTypeFieldChoice.update({
-      where: { id },
-      data: { value, label, sortOrder, pillColor, textColor }
-    });
-
-    res.json(choice);
-  });
-
-  app.delete("/api/location-type-field-choices/:id", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-
-    const { id } = req.params;
-    const existing = await prisma.locationTypeFieldChoice.findUnique({
-      where: { id },
-      select: { field: { select: { locationType: { select: { worldId: true } } } } }
-    });
-    if (!existing) {
-      res.status(404).json({ error: "Choice not found." });
-      return;
-    }
-
-    if (!isAdmin(user) && !(await isWorldArchitect(user.id, existing.field.locationType.worldId))) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-
-    await prisma.locationTypeFieldChoice.delete({ where: { id } });
-    res.json({ ok: true });
-  });
 
   app.get("/api/location-type-rules", requireAuth, async (req, res) => {
     const user = (req as AuthRequest).user;

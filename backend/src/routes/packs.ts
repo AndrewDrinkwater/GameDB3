@@ -175,7 +175,6 @@ export const registerPackRoutes = (app: express.Express) => {
     res.json(
       fields.map((field) => ({
         ...field,
-        choices: field.choices ? JSON.stringify(field.choices) : null,
         validationRules: field.validationRules ? JSON.stringify(field.validationRules) : null
       }))
     );
@@ -189,7 +188,7 @@ export const registerPackRoutes = (app: express.Express) => {
       fieldType,
       required,
       defaultEnabled,
-      choices,
+      choiceListId,
       validationRules
     } = req.body as {
       templateId?: string;
@@ -198,7 +197,7 @@ export const registerPackRoutes = (app: express.Express) => {
       fieldType?: string;
       required?: boolean;
       defaultEnabled?: boolean;
-      choices?: unknown;
+      choiceListId?: string;
       validationRules?: unknown;
     };
 
@@ -207,11 +206,32 @@ export const registerPackRoutes = (app: express.Express) => {
       return;
     }
 
-    const parsedChoices = parseOptionalJson(choices);
     const parsedRules = parseOptionalJson(validationRules);
-    if (parsedChoices === null || parsedRules === null) {
-      res.status(400).json({ error: "choices and validationRules must be valid JSON." });
+    if (parsedRules === null) {
+      res.status(400).json({ error: "validationRules must be valid JSON." });
       return;
+    }
+    if (fieldType === "CHOICE" && !choiceListId) {
+      res.status(400).json({ error: "choiceListId is required for choice fields." });
+      return;
+    }
+    if (fieldType === "CHOICE" && choiceListId) {
+      const template = await prisma.entityTypeTemplate.findUnique({
+        where: { id: templateId },
+        select: { packId: true }
+      });
+      if (!template) {
+        res.status(404).json({ error: "Template not found." });
+        return;
+      }
+      const choiceList = await prisma.choiceList.findUnique({
+        where: { id: choiceListId },
+        select: { scope: true, packId: true }
+      });
+      if (!choiceList || choiceList.scope !== "PACK" || choiceList.packId !== template.packId) {
+        res.status(400).json({ error: "choiceListId must belong to the same pack." });
+        return;
+      }
     }
 
     const field = await prisma.entityTypeTemplateField.create({
@@ -222,7 +242,7 @@ export const registerPackRoutes = (app: express.Express) => {
         fieldType: fieldType as EntityFieldType,
         required: Boolean(required),
         defaultEnabled: defaultEnabled ?? true,
-        choices: parsedChoices,
+        choiceListId: choiceListId ?? null,
         validationRules: parsedRules
       }
     });
@@ -239,7 +259,6 @@ export const registerPackRoutes = (app: express.Express) => {
     }
     res.json({
       ...field,
-      choices: field.choices ? JSON.stringify(field.choices) : null,
       validationRules: field.validationRules ? JSON.stringify(field.validationRules) : null
     });
   });
@@ -252,7 +271,7 @@ export const registerPackRoutes = (app: express.Express) => {
       fieldType,
       required,
       defaultEnabled,
-      choices,
+      choiceListId,
       validationRules
     } = req.body as {
       templateId?: string;
@@ -261,15 +280,45 @@ export const registerPackRoutes = (app: express.Express) => {
       fieldType?: string;
       required?: boolean;
       defaultEnabled?: boolean;
-      choices?: unknown;
+      choiceListId?: string;
       validationRules?: unknown;
     };
 
-    const parsedChoices = parseOptionalJson(choices);
     const parsedRules = parseOptionalJson(validationRules);
-    if (parsedChoices === null || parsedRules === null) {
-      res.status(400).json({ error: "choices and validationRules must be valid JSON." });
+    if (parsedRules === null) {
+      res.status(400).json({ error: "validationRules must be valid JSON." });
       return;
+    }
+    if (fieldType === "CHOICE" && !choiceListId) {
+      res.status(400).json({ error: "choiceListId is required for choice fields." });
+      return;
+    }
+    if (fieldType === "CHOICE" && choiceListId) {
+      const existing = await prisma.entityTypeTemplateField.findUnique({
+        where: { id: req.params.id },
+        select: { templateId: true }
+      });
+      const targetTemplateId = templateId ?? existing?.templateId;
+      if (!targetTemplateId) {
+        res.status(404).json({ error: "Template not found." });
+        return;
+      }
+      const template = await prisma.entityTypeTemplate.findUnique({
+        where: { id: targetTemplateId },
+        select: { packId: true }
+      });
+      if (!template) {
+        res.status(404).json({ error: "Template not found." });
+        return;
+      }
+      const choiceList = await prisma.choiceList.findUnique({
+        where: { id: choiceListId },
+        select: { scope: true, packId: true }
+      });
+      if (!choiceList || choiceList.scope !== "PACK" || choiceList.packId !== template.packId) {
+        res.status(400).json({ error: "choiceListId must belong to the same pack." });
+        return;
+      }
     }
 
     const field = await prisma.entityTypeTemplateField.update({
@@ -281,7 +330,7 @@ export const registerPackRoutes = (app: express.Express) => {
         fieldType: fieldType as EntityFieldType | undefined,
         required,
         defaultEnabled,
-        choices: parsedChoices,
+        choiceListId: choiceListId ?? null,
         validationRules: parsedRules
       }
     });
@@ -372,7 +421,6 @@ export const registerPackRoutes = (app: express.Express) => {
     res.json(
       fields.map((field) => ({
         ...field,
-        choices: field.choices ? JSON.stringify(field.choices) : null,
         validationRules: field.validationRules ? JSON.stringify(field.validationRules) : null
       }))
     );
@@ -386,7 +434,7 @@ export const registerPackRoutes = (app: express.Express) => {
       fieldType,
       required,
       defaultEnabled,
-      choices,
+      choiceListId,
       validationRules
     } = req.body as {
       templateId?: string;
@@ -395,7 +443,7 @@ export const registerPackRoutes = (app: express.Express) => {
       fieldType?: string;
       required?: boolean;
       defaultEnabled?: boolean;
-      choices?: unknown;
+      choiceListId?: string;
       validationRules?: unknown;
     };
 
@@ -404,11 +452,32 @@ export const registerPackRoutes = (app: express.Express) => {
       return;
     }
 
-    const parsedChoices = parseOptionalJson(choices);
     const parsedRules = parseOptionalJson(validationRules);
-    if (parsedChoices === null || parsedRules === null) {
-      res.status(400).json({ error: "choices and validationRules must be valid JSON." });
+    if (parsedRules === null) {
+      res.status(400).json({ error: "validationRules must be valid JSON." });
       return;
+    }
+    if (fieldType === "CHOICE" && !choiceListId) {
+      res.status(400).json({ error: "choiceListId is required for choice fields." });
+      return;
+    }
+    if (fieldType === "CHOICE" && choiceListId) {
+      const template = await prisma.locationTypeTemplate.findUnique({
+        where: { id: templateId },
+        select: { packId: true }
+      });
+      if (!template) {
+        res.status(404).json({ error: "Template not found." });
+        return;
+      }
+      const choiceList = await prisma.choiceList.findUnique({
+        where: { id: choiceListId },
+        select: { scope: true, packId: true }
+      });
+      if (!choiceList || choiceList.scope !== "PACK" || choiceList.packId !== template.packId) {
+        res.status(400).json({ error: "choiceListId must belong to the same pack." });
+        return;
+      }
     }
 
     const field = await prisma.locationTypeTemplateField.create({
@@ -419,7 +488,7 @@ export const registerPackRoutes = (app: express.Express) => {
         fieldType: fieldType as LocationFieldType,
         required: Boolean(required),
         defaultEnabled: defaultEnabled ?? true,
-        choices: parsedChoices,
+        choiceListId: choiceListId ?? null,
         validationRules: parsedRules
       }
     });
@@ -436,7 +505,6 @@ export const registerPackRoutes = (app: express.Express) => {
     }
     res.json({
       ...field,
-      choices: field.choices ? JSON.stringify(field.choices) : null,
       validationRules: field.validationRules ? JSON.stringify(field.validationRules) : null
     });
   });
@@ -449,7 +517,7 @@ export const registerPackRoutes = (app: express.Express) => {
       fieldType,
       required,
       defaultEnabled,
-      choices,
+      choiceListId,
       validationRules
     } = req.body as {
       templateId?: string;
@@ -458,15 +526,45 @@ export const registerPackRoutes = (app: express.Express) => {
       fieldType?: string;
       required?: boolean;
       defaultEnabled?: boolean;
-      choices?: unknown;
+      choiceListId?: string;
       validationRules?: unknown;
     };
 
-    const parsedChoices = parseOptionalJson(choices);
     const parsedRules = parseOptionalJson(validationRules);
-    if (parsedChoices === null || parsedRules === null) {
-      res.status(400).json({ error: "choices and validationRules must be valid JSON." });
+    if (parsedRules === null) {
+      res.status(400).json({ error: "validationRules must be valid JSON." });
       return;
+    }
+    if (fieldType === "CHOICE" && !choiceListId) {
+      res.status(400).json({ error: "choiceListId is required for choice fields." });
+      return;
+    }
+    if (fieldType === "CHOICE" && choiceListId) {
+      const existing = await prisma.locationTypeTemplateField.findUnique({
+        where: { id: req.params.id },
+        select: { templateId: true }
+      });
+      const targetTemplateId = templateId ?? existing?.templateId;
+      if (!targetTemplateId) {
+        res.status(404).json({ error: "Template not found." });
+        return;
+      }
+      const template = await prisma.locationTypeTemplate.findUnique({
+        where: { id: targetTemplateId },
+        select: { packId: true }
+      });
+      if (!template) {
+        res.status(404).json({ error: "Template not found." });
+        return;
+      }
+      const choiceList = await prisma.choiceList.findUnique({
+        where: { id: choiceListId },
+        select: { scope: true, packId: true }
+      });
+      if (!choiceList || choiceList.scope !== "PACK" || choiceList.packId !== template.packId) {
+        res.status(400).json({ error: "choiceListId must belong to the same pack." });
+        return;
+      }
     }
 
     const field = await prisma.locationTypeTemplateField.update({
@@ -478,7 +576,7 @@ export const registerPackRoutes = (app: express.Express) => {
         fieldType: fieldType as LocationFieldType | undefined,
         required,
         defaultEnabled,
-        choices: parsedChoices,
+        choiceListId: choiceListId ?? null,
         validationRules: parsedRules
       }
     });
