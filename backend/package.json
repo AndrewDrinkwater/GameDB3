@@ -11,6 +11,7 @@
     "db:studio": "prisma studio",
     "db:seed": "ts-node prisma/seed.ts",
     "db:seed:example": "ts-node prisma/seed_example.ts",
+    "db:seed:packs": "ts-node prisma/seed_packs.ts",
     "test": "jest"
   },
   "prisma": {

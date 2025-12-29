@@ -219,6 +219,19 @@ export default function RelatedLists({
   }, [token, parentEntityKey, disabled, activeKey]);
 
   const activeList = useMemo(() => lists.find((list) => list.key === activeKey) ?? null, [lists, activeKey]);
+  const readOnlyJoinKeys = useMemo(
+    () =>
+      new Set([
+        "packEntityTypeTemplate",
+        "packLocationTypeTemplate",
+        "packRelationshipTypeTemplate",
+        "relationshipTypeRuleFrom",
+        "relationshipTypeRuleTo",
+        "locationTypeRuleParent",
+        "locationTypeRuleChild"
+      ]),
+    []
+  );
 
   const loadItems = async (listKey: string) => {
     setLoadingListKey(listKey);
@@ -251,6 +264,7 @@ export default function RelatedLists({
   const activeItems = activeList ? itemsByList[activeList.key] ?? [] : [];
   const addState = activeList ? addStateByList[activeList.key] ?? emptyAddState : emptyAddState;
   const canCreateEntityField = activeList?.joinEntityKey === "entityField";
+  const canMutate = canManage && (!activeList || !readOnlyJoinKeys.has(activeList.joinEntityKey));
 
   const handleSearch = async (list: RelatedListConfig, query: string) => {
     setAddStateByList((current) => ({
@@ -404,7 +418,7 @@ export default function RelatedLists({
               >
                 New field
               </button>
-            ) : canManage ? (
+            ) : canMutate ? (
               <div className="related-lists__add" onBlur={(event) => {
                 const nextTarget = event.relatedTarget as Node | null;
                 if (nextTarget && event.currentTarget.contains(nextTarget)) return;
@@ -480,7 +494,7 @@ export default function RelatedLists({
                       );
                     })}
                   <div className="related-lists__cell">
-                    {canManage ? (
+                    {canMutate ? (
                       <button
                         type="button"
                         className="ghost-button"

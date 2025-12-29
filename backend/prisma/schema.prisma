@@ -118,6 +118,11 @@ enum RelationshipStatus {
   EXPIRED
 }
 
+enum PackPosture {
+  opinionated
+  minimal
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -152,6 +157,7 @@ model User {
   sessionNoteDrafts  SessionNoteDraft[]
   sessionNotesAuthored SessionNote[]     @relation("SessionNoteAuthor")
   createdRelationships Relationship[]    @relation("RelationshipCreator")
+  createdPacks      Pack[]               @relation("PackCreator")
 }
 
 model World {
@@ -608,6 +614,147 @@ model Relationship {
   @@index([fromEntityId])
   @@index([toEntityId])
   @@index([peerGroupId])
+}
+
+model Pack {
+  id          String      @id @default(uuid())
+  name        String
+  description String?
+  posture     PackPosture
+  isActive    Boolean     @default(true)
+  createdById String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  createdBy User @relation("PackCreator", fields: [createdById], references: [id])
+
+  entityTypeTemplates     EntityTypeTemplate[]
+  locationTypeTemplates   LocationTypeTemplate[]
+  locationTypeRuleTemplates LocationTypeRuleTemplate[]
+  relationshipTypeTemplates RelationshipTypeTemplate[]
+
+  @@index([createdById])
+}
+
+model EntityTypeTemplate {
+  id          String   @id @default(uuid())
+  packId      String
+  name        String
+  description String?
+  category    String?
+  isCore      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  pack   Pack                    @relation(fields: [packId], references: [id])
+  fields EntityTypeTemplateField[]
+
+  @@index([packId])
+}
+
+model EntityTypeTemplateField {
+  id             String         @id @default(uuid())
+  templateId     String
+  fieldKey       String
+  fieldLabel     String
+  fieldType      EntityFieldType
+  required       Boolean        @default(false)
+  defaultEnabled Boolean        @default(true)
+  choices        Json?
+  validationRules Json?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  template EntityTypeTemplate @relation(fields: [templateId], references: [id])
+
+  @@unique([templateId, fieldKey])
+  @@index([templateId])
+}
+
+model LocationTypeTemplate {
+  id          String   @id @default(uuid())
+  packId      String
+  name        String
+  description String?
+  isCore      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  pack   Pack                       @relation(fields: [packId], references: [id])
+  fields LocationTypeTemplateField[]
+  parentRules LocationTypeRuleTemplate[] @relation("LocationTypeTemplateParent")
+  childRules  LocationTypeRuleTemplate[] @relation("LocationTypeTemplateChild")
+
+  @@index([packId])
+}
+
+model LocationTypeTemplateField {
+  id             String           @id @default(uuid())
+  templateId     String
+  fieldKey       String
+  fieldLabel     String
+  fieldType      LocationFieldType
+  required       Boolean          @default(false)
+  defaultEnabled Boolean          @default(true)
+  choices        Json?
+  validationRules Json?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  template LocationTypeTemplate @relation(fields: [templateId], references: [id])
+
+  @@unique([templateId, fieldKey])
+  @@index([templateId])
+}
+
+model LocationTypeRuleTemplate {
+  id           String   @id @default(uuid())
+  packId       String
+  parentLocationTypeTemplateId String
+  childLocationTypeTemplateId  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  pack Pack @relation(fields: [packId], references: [id])
+  parentTemplate LocationTypeTemplate @relation("LocationTypeTemplateParent", fields: [parentLocationTypeTemplateId], references: [id])
+  childTemplate  LocationTypeTemplate @relation("LocationTypeTemplateChild", fields: [childLocationTypeTemplateId], references: [id])
+
+  @@unique([parentLocationTypeTemplateId, childLocationTypeTemplateId])
+  @@index([packId])
+  @@index([parentLocationTypeTemplateId])
+  @@index([childLocationTypeTemplateId])
+}
+
+model RelationshipTypeTemplate {
+  id            String   @id @default(uuid())
+  packId        String
+  name          String
+  description   String?
+  isPeerable    Boolean  @default(false)
+  fromLabel     String
+  toLabel       String
+  pastFromLabel String?
+  pastToLabel   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  pack  Pack                         @relation(fields: [packId], references: [id])
+  roles RelationshipTypeTemplateRole[]
+
+  @@index([packId])
+}
+
+model RelationshipTypeTemplateRole {
+  id                         String   @id @default(uuid())
+  relationshipTypeTemplateId String
+  fromRole                   String
+  toRole                     String
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  relationshipTypeTemplate RelationshipTypeTemplate @relation(fields: [relationshipTypeTemplateId], references: [id])
+
+  @@index([relationshipTypeTemplateId])
 }
 
 model EntityFieldValue {

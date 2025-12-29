@@ -8,6 +8,7 @@ import PopoutProvider from "./components/PopoutProvider";
 import { useUnsavedChangesPrompt } from "./utils/unsavedChanges";
 import ErrorBoundary from "./components/ErrorBoundary";
 import SessionsPanel from "./components/SessionsPanel";
+import WorldBuilder from "./components/WorldBuilder";
 
 type User = {
   id: string;
@@ -86,6 +87,46 @@ const viewRegistry: Record<string, ViewConfig> = {
 };
 
 const adminViewRegistry: Record<string, ViewConfig> = {
+  packs: {
+    listKey: "admin.packs.list",
+    formKey: "admin.packs.form",
+    label: "Packs"
+  },
+  entity_type_templates: {
+    listKey: "admin.entity_type_templates.list",
+    formKey: "admin.entity_type_templates.form",
+    label: "Entity Type Templates"
+  },
+  entity_type_template_fields: {
+    listKey: "admin.entity_type_template_fields.list",
+    formKey: "admin.entity_type_template_fields.form",
+    label: "Entity Template Fields"
+  },
+  location_type_templates: {
+    listKey: "admin.location_type_templates.list",
+    formKey: "admin.location_type_templates.form",
+    label: "Location Type Templates"
+  },
+  location_type_template_fields: {
+    listKey: "admin.location_type_template_fields.list",
+    formKey: "admin.location_type_template_fields.form",
+    label: "Location Template Fields"
+  },
+  location_type_rule_templates: {
+    listKey: "admin.location_type_rule_templates.list",
+    formKey: "admin.location_type_rule_templates.form",
+    label: "Location Rule Templates"
+  },
+  relationship_type_templates: {
+    listKey: "admin.relationship_type_templates.list",
+    formKey: "admin.relationship_type_templates.form",
+    label: "Relationship Type Templates"
+  },
+  relationship_type_template_roles: {
+    listKey: "admin.relationship_type_template_roles.list",
+    formKey: "admin.relationship_type_template_roles.form",
+    label: "Relationship Template Roles"
+  },
   system_choices: {
     listKey: "admin.system_choices.list",
     formKey: "admin.system_choices.form",
@@ -1121,6 +1162,22 @@ function AppShell() {
         );
       }
 
+      if (routeParts[0] === "world-builder") {
+        return (
+          <section className="app__panel app__panel--wide">
+            <WorldBuilder
+              token={token}
+              worldId={context.worldId}
+              worldLabel={context.worldLabel}
+              onApplied={() => {
+                navigateWithGuard("/list/entity_types");
+                handleSidebarSelect();
+              }}
+            />
+          </section>
+        );
+      }
+
       if (routeParts[0] === "profile") {
         return (
         <section className="app__panel">
@@ -1815,6 +1872,15 @@ function AppShell() {
                                 >
                                   Location Rules
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/world-builder");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Guided Builder
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -1835,71 +1901,163 @@ function AppShell() {
                           />
                         </button>
                         {adminExpanded ? (
-                        <div className="sidebar__section-body">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigateWithGuard("/admin/system_choices");
-                            handleSidebarSelect();
-                          }}
-                        >
-                          System Choices
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigateWithGuard("/admin/system_properties");
-                            handleSidebarSelect();
-                          }}
-                        >
-                          System Properties
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigateWithGuard("/admin/user_preferences");
-                            handleSidebarSelect();
-                          }}
-                        >
-                          User Preferences
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigateWithGuard("/admin/system_controls");
-                            handleSidebarSelect();
-                          }}
-                        >
-                          System Controls
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigateWithGuard("/admin/system_related_lists");
-                            handleSidebarSelect();
-                          }}
-                        >
-                          Related Lists
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigateWithGuard("/admin/system_related_list_fields");
-                            handleSidebarSelect();
-                          }}
-                        >
-                          Related List Fields
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigateWithGuard("/admin/users");
-                            handleSidebarSelect();
-                          }}
-                        >
-                          Users
-                        </button>
-                        </div>
+                          <div className="sidebar__section-body sidebar__subsections">
+                            <div className="sidebar__subsection">
+                              <span className="sidebar__subsection-title">System Config</span>
+                              <div className="sidebar__subsection-body">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/system_choices");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  System Choices
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/system_properties");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  System Properties
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/system_controls");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  System Controls
+                                </button>
+                              </div>
+                            </div>
+                            <div className="sidebar__subsection">
+                              <span className="sidebar__subsection-title">Packs & Templates</span>
+                              <div className="sidebar__subsection-body">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/packs");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Packs
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/entity_type_templates");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Entity Type Templates
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/entity_type_template_fields");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Entity Template Fields
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/location_type_templates");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Location Type Templates
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/location_type_template_fields");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Location Template Fields
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/location_type_rule_templates");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Location Rule Templates
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/relationship_type_templates");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Relationship Type Templates
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/relationship_type_template_roles");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Relationship Template Roles
+                                </button>
+                              </div>
+                            </div>
+                            <div className="sidebar__subsection">
+                              <span className="sidebar__subsection-title">Related Lists</span>
+                              <div className="sidebar__subsection-body">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/system_related_lists");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Related Lists
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/system_related_list_fields");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Related List Fields
+                                </button>
+                              </div>
+                            </div>
+                            <div className="sidebar__subsection">
+                              <span className="sidebar__subsection-title">User Admin</span>
+                              <div className="sidebar__subsection-body">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/users");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Users
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/admin/user_preferences");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  User Preferences
+                                </button>
+                              </div>
+                            </div>
+                          </div>
                         ) : null}
                       </div>
                     ) : null}

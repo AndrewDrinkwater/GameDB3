@@ -11,6 +11,8 @@ import { registerNotesRoutes } from "./notes";
 import { registerSessionNotesRoutes } from "./sessionNotes";
 import { registerSessionsRoutes } from "./sessions";
 import { registerRelationshipsRoutes } from "./relationships";
+import { registerPackRoutes } from "./packs";
+import { registerWorldBuilderRoutes } from "./worldBuilder";
 import { registerSystemRoutes } from "./system";
 import { registerTagsRoutes } from "./tags";
 import { registerUserPreferencesRoutes } from "./userPreferences";
@@ -32,5 +34,7 @@ export const registerRoutes = (app: express.Express) => {
   registerSessionsRoutes(app);
   registerSessionNotesRoutes(app);
   registerRelationshipsRoutes(app);
+  registerPackRoutes(app);
+  registerWorldBuilderRoutes(app);
   registerTagsRoutes(app);
 };

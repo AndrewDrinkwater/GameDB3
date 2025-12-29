@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import {
+  PackPosture,
   PrismaClient,
   RelatedListFieldSource,
   Role,
@@ -101,6 +102,32 @@ async function main() {
     });
   }
 
+  if (adminUser) {
+    const existingMinimalPack = await prisma.pack.findFirst({
+      where: { name: "Minimalist", createdById: adminUser.id }
+    });
+    if (existingMinimalPack) {
+      await prisma.pack.update({
+        where: { id: existingMinimalPack.id },
+        data: {
+          description: "A near-zero opinion pack for expert architects.",
+          posture: PackPosture.minimal,
+          isActive: true
+        }
+      });
+    } else {
+      await prisma.pack.create({
+        data: {
+          name: "Minimalist",
+          description: "A near-zero opinion pack for expert architects.",
+          posture: PackPosture.minimal,
+          isActive: true,
+          createdById: adminUser.id
+        }
+      });
+    }
+  }
+
   await prisma.systemUserPreferenceDefault.upsert({
     where: { key: "homepage" },
     update: {
@@ -186,6 +213,8 @@ async function main() {
     { listKey: "character_status", value: "dead", label: "Dead", sortOrder: 2 },
     { listKey: "user_role", value: "ADMIN", label: "Admin", sortOrder: 1 },
     { listKey: "user_role", value: "USER", label: "User", sortOrder: 2 },
+    { listKey: "pack_posture", value: "opinionated", label: "Opinionated", sortOrder: 1 },
+    { listKey: "pack_posture", value: "minimal", label: "Minimal", sortOrder: 2 },
     { listKey: "world_entity_permission", value: "ARCHITECT", label: "Architects only", sortOrder: 1 },
     { listKey: "world_entity_permission", value: "ARCHITECT_GM", label: "Architects and GMs", sortOrder: 2 },
     { listKey: "world_entity_permission", value: "ARCHITECT_GM_PLAYER", label: "Architects, GMs, and Players", sortOrder: 3 },
@@ -262,6 +291,14 @@ async function main() {
     { entityKey: "entity_fields", fieldKey: "label", label: "Field Label", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "location_type_fields", fieldKey: "fieldLabel", label: "Field Label", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "location_type_field_choices", fieldKey: "label", label: "Field Choice Label", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "packs", fieldKey: "name", label: "Pack Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "entity_type_templates", fieldKey: "name", label: "Template Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "entity_type_template_fields", fieldKey: "fieldLabel", label: "Field Label", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "location_type_templates", fieldKey: "name", label: "Template Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "location_type_template_fields", fieldKey: "fieldLabel", label: "Field Label", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "location_type_rule_templates", fieldKey: "id", label: "Rule", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "relationship_type_templates", fieldKey: "name", label: "Template Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
+    { entityKey: "relationship_type_template_roles", fieldKey: "fromRole", label: "From Role", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "users", fieldKey: "name", label: "User Name", fieldType: SystemFieldType.TEXT, referenceEntityKey: null, isLabel: true },
     { entityKey: "users", fieldKey: "email", label: "Email", fieldType: SystemFieldType.EMAIL, referenceEntityKey: null, isLabel: false }
   ];
@@ -727,6 +764,240 @@ async function main() {
     ]
   },
   {
+    key: "admin.packs.list",
+    title: "Packs",
+    entityKey: "packs",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/packs",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
+      { fieldKey: "posture", label: "Posture", fieldType: SystemFieldType.SELECT, listOrder: 2, formOrder: 2, optionsListKey: "pack_posture" },
+      { fieldKey: "isActive", label: "Active", fieldType: SystemFieldType.BOOLEAN, listOrder: 3, formOrder: 3 }
+    ]
+  },
+  {
+    key: "admin.packs.form",
+    title: "Pack",
+    entityKey: "packs",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/packs",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
+      { fieldKey: "posture", label: "Posture", fieldType: SystemFieldType.SELECT, listOrder: 2, formOrder: 2, required: true, optionsListKey: "pack_posture" },
+      { fieldKey: "isActive", label: "Active", fieldType: SystemFieldType.BOOLEAN, listOrder: 3, formOrder: 3 },
+      { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 4, formOrder: 4 }
+    ]
+  },
+  {
+    key: "admin.entity_type_templates.list",
+    title: "Entity Type Templates",
+    entityKey: "entity_type_templates",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/entity-type-templates",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
+      { fieldKey: "packId", label: "Pack", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "packs" },
+      { fieldKey: "category", label: "Category", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
+      { fieldKey: "isCore", label: "Core", fieldType: SystemFieldType.BOOLEAN, listOrder: 4, formOrder: 4 }
+    ]
+  },
+  {
+    key: "admin.entity_type_templates.form",
+    title: "Entity Type Template",
+    entityKey: "entity_type_templates",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/entity-type-templates",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
+      { fieldKey: "packId", label: "Pack", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, required: true, referenceEntityKey: "packs" },
+      { fieldKey: "category", label: "Category", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
+      { fieldKey: "isCore", label: "Core", fieldType: SystemFieldType.BOOLEAN, listOrder: 4, formOrder: 4 },
+      { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 5, formOrder: 5 }
+    ]
+  },
+  {
+    key: "admin.entity_type_template_fields.list",
+    title: "Entity Template Fields",
+    entityKey: "entity_type_template_fields",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/entity-type-template-fields",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "templateId", label: "Template", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "entity_type_templates" },
+      { fieldKey: "fieldKey", label: "Field Key", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2 },
+      { fieldKey: "fieldLabel", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
+      { fieldKey: "fieldType", label: "Type", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 4, optionsListKey: "entity_field_type" },
+      { fieldKey: "required", label: "Required", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 },
+      { fieldKey: "defaultEnabled", label: "Enabled", fieldType: SystemFieldType.BOOLEAN, listOrder: 6, formOrder: 6 }
+    ]
+  },
+  {
+    key: "admin.entity_type_template_fields.form",
+    title: "Entity Template Field",
+    entityKey: "entity_type_template_fields",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/entity-type-template-fields",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "templateId", label: "Template", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "entity_type_templates" },
+      { fieldKey: "fieldKey", label: "Field Key", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2, required: true },
+      { fieldKey: "fieldLabel", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true },
+      { fieldKey: "fieldType", label: "Type", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 4, required: true, optionsListKey: "entity_field_type" },
+      { fieldKey: "required", label: "Required", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 },
+      { fieldKey: "defaultEnabled", label: "Enabled", fieldType: SystemFieldType.BOOLEAN, listOrder: 6, formOrder: 6 },
+      { fieldKey: "choices", label: "Choices (JSON)", fieldType: SystemFieldType.TEXTAREA, listOrder: 7, formOrder: 7 },
+      { fieldKey: "validationRules", label: "Validation (JSON)", fieldType: SystemFieldType.TEXTAREA, listOrder: 8, formOrder: 8 }
+    ]
+  },
+  {
+    key: "admin.location_type_templates.list",
+    title: "Location Type Templates",
+    entityKey: "location_type_templates",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/location-type-templates",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
+      { fieldKey: "packId", label: "Pack", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "packs" },
+      { fieldKey: "isCore", label: "Core", fieldType: SystemFieldType.BOOLEAN, listOrder: 3, formOrder: 3 }
+    ]
+  },
+  {
+    key: "admin.location_type_templates.form",
+    title: "Location Type Template",
+    entityKey: "location_type_templates",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/location-type-templates",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
+      { fieldKey: "packId", label: "Pack", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, required: true, referenceEntityKey: "packs" },
+      { fieldKey: "isCore", label: "Core", fieldType: SystemFieldType.BOOLEAN, listOrder: 3, formOrder: 3 },
+      { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 4, formOrder: 4 }
+    ]
+  },
+  {
+    key: "admin.location_type_template_fields.list",
+    title: "Location Template Fields",
+    entityKey: "location_type_template_fields",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/location-type-template-fields",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "templateId", label: "Template", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "location_type_templates" },
+      { fieldKey: "fieldKey", label: "Field Key", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2 },
+      { fieldKey: "fieldLabel", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 },
+      { fieldKey: "fieldType", label: "Type", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 4, optionsListKey: "location_field_type" },
+      { fieldKey: "required", label: "Required", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 },
+      { fieldKey: "defaultEnabled", label: "Enabled", fieldType: SystemFieldType.BOOLEAN, listOrder: 6, formOrder: 6 }
+    ]
+  },
+  {
+    key: "admin.location_type_template_fields.form",
+    title: "Location Template Field",
+    entityKey: "location_type_template_fields",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/location-type-template-fields",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "templateId", label: "Template", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "location_type_templates" },
+      { fieldKey: "fieldKey", label: "Field Key", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2, required: true },
+      { fieldKey: "fieldLabel", label: "Label", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true },
+      { fieldKey: "fieldType", label: "Type", fieldType: SystemFieldType.SELECT, listOrder: 4, formOrder: 4, required: true, optionsListKey: "location_field_type" },
+      { fieldKey: "required", label: "Required", fieldType: SystemFieldType.BOOLEAN, listOrder: 5, formOrder: 5 },
+      { fieldKey: "defaultEnabled", label: "Enabled", fieldType: SystemFieldType.BOOLEAN, listOrder: 6, formOrder: 6 },
+      { fieldKey: "choices", label: "Choices (JSON)", fieldType: SystemFieldType.TEXTAREA, listOrder: 7, formOrder: 7 },
+      { fieldKey: "validationRules", label: "Validation (JSON)", fieldType: SystemFieldType.TEXTAREA, listOrder: 8, formOrder: 8 }
+    ]
+  },
+  {
+    key: "admin.location_type_rule_templates.list",
+    title: "Location Rule Templates",
+    entityKey: "location_type_rule_templates",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/location-type-rule-templates",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "packId", label: "Pack", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "packs" },
+      { fieldKey: "parentLocationTypeTemplateId", label: "Parent Template", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "location_type_templates" },
+      { fieldKey: "childLocationTypeTemplateId", label: "Child Template", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, referenceEntityKey: "location_type_templates" }
+    ]
+  },
+  {
+    key: "admin.location_type_rule_templates.form",
+    title: "Location Rule Template",
+    entityKey: "location_type_rule_templates",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/location-type-rule-templates",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "packId", label: "Pack", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "packs" },
+      { fieldKey: "parentLocationTypeTemplateId", label: "Parent Template", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, required: true, referenceEntityKey: "location_type_templates" },
+      { fieldKey: "childLocationTypeTemplateId", label: "Child Template", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, required: true, referenceEntityKey: "location_type_templates" }
+    ]
+  },
+  {
+    key: "admin.relationship_type_templates.list",
+    title: "Relationship Type Templates",
+    entityKey: "relationship_type_templates",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/relationship-type-templates",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1 },
+      { fieldKey: "packId", label: "Pack", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, referenceEntityKey: "packs" },
+      { fieldKey: "isPeerable", label: "Peerable", fieldType: SystemFieldType.BOOLEAN, listOrder: 3, formOrder: 3 }
+    ]
+  },
+  {
+    key: "admin.relationship_type_templates.form",
+    title: "Relationship Type Template",
+    entityKey: "relationship_type_templates",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/relationship-type-templates",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
+      { fieldKey: "packId", label: "Pack", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, required: true, referenceEntityKey: "packs" },
+      { fieldKey: "isPeerable", label: "Peerable", fieldType: SystemFieldType.BOOLEAN, listOrder: 3, formOrder: 3 },
+      { fieldKey: "fromLabel", label: "From Label", fieldType: SystemFieldType.TEXT, listOrder: 4, formOrder: 4, required: true },
+      { fieldKey: "toLabel", label: "To Label", fieldType: SystemFieldType.TEXT, listOrder: 5, formOrder: 5, required: true },
+      { fieldKey: "pastFromLabel", label: "Past From Label", fieldType: SystemFieldType.TEXT, listOrder: 6, formOrder: 6 },
+      { fieldKey: "pastToLabel", label: "Past To Label", fieldType: SystemFieldType.TEXT, listOrder: 7, formOrder: 7 },
+      { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 8, formOrder: 8 }
+    ]
+  },
+  {
+    key: "admin.relationship_type_template_roles.list",
+    title: "Relationship Template Roles",
+    entityKey: "relationship_type_template_roles",
+    viewType: SystemViewType.LIST,
+    endpoint: "/api/relationship-type-template-roles",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "relationshipTypeTemplateId", label: "Template", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, referenceEntityKey: "relationship_type_templates" },
+      { fieldKey: "fromRole", label: "From Role", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2 },
+      { fieldKey: "toRole", label: "To Role", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3 }
+    ]
+  },
+  {
+    key: "admin.relationship_type_template_roles.form",
+    title: "Relationship Template Role",
+    entityKey: "relationship_type_template_roles",
+    viewType: SystemViewType.FORM,
+    endpoint: "/api/relationship-type-template-roles",
+    adminOnly: true,
+    fields: [
+      { fieldKey: "relationshipTypeTemplateId", label: "Template", fieldType: SystemFieldType.REFERENCE, listOrder: 1, formOrder: 1, required: true, referenceEntityKey: "relationship_type_templates" },
+      { fieldKey: "fromRole", label: "From Role", fieldType: SystemFieldType.TEXT, listOrder: 2, formOrder: 2, required: true },
+      { fieldKey: "toRole", label: "To Role", fieldType: SystemFieldType.TEXT, listOrder: 3, formOrder: 3, required: true }
+    ]
+  },
+  {
     key: "admin.system_choices.list",
     title: "System Choices",
     entityKey: "system_choices",
@@ -1048,6 +1319,112 @@ for (const view of viewData) {
       fields: [
         { fieldKey: "name", label: "Name", source: RelatedListFieldSource.RELATED, listOrder: 1 },
         { fieldKey: "email", label: "Email", source: RelatedListFieldSource.RELATED, listOrder: 2 }
+      ]
+    },
+    {
+      key: "packs.entity_type_templates",
+      title: "Entity Templates",
+      parentEntityKey: "packs",
+      relatedEntityKey: "entity_type_templates",
+      joinEntityKey: "packEntityTypeTemplate",
+      parentFieldKey: "packId",
+      relatedFieldKey: "id",
+      listOrder: 1,
+      adminOnly: true,
+      fields: [
+        { fieldKey: "name", label: "Name", source: RelatedListFieldSource.RELATED, listOrder: 1 },
+        { fieldKey: "isCore", label: "Core", source: RelatedListFieldSource.RELATED, listOrder: 2 },
+        { fieldKey: "category", label: "Category", source: RelatedListFieldSource.RELATED, listOrder: 3 }
+      ]
+    },
+    {
+      key: "packs.location_type_templates",
+      title: "Location Templates",
+      parentEntityKey: "packs",
+      relatedEntityKey: "location_type_templates",
+      joinEntityKey: "packLocationTypeTemplate",
+      parentFieldKey: "packId",
+      relatedFieldKey: "id",
+      listOrder: 2,
+      adminOnly: true,
+      fields: [
+        { fieldKey: "name", label: "Name", source: RelatedListFieldSource.RELATED, listOrder: 1 },
+        { fieldKey: "isCore", label: "Core", source: RelatedListFieldSource.RELATED, listOrder: 2 }
+      ]
+    },
+    {
+      key: "packs.relationship_type_templates",
+      title: "Relationship Templates",
+      parentEntityKey: "packs",
+      relatedEntityKey: "relationship_type_templates",
+      joinEntityKey: "packRelationshipTypeTemplate",
+      parentFieldKey: "packId",
+      relatedFieldKey: "id",
+      listOrder: 3,
+      adminOnly: true,
+      fields: [
+        { fieldKey: "name", label: "Name", source: RelatedListFieldSource.RELATED, listOrder: 1 },
+        { fieldKey: "isPeerable", label: "Peerable", source: RelatedListFieldSource.RELATED, listOrder: 2 }
+      ]
+    },
+    {
+      key: "entity_types.relationship_rules_from",
+      title: "Relationship Rules (From)",
+      parentEntityKey: "entity_types",
+      relatedEntityKey: "relationship_type_rules",
+      joinEntityKey: "relationshipTypeRuleFrom",
+      parentFieldKey: "fromEntityTypeId",
+      relatedFieldKey: "id",
+      listOrder: 2,
+      adminOnly: false,
+      fields: [
+        { fieldKey: "relationshipTypeName", label: "Relationship", source: RelatedListFieldSource.JOIN, listOrder: 1 },
+        { fieldKey: "toEntityTypeName", label: "To Entity Type", source: RelatedListFieldSource.JOIN, listOrder: 2 }
+      ]
+    },
+    {
+      key: "entity_types.relationship_rules_to",
+      title: "Relationship Rules (To)",
+      parentEntityKey: "entity_types",
+      relatedEntityKey: "relationship_type_rules",
+      joinEntityKey: "relationshipTypeRuleTo",
+      parentFieldKey: "toEntityTypeId",
+      relatedFieldKey: "id",
+      listOrder: 3,
+      adminOnly: false,
+      fields: [
+        { fieldKey: "relationshipTypeName", label: "Relationship", source: RelatedListFieldSource.JOIN, listOrder: 1 },
+        { fieldKey: "fromEntityTypeName", label: "From Entity Type", source: RelatedListFieldSource.JOIN, listOrder: 2 }
+      ]
+    },
+    {
+      key: "location_types.parent_rules",
+      title: "Location Rules (Parent)",
+      parentEntityKey: "location_types",
+      relatedEntityKey: "location_type_rules",
+      joinEntityKey: "locationTypeRuleParent",
+      parentFieldKey: "parentTypeId",
+      relatedFieldKey: "id",
+      listOrder: 1,
+      adminOnly: false,
+      fields: [
+        { fieldKey: "childTypeName", label: "Child Type", source: RelatedListFieldSource.JOIN, listOrder: 1 },
+        { fieldKey: "allowed", label: "Allowed", source: RelatedListFieldSource.JOIN, listOrder: 2 }
+      ]
+    },
+    {
+      key: "location_types.child_rules",
+      title: "Location Rules (Child)",
+      parentEntityKey: "location_types",
+      relatedEntityKey: "location_type_rules",
+      joinEntityKey: "locationTypeRuleChild",
+      parentFieldKey: "childTypeId",
+      relatedFieldKey: "id",
+      listOrder: 2,
+      adminOnly: false,
+      fields: [
+        { fieldKey: "parentTypeName", label: "Parent Type", source: RelatedListFieldSource.JOIN, listOrder: 1 },
+        { fieldKey: "allowed", label: "Allowed", source: RelatedListFieldSource.JOIN, listOrder: 2 }
       ]
     }
   ];

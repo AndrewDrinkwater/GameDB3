@@ -1,6 +1,6 @@
 import express from "express";
 import { Prisma, EntityAccessScope, EntityAccessType, SystemViewType } from "@prisma/client";
-import { prisma, requireAuth, requireSystemAdmin, isAdmin, ensureSeededView, relatedListSeeds, ensureSeededRelatedList, canAccessCampaign, canAccessWorld, isWorldArchitect, isWorldGameMaster, isWorldGm, canManageCampaign, canAccessEntityType, canManageEntityType, canCreateCampaign, canCreateCharacterInWorld, canCreateEntityInWorld, canCreateLocationInWorld, canCreateCharacterInCampaign, buildLocationAccessFilter, isCampaignGm, getLabelFieldForEntity, canWriteEntity, canWriteLocation, getReferenceResults } from "../lib/helpers";
+import { prisma, requireAuth, requireSystemAdmin, isAdmin, ensureSeededView, relatedListSeeds, ensureSeededRelatedList, canAccessCampaign, canAccessWorld, isWorldArchitect, isWorldGameMaster, isWorldGm, canManageCampaign, canAccessEntityType, canManageEntityType, canAccessLocationType, canManageLocationType, canCreateCampaign, canCreateCharacterInWorld, canCreateEntityInWorld, canCreateLocationInWorld, canCreateCharacterInCampaign, buildLocationAccessFilter, isCampaignGm, getLabelFieldForEntity, canWriteEntity, canWriteLocation, getReferenceResults } from "../lib/helpers";
 import type { AuthRequest, ListViewFilterRule, ListViewFilterGroup } from "../lib/helpers";
 import { getAllowedLocationParentTypeIds } from "./shared";
 
@@ -38,6 +38,10 @@ export const registerCoreRoutes = (app: express.Express) => {
         location_status: [
           { value: "ACTIVE", label: "Active", sortOrder: 1 },
           { value: "INACTIVE", label: "Inactive", sortOrder: 2 }
+        ],
+        pack_posture: [
+          { value: "opinionated", label: "Opinionated", sortOrder: 1 },
+          { value: "minimal", label: "Minimal", sortOrder: 2 }
         ],
         location_field_type: [
           { value: "TEXT", label: "Single line text", sortOrder: 1 },
@@ -323,6 +327,17 @@ export const registerCoreRoutes = (app: express.Express) => {
     }
     if (entityKey === "entity_types") {
       await ensureSeededRelatedList("entity_types.fields");
+      await ensureSeededRelatedList("entity_types.relationship_rules_from");
+      await ensureSeededRelatedList("entity_types.relationship_rules_to");
+    }
+    if (entityKey === "location_types") {
+      await ensureSeededRelatedList("location_types.parent_rules");
+      await ensureSeededRelatedList("location_types.child_rules");
+    }
+    if (entityKey === "packs") {
+      await ensureSeededRelatedList("packs.entity_type_templates");
+      await ensureSeededRelatedList("packs.location_type_templates");
+      await ensureSeededRelatedList("packs.relationship_type_templates");
     }
   
     const relatedLists = await prisma.systemRelatedList.findMany({
@@ -389,6 +404,14 @@ export const registerCoreRoutes = (app: express.Express) => {
   
     if (relatedList.parentEntityKey === "entity_types") {
       const canAccess = isAdmin(user) || (await canAccessEntityType(user.id, parentId));
+      if (!canAccess) {
+        res.status(403).json({ error: "Forbidden." });
+        return;
+      }
+    }
+  
+    if (relatedList.parentEntityKey === "location_types") {
+      const canAccess = isAdmin(user) || (await canAccessLocationType(user.id, parentId));
       if (!canAccess) {
         res.status(403).json({ error: "Forbidden." });
         return;
@@ -521,6 +544,127 @@ export const registerCoreRoutes = (app: express.Express) => {
       }));
     }
   
+    if (relatedList.joinEntityKey === "packEntityTypeTemplate") {
+      const rows = await prisma.entityTypeTemplate.findMany({
+        where: { packId: parentId },
+        select: {
+          ...(relatedSelect as Record<string, true>),
+          id: true
+        },
+        orderBy: { name: "asc" }
+      });
+  
+      items = rows.map((row) => ({
+        relatedId: row.id,
+        relatedData: row as Record<string, unknown>,
+        joinData: {}
+      }));
+    }
+  
+    if (relatedList.joinEntityKey === "packLocationTypeTemplate") {
+      const rows = await prisma.locationTypeTemplate.findMany({
+        where: { packId: parentId },
+        select: {
+          ...(relatedSelect as Record<string, true>),
+          id: true
+        },
+        orderBy: { name: "asc" }
+      });
+  
+      items = rows.map((row) => ({
+        relatedId: row.id,
+        relatedData: row as Record<string, unknown>,
+        joinData: {}
+      }));
+    }
+  
+    if (relatedList.joinEntityKey === "packRelationshipTypeTemplate") {
+      const rows = await prisma.relationshipTypeTemplate.findMany({
+        where: { packId: parentId },
+        select: {
+          ...(relatedSelect as Record<string, true>),
+          id: true
+        },
+        orderBy: { name: "asc" }
+      });
+  
+      items = rows.map((row) => ({
+        relatedId: row.id,
+        relatedData: row as Record<string, unknown>,
+        joinData: {}
+      }));
+    }
+  
+    if (relatedList.joinEntityKey === "relationshipTypeRuleFrom") {
+      const rows = await prisma.relationshipTypeRule.findMany({
+        where: { fromEntityTypeId: parentId },
+        include: {
+          relationshipType: { select: { name: true } },
+          toEntityType: { select: { name: true } }
+        }
+      });
+  
+      items = rows.map((row) => ({
+        relatedId: row.id,
+        relatedData: {},
+        joinData: {
+          relationshipTypeName: row.relationshipType.name,
+          toEntityTypeName: row.toEntityType.name
+        }
+      }));
+    }
+  
+    if (relatedList.joinEntityKey === "relationshipTypeRuleTo") {
+      const rows = await prisma.relationshipTypeRule.findMany({
+        where: { toEntityTypeId: parentId },
+        include: {
+          relationshipType: { select: { name: true } },
+          fromEntityType: { select: { name: true } }
+        }
+      });
+  
+      items = rows.map((row) => ({
+        relatedId: row.id,
+        relatedData: {},
+        joinData: {
+          relationshipTypeName: row.relationshipType.name,
+          fromEntityTypeName: row.fromEntityType.name
+        }
+      }));
+    }
+  
+    if (relatedList.joinEntityKey === "locationTypeRuleParent") {
+      const rows = await prisma.locationTypeRule.findMany({
+        where: { parentTypeId: parentId },
+        include: { childType: { select: { name: true } } }
+      });
+  
+      items = rows.map((row) => ({
+        relatedId: row.id,
+        relatedData: {},
+        joinData: {
+          childTypeName: row.childType.name,
+          allowed: row.allowed
+        }
+      }));
+    }
+  
+    if (relatedList.joinEntityKey === "locationTypeRuleChild") {
+      const rows = await prisma.locationTypeRule.findMany({
+        where: { childTypeId: parentId },
+        include: { parentType: { select: { name: true } } }
+      });
+  
+      items = rows.map((row) => ({
+        relatedId: row.id,
+        relatedData: {},
+        joinData: {
+          parentTypeName: row.parentType.name,
+          allowed: row.allowed
+        }
+      }));
+    }
+  
     res.json({ items });
   });
 
@@ -571,6 +715,14 @@ export const registerCoreRoutes = (app: express.Express) => {
   
     if (relatedList.parentEntityKey === "entity_types") {
       const canManage = isAdmin(user) || (await canManageEntityType(user.id, parentId));
+      if (!canManage) {
+        res.status(403).json({ error: "Forbidden." });
+        return;
+      }
+    }
+  
+    if (relatedList.parentEntityKey === "location_types") {
+      const canManage = isAdmin(user) || (await canManageLocationType(user.id, parentId));
       if (!canManage) {
         res.status(403).json({ error: "Forbidden." });
         return;
@@ -717,6 +869,14 @@ export const registerCoreRoutes = (app: express.Express) => {
       }
     }
   
+    if (relatedList.parentEntityKey === "location_types") {
+      const canManage = isAdmin(user) || (await canManageLocationType(user.id, parentId));
+      if (!canManage) {
+        res.status(403).json({ error: "Forbidden." });
+        return;
+      }
+    }
+  
     if (relatedList.joinEntityKey === "characterCampaign") {
       await prisma.characterCampaign.delete({
         where: { characterId_campaignId: { characterId: relatedId, campaignId: parentId } }
@@ -814,6 +974,20 @@ export const registerCoreRoutes = (app: express.Express) => {
     const user = (req as AuthRequest).user;
     if (!user) {
       res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+    const adminOnlyEntities = new Set([
+      "packs",
+      "entity_type_templates",
+      "entity_type_template_fields",
+      "location_type_templates",
+      "location_type_template_fields",
+      "location_type_rule_templates",
+      "relationship_type_templates",
+      "relationship_type_template_roles"
+    ]);
+    if (adminOnlyEntities.has(entityKey) && !isAdmin(user)) {
+      res.status(403).json({ error: "Forbidden." });
       return;
     }
     const ids = idsParam ? idsParam.split(",").map((id) => id.trim()).filter(Boolean) : undefined;
@@ -1817,6 +1991,21 @@ export const registerCoreRoutes = (app: express.Express) => {
           const canManage = admin || (await isWorldArchitect(user.id, rule.parentType.worldId));
           canEdit = canManage;
           canDelete = canManage;
+        }
+        break;
+      }
+      case "packs":
+      case "entity_type_templates":
+      case "entity_type_template_fields":
+      case "location_type_templates":
+      case "location_type_template_fields":
+      case "location_type_rule_templates":
+      case "relationship_type_templates":
+      case "relationship_type_template_roles": {
+        canCreate = admin;
+        if (recordId) {
+          canEdit = admin;
+          canDelete = admin;
         }
         break;
       }

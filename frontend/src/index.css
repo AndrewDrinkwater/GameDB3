@@ -3929,6 +3929,268 @@ body {
   margin-top: 0.5rem;
 }
 
+.world-builder {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.world-builder__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  padding: 1.5rem;
+  border-radius: 1rem;
+  background: linear-gradient(120deg, rgba(79, 70, 229, 0.12), transparent 60%),
+    var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.world-builder__header h1 {
+  margin: 0 0 0.4rem;
+}
+
+.world-builder__header p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.world-builder__meta {
+  display: grid;
+  gap: 0.35rem;
+  align-content: center;
+  font-size: 0.9rem;
+}
+
+.world-builder__meta-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.world-builder__steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.6rem;
+}
+
+.world-builder__step {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.world-builder__step span:first-child {
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 0.6rem;
+  background: var(--surface-2);
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+}
+
+.world-builder__step.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 12px 22px color-mix(in srgb, var(--shadow) 30%, transparent);
+}
+
+.world-builder__step.is-complete span:first-child {
+  background: var(--accent);
+  color: #fff;
+}
+
+.world-builder__panel {
+  padding: 1.5rem;
+  border-radius: 1rem;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  display: grid;
+  gap: 1.2rem;
+}
+
+.world-builder__hint {
+  color: var(--text-muted);
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.world-builder__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.world-builder__card {
+  text-align: left;
+  border-radius: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  padding: 1rem;
+  display: grid;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.world-builder__card.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.world-builder__card-title {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.world-builder__card-meta {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.world-builder__section {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-radius: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, var(--surface-2));
+}
+
+.world-builder__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  font-weight: 600;
+}
+
+.world-builder__badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-2) 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  color: var(--text-muted);
+}
+
+.world-builder__fields {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.world-builder__field {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: 120px repeat(3, minmax(0, 1fr)) auto;
+  align-items: center;
+}
+
+.world-builder__field-row {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) auto;
+  align-items: end;
+}
+
+.world-builder__field input,
+.world-builder__field select,
+.world-builder__field-row input {
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.world-builder__rules {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.world-builder__rule,
+.world-builder__role {
+  display: grid;
+  gap: 0.6rem;
+  align-items: center;
+  grid-template-columns: auto repeat(2, minmax(140px, 1fr));
+}
+
+.world-builder__role select {
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.world-builder__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.world-builder__summary-item {
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: var(--surface);
+  display: grid;
+  gap: 0.25rem;
+}
+
+.world-builder__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.world-builder__error {
+  padding: 0.75rem 1rem;
+  border-radius: 0.7rem;
+  border: 1px solid color-mix(in srgb, #ef4444 45%, var(--border));
+  background: color-mix(in srgb, #ef4444 14%, var(--surface));
+  color: var(--text);
+}
+
+.world-builder__warning {
+  padding: 0.75rem 1rem;
+  border-radius: 0.7rem;
+  border: 1px solid color-mix(in srgb, #f59e0b 45%, var(--border));
+  background: color-mix(in srgb, #f59e0b 18%, var(--surface));
+  color: var(--text);
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 900px) {
+  .world-builder__field {
+    grid-template-columns: 1fr;
+  }
+
+  .world-builder__role,
+  .world-builder__rule {
+    grid-template-columns: 1fr;
+  }
+
+  .world-builder__field-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 840px) {
   .relationship-card {
     flex-direction: column;
