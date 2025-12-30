@@ -1987,9 +1987,11 @@ export const registerCoreRoutes = (app: express.Express) => {
             return;
           }
           const canManage =
-            admin || (list.scope === "WORLD" && list.worldId && (await isWorldArchitect(user.id, list.worldId)));
-          canEdit = canManage;
-          canDelete = canManage;
+            admin ||
+            (list.scope === "WORLD" &&
+              (list.worldId ? await isWorldArchitect(user.id, list.worldId) : false));
+          canEdit = Boolean(canManage);
+          canDelete = Boolean(canManage);
         }
         if (worldId) {
           canCreate = admin || (await isWorldArchitect(user.id, worldId));
@@ -2011,10 +2013,11 @@ export const registerCoreRoutes = (app: express.Express) => {
           const canManage =
             admin ||
             (option.choiceList.scope === "WORLD" &&
-              option.choiceList.worldId &&
-              (await isWorldArchitect(user.id, option.choiceList.worldId)));
-          canEdit = canManage;
-          canDelete = canManage;
+              (option.choiceList.worldId
+                ? await isWorldArchitect(user.id, option.choiceList.worldId)
+                : false));
+          canEdit = Boolean(canManage);
+          canDelete = Boolean(canManage);
         }
         if (worldId) {
           canCreate = admin || (await isWorldArchitect(user.id, worldId));

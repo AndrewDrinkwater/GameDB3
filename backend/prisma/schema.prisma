@@ -311,6 +311,7 @@ model EntityType {
   name        String
   description String?
   isTemplate  Boolean  @default(false)
+  isDeprecated Boolean @default(false)
   createdById String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -339,6 +340,7 @@ model LocationType {
   colour      String?
   menu        Boolean  @default(false)
   metadata    Json?
+  isDeprecated Boolean @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -361,6 +363,7 @@ model LocationTypeField {
   defaultValue   Json?
   validationRules Json?
   choiceListId   String?
+  isDeprecated   Boolean          @default(false)
   listOrder      Int              @default(0)
   formOrder      Int              @default(0)
   createdAt      DateTime         @default(now())
@@ -380,6 +383,7 @@ model LocationTypeRule {
   parentTypeId String
   childTypeId  String
   allowed      Boolean  @default(true)
+  isDeprecated Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -406,6 +410,7 @@ model EntityField {
   referenceEntityTypeId String?
   referenceLocationTypeKey String?
   choiceListId String?
+  isDeprecated Boolean        @default(false)
   conditions  Json?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
@@ -443,6 +448,7 @@ model ChoiceList {
   scope       ChoiceScope
   packId      String?
   worldId     String?
+  isDeprecated Boolean    @default(false)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
@@ -466,6 +472,7 @@ model ChoiceOption {
   label        String
   order        Int      @default(0)
   isActive     Boolean  @default(true)
+  isDeprecated Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -574,6 +581,7 @@ model RelationshipType {
   pastToLabel   String?
   isPeerable    Boolean  @default(false)
   metadata      Json?
+  isDeprecated  Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

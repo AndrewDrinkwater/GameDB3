@@ -818,6 +818,235 @@ describe("Entity type and field permissions", () => {
   });
 });
 
+describe("Packs and templates", () => {
+  let packId: string;
+  let choiceListId: string;
+  let choiceOptionId: string;
+  let entityTemplateId: string;
+  let entityTemplateFieldId: string;
+  let locationTemplateParentId: string;
+  let locationTemplateChildId: string;
+  let locationTemplateFieldId: string;
+  let locationRuleTemplateId: string;
+  let relationshipTemplateId: string;
+  let relationshipRoleId: string;
+
+  afterAll(async () => {
+    if (relationshipRoleId) {
+      await prisma.relationshipTypeTemplateRole
+        .delete({ where: { id: relationshipRoleId } })
+        .catch(() => undefined);
+    }
+    if (relationshipTemplateId) {
+      await prisma.relationshipTypeTemplate
+        .delete({ where: { id: relationshipTemplateId } })
+        .catch(() => undefined);
+    }
+    if (locationRuleTemplateId) {
+      await prisma.locationTypeRuleTemplate
+        .delete({ where: { id: locationRuleTemplateId } })
+        .catch(() => undefined);
+    }
+    if (locationTemplateFieldId) {
+      await prisma.locationTypeTemplateField
+        .delete({ where: { id: locationTemplateFieldId } })
+        .catch(() => undefined);
+    }
+    if (locationTemplateParentId) {
+      await prisma.locationTypeTemplate
+        .delete({ where: { id: locationTemplateParentId } })
+        .catch(() => undefined);
+    }
+    if (locationTemplateChildId) {
+      await prisma.locationTypeTemplate
+        .delete({ where: { id: locationTemplateChildId } })
+        .catch(() => undefined);
+    }
+    if (entityTemplateFieldId) {
+      await prisma.entityTypeTemplateField
+        .delete({ where: { id: entityTemplateFieldId } })
+        .catch(() => undefined);
+    }
+    if (entityTemplateId) {
+      await prisma.entityTypeTemplate.delete({ where: { id: entityTemplateId } }).catch(() => undefined);
+    }
+    if (choiceOptionId) {
+      await prisma.choiceOption.delete({ where: { id: choiceOptionId } }).catch(() => undefined);
+    }
+    if (choiceListId) {
+      await prisma.choiceList.delete({ where: { id: choiceListId } }).catch(() => undefined);
+    }
+    if (packId) {
+      await prisma.pack.delete({ where: { id: packId } }).catch(() => undefined);
+    }
+  });
+
+  it("allows admins to manage packs and templates", async () => {
+    const packResponse = await request(app)
+      .post("/api/packs")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        name: `Test Pack ${Date.now()}`,
+        description: "Pack for testing templates.",
+        posture: "opinionated",
+        isActive: true
+      });
+
+    expect(packResponse.status).toBe(201);
+    packId = packResponse.body.id;
+
+    const choiceListResponse = await request(app)
+      .post("/api/choice-lists")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        name: "Pack Choices",
+        scope: "PACK",
+        packId
+      });
+
+    expect(choiceListResponse.status).toBe(201);
+    choiceListId = choiceListResponse.body.id;
+
+    const choiceOptionResponse = await request(app)
+      .post("/api/choice-options")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        choiceListId,
+        value: "option_a",
+        label: "Option A"
+      });
+
+    expect(choiceOptionResponse.status).toBe(201);
+    choiceOptionId = choiceOptionResponse.body.id;
+
+    const entityTemplateResponse = await request(app)
+      .post("/api/entity-type-templates")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        packId,
+        name: "Template Character",
+        description: "Template character for testing.",
+        category: "people",
+        isCore: true
+      });
+
+    expect(entityTemplateResponse.status).toBe(201);
+    entityTemplateId = entityTemplateResponse.body.id;
+
+    const entityFieldResponse = await request(app)
+      .post("/api/entity-type-template-fields")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        templateId: entityTemplateId,
+        fieldKey: "status",
+        fieldLabel: "Status",
+        fieldType: "CHOICE",
+        choiceListId
+      });
+
+    expect(entityFieldResponse.status).toBe(201);
+    entityTemplateFieldId = entityFieldResponse.body.id;
+
+    const parentLocationResponse = await request(app)
+      .post("/api/location-type-templates")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        packId,
+        name: "Template Region",
+        description: "Parent location template.",
+        isCore: true
+      });
+
+    expect(parentLocationResponse.status).toBe(201);
+    locationTemplateParentId = parentLocationResponse.body.id;
+
+    const childLocationResponse = await request(app)
+      .post("/api/location-type-templates")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        packId,
+        name: "Template Settlement",
+        description: "Child location template.",
+        isCore: true
+      });
+
+    expect(childLocationResponse.status).toBe(201);
+    locationTemplateChildId = childLocationResponse.body.id;
+
+    const locationFieldResponse = await request(app)
+      .post("/api/location-type-template-fields")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        templateId: locationTemplateParentId,
+        fieldKey: "size",
+        fieldLabel: "Size",
+        fieldType: "CHOICE",
+        choiceListId
+      });
+
+    expect(locationFieldResponse.status).toBe(201);
+    locationTemplateFieldId = locationFieldResponse.body.id;
+
+    const locationRuleResponse = await request(app)
+      .post("/api/location-type-rule-templates")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        packId,
+        parentLocationTypeTemplateId: locationTemplateParentId,
+        childLocationTypeTemplateId: locationTemplateChildId
+      });
+
+    expect(locationRuleResponse.status).toBe(201);
+    locationRuleTemplateId = locationRuleResponse.body.id;
+
+    const relationshipTemplateResponse = await request(app)
+      .post("/api/relationship-type-templates")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        packId,
+        name: "Member Of",
+        description: "Membership template relationship.",
+        isPeerable: false,
+        fromLabel: "Member",
+        toLabel: "Organization"
+      });
+
+    expect(relationshipTemplateResponse.status).toBe(201);
+    relationshipTemplateId = relationshipTemplateResponse.body.id;
+
+    const relationshipRoleResponse = await request(app)
+      .post("/api/relationship-type-template-roles")
+      .set("Authorization", `Bearer ${context.token}`)
+      .send({
+        relationshipTypeTemplateId: relationshipTemplateId,
+        fromRole: "Character",
+        toRole: "Organisation"
+      });
+
+    expect(relationshipRoleResponse.status).toBe(201);
+    relationshipRoleId = relationshipRoleResponse.body.id;
+
+    const listResponse = await request(app)
+      .get(`/api/entity-type-templates?packId=${packId}`)
+      .set("Authorization", `Bearer ${context.token}`);
+
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.map((item: { id: string }) => item.id)).toContain(entityTemplateId);
+  });
+
+  it("blocks non-admins from managing packs", async () => {
+    const response = await request(app)
+      .post("/api/packs")
+      .set("Authorization", `Bearer ${context.viewerToken}`)
+      .send({
+        name: "Blocked Pack",
+        posture: "minimal"
+      });
+
+    expect(response.status).toBe(403);
+  });
+});
+
 describe("Access visibility", () => {
   it("hides worlds from unrelated users", async () => {
     const response = await request(app)
