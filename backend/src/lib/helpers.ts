@@ -599,6 +599,21 @@ const relatedListSeeds: Record<string, RelatedListSeed> = {
       { fieldKey: "fromEntityTypeName", label: "From Entity Type", source: RelatedListFieldSource.JOIN, listOrder: 2 }
     ]
   },
+  "relationship_types.rules": {
+    key: "relationship_types.rules",
+    title: "Relationship Rules",
+    parentEntityKey: "relationship_types",
+    relatedEntityKey: "relationship_type_rules",
+    joinEntityKey: "relationshipTypeRuleRelationship",
+    parentFieldKey: "relationshipTypeId",
+    relatedFieldKey: "id",
+    listOrder: 4,
+    adminOnly: false,
+    fields: [
+      { fieldKey: "fromEntityTypeName", label: "From Entity Type", source: RelatedListFieldSource.JOIN, listOrder: 1 },
+      { fieldKey: "toEntityTypeName", label: "To Entity Type", source: RelatedListFieldSource.JOIN, listOrder: 2 }
+    ]
+  },
   "location_types.parent_rules": {
     key: "location_types.parent_rules",
     title: "Location Rules (Parent)",

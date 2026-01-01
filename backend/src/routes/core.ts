@@ -621,7 +621,7 @@ export const registerCoreRoutes = (app: express.Express) => {
           fromEntityType: { select: { name: true } }
         }
       });
-  
+
       items = rows.map((row) => ({
         relatedId: row.id,
         relatedData: {},
@@ -631,7 +631,27 @@ export const registerCoreRoutes = (app: express.Express) => {
         }
       }));
     }
-  
+
+    if (relatedList.joinEntityKey === "relationshipTypeRuleRelationship") {
+      const rows = await prisma.relationshipTypeRule.findMany({
+        where: { relationshipTypeId: parentId },
+        include: {
+          fromEntityType: { select: { name: true } },
+          toEntityType: { select: { name: true } }
+        },
+        orderBy: { createdAt: "desc" }
+      });
+
+      items = rows.map((row) => ({
+        relatedId: row.id,
+        relatedData: {},
+        joinData: {
+          fromEntityTypeName: row.fromEntityType.name,
+          toEntityTypeName: row.toEntityType.name
+        }
+      }));
+    }
+
     if (relatedList.joinEntityKey === "locationTypeRuleParent") {
       const rows = await prisma.locationTypeRule.findMany({
         where: { parentTypeId: parentId },

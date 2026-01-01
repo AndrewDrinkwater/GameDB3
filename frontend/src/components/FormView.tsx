@@ -944,6 +944,7 @@ export default function FormView({
     const loadEntityTypes = async () => {
       const params = new URLSearchParams({ entityKey: "entity_types" });
       params.set("worldId", worldId);
+      params.set("scope", "entity_type");
       const response = await fetch(`/api/references?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1014,6 +1015,14 @@ export default function FormView({
                 entityTypeId: option.label
               }));
             }
+          }
+        }
+        ,
+        {
+          label: "Cancel",
+          tone: "ghost",
+          onClick: () => {
+            handleNavigateAway(onBack);
           }
         }
       ]

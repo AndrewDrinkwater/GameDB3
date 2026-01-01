@@ -91,6 +91,17 @@ const filterRows = (rows: Record<string, unknown>[], fields: ListField[], query:
   );
 };
 
+const toSingular = (label: string) => {
+  if (!label) return label;
+  if (label.endsWith("ies")) {
+    return `${label.slice(0, -3)}y`;
+  }
+  if (label.endsWith("s")) {
+    return label.slice(0, -1);
+  }
+  return label;
+};
+
 const isStatusField = (field: ViewField) => {
   const key = field.fieldKey.toLowerCase();
   const label = field.label.toLowerCase();
@@ -1456,7 +1467,7 @@ export default function ListView({
                   className="primary-button"
                   onClick={() => onOpenForm("new")}
                 >
-                  {`Create ${String(titleOverride ?? view.title).replace(/s$/, "")}`}
+              {`Create ${toSingular(String(titleOverride ?? view.title))}`}
                 </button>
               ) : null}
             </div>
