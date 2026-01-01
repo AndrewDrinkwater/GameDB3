@@ -347,6 +347,43 @@ export const registerRelationshipsRoutes = (app: express.Express) => {
     }
 
     const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+    const relationshipTypeId =
+      typeof req.query.relationshipTypeId === "string" ? req.query.relationshipTypeId : undefined;
+
+    if (relationshipTypeId) {
+      const relationshipType = await prisma.relationshipType.findUnique({
+        where: { id: relationshipTypeId },
+        select: {
+          id: true,
+          name: true,
+          fromLabel: true,
+          toLabel: true,
+          worldId: true
+        }
+      });
+      if (!relationshipType) {
+        res.status(404).json({ error: "Relationship type not found." });
+        return;
+      }
+
+      if (!(await canManageRelationships(user, relationshipType.worldId))) {
+        res.status(403).json({ error: "Forbidden." });
+        return;
+      }
+
+      const rules = await prisma.relationshipTypeRule.findMany({
+        where: { relationshipTypeId },
+        orderBy: { createdAt: "desc" },
+        include: {
+          fromEntityType: { select: { id: true, name: true } },
+          toEntityType: { select: { id: true, name: true } }
+        }
+      });
+
+      res.json({ relationshipType, rules });
+      return;
+    }
+
     if (!worldId) {
       if (isAdmin(user)) {
         const rules = await prisma.relationshipTypeRule.findMany({

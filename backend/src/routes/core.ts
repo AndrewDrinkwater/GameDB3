@@ -958,6 +958,8 @@ export const registerCoreRoutes = (app: express.Express) => {
     const entityTypeId = typeof req.query.entityTypeId === "string" ? req.query.entityTypeId : undefined;
     const entityTypeIdsParam =
       typeof req.query.entityTypeIds === "string" ? req.query.entityTypeIds : undefined;
+    const relationshipTypeIdParam =
+      typeof req.query.relationshipTypeId === "string" ? req.query.relationshipTypeId : undefined;
     const includeEntityTypeId =
       typeof req.query.includeEntityTypeId === "string"
         ? req.query.includeEntityTypeId.toLowerCase() === "true" ||
@@ -1183,11 +1185,19 @@ export const registerCoreRoutes = (app: express.Express) => {
         : queryValue
           ? { name: { contains: queryValue, mode: Prisma.QueryMode.insensitive } }
           : {};
-  
+ 
       const filters: Prisma.EntityTypeWhereInput[] = [baseClause];
+      let effectiveWorldId = worldId;
+      if (!effectiveWorldId && relationshipTypeIdParam) {
+        const relationshipType = await prisma.relationshipType.findUnique({
+          where: { id: relationshipTypeIdParam },
+          select: { worldId: true }
+        });
+        effectiveWorldId = relationshipType?.worldId ?? undefined;
+      }
       if (scope === "entity_type") {
-        if (worldId) {
-          filters.push({ worldId });
+        if (effectiveWorldId) {
+          filters.push({ worldId: effectiveWorldId });
         } else if (!isAdmin(user)) {
           res.json([]);
           return;

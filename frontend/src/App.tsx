@@ -9,6 +9,7 @@ import { useUnsavedChangesPrompt } from "./utils/unsavedChanges";
 import ErrorBoundary from "./components/ErrorBoundary";
 import SessionsPanel from "./components/SessionsPanel";
 import WorldBuilder from "./components/WorldBuilder";
+import RuleBuilder from "./components/RuleBuilder";
 
 type User = {
   id: string;
@@ -1478,6 +1479,14 @@ function AppShell() {
       );
     }
 
+    if (route === "/rule-builder") {
+      return (
+        <section className="app__panel app__panel--wide">
+          <RuleBuilder token={token} contextWorldId={context.worldId} />
+        </section>
+      );
+    }
+
     if (route === "/home") {
       return (
         <section className="app__panel">
@@ -1831,6 +1840,15 @@ function AppShell() {
                                   }}
                                 >
                                   Relationship Rules
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigateWithGuard("/rule-builder");
+                                    handleSidebarSelect();
+                                  }}
+                                >
+                                  Rule Builder
                                 </button>
                               </div>
                             </div>

@@ -240,6 +240,7 @@ export default function FormView({
   const [entityAuditError, setEntityAuditError] = useState<string | null>(null);
   const [openAuditEntryId, setOpenAuditEntryId] = useState<string | null>(null);
   const [entityTypeWorldId, setEntityTypeWorldId] = useState<string | null>(null);
+  const [relationshipTypeWorldId, setRelationshipTypeWorldId] = useState<string | null>(null);
   const [entityPanelId, setEntityPanelId] = useState<string | null>(null);
   const [entityTypePromptOptions, setEntityTypePromptOptions] = useState<Choice[]>([]);
   const [conditionFieldOptions, setConditionFieldOptions] = useState<ConditionFieldOption[]>([]);
@@ -616,8 +617,15 @@ export default function FormView({
       const labelMap: Record<string, string> = {};
       await Promise.all(
         refFields.map(async (field) => {
-          const value = formData[field.fieldKey];
-          if (!value) return;
+        const value = formData[field.fieldKey];
+        if (
+          value === undefined ||
+          value === null ||
+          (Array.isArray(value) && value.length === 0) ||
+          (typeof value === "string" && value.trim() === "")
+        ) {
+          return;
+        }
           const entityKey = field.referenceEntityKey as string;
           const params = new URLSearchParams({
             entityKey,
@@ -1051,6 +1059,37 @@ export default function FormView({
 
   useEffect(() => {
     let ignore = false;
+    if (!view || view.entityKey !== "relationship_type_rules") {
+      setRelationshipTypeWorldId(null);
+      return;
+    }
+    const relationshipTypeId = formData.relationshipTypeId as string | undefined;
+    if (!relationshipTypeId) {
+      setRelationshipTypeWorldId(null);
+      return;
+    }
+
+    const loadRelationshipTypeWorld = async () => {
+      const response = await fetch(`/api/relationship-types/${relationshipTypeId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (handleUnauthorized(response)) return;
+      if (!response.ok) return;
+      const data = (await response.json()) as { worldId?: string | null };
+      if (!ignore) {
+        setRelationshipTypeWorldId(data.worldId ?? null);
+      }
+    };
+
+    void loadRelationshipTypeWorld();
+
+    return () => {
+      ignore = true;
+    };
+  }, [view, formData.relationshipTypeId, token]);
+
+  useEffect(() => {
+    let ignore = false;
     if (
       !view ||
       (view.entityKey !== "entities" && view.entityKey !== "locations") ||
@@ -1381,18 +1420,25 @@ export default function FormView({
       const worldParamValue =
         (typeof formData.worldId === "string" ? formData.worldId : undefined) ??
         contextWorldId;
+      const preferredWorldId =
+        (typeof formData.worldId === "string" ? formData.worldId : undefined) ??
+        relationshipTypeWorldId ??
+        entityTypeWorldId ??
+        contextWorldId;
       const contextParams =
         effectiveScope === "entity_type" || effectiveScope === "relationship_type"
-          ? formData.worldId
-            ? `&worldId=${formData.worldId}`
-            : entityTypeWorldId
-              ? `&worldId=${entityTypeWorldId}`
-              : contextWorldId
-                ? `&worldId=${contextWorldId}`
-                : ""
+          ? preferredWorldId
+            ? `&worldId=${preferredWorldId}`
+            : ""
           : field.referenceEntityKey === "entity_fields" && contextWorldId
             ? `&worldId=${contextWorldId}`
             : "";
+      const relationshipTypeIdValue =
+        typeof formData.relationshipTypeId === "string" ? formData.relationshipTypeId : undefined;
+      const relationshipTypeParam =
+        field.referenceEntityKey === "entity_types" && relationshipTypeIdValue
+          ? `&relationshipTypeId=${relationshipTypeIdValue}`
+          : "";
       const locationScopeParams =
         effectiveScope === "location_parent"
           ? `${formData.locationTypeId ? `&locationTypeId=${formData.locationTypeId}` : ""}${
@@ -1424,7 +1470,7 @@ export default function FormView({
               : ""
             : "";
     const response = await fetch(
-      `/api/references?entityKey=${field.referenceEntityKey}&query=${encodeURIComponent(query)}${scopeParam}${contextParams}${gmWorldParam}${locationScopeParams}${locationAccessParams}${choiceListParams}`,
+      `/api/references?entityKey=${field.referenceEntityKey}&query=${encodeURIComponent(query)}${scopeParam}${contextParams}${relationshipTypeParam}${gmWorldParam}${locationScopeParams}${locationAccessParams}${choiceListParams}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     if (handleUnauthorized(response)) return;
@@ -1750,8 +1796,28 @@ export default function FormView({
         if (ok) {
           onBack();
         }
-      });
-    };
+    });
+  };
+
+  const logReferenceChipRemoval = (
+    field: ViewField,
+    removed: Choice,
+    before: Choice[],
+    after: Choice[]
+  ) => {
+    console.log("[FormView] reference chip removed", {
+      fieldKey: field.fieldKey,
+      fieldLabel: field.label,
+      referenceEntityKey: field.referenceEntityKey,
+      removed,
+      beforeCount: before.length,
+      afterCount: after.length,
+      beforeValues: before.map((entry) => `${entry.label} (${entry.value})`),
+      afterValues: after.map((entry) => `${entry.label} (${entry.value})`),
+      formDataValue: formData[field.fieldKey],
+      referenceSelections: referenceSelections[field.fieldKey]
+    });
+  };
 
   const confirmUnsavedChanges = useUnsavedChangesPrompt({
     isDirtyRef,
@@ -2029,6 +2095,7 @@ export default function FormView({
                       className="reference-field__chip"
                       onClick={() => {
                         const next = selections.filter((entry) => entry.value !== item.value);
+                        logReferenceChipRemoval(field, item, selections, next);
                         setReferenceSelections((current) => ({
                           ...current,
                           [field.fieldKey]: next
@@ -2430,6 +2497,7 @@ export default function FormView({
                                 const next = selections.filter(
                                   (entry) => entry.value !== item.value
                                 );
+                                logReferenceChipRemoval(field, item, selections, next);
                                 setReferenceSelections((current) => ({
                                   ...current,
                                   [field.fieldKey]: next
