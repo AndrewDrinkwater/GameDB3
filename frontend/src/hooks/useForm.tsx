@@ -2399,6 +2399,7 @@ export function useForm({
     formFields,
     visibleEntityFields,
     handleChange,
+    coerceValue,
     isMultiReferenceField,
     handleEntityValueChange,
     renderEntityField,

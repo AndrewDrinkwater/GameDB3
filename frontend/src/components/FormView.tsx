@@ -124,6 +124,7 @@ export default function FormView(props: FormViewProps) {
     formFields,
     visibleEntityFields,
     handleChange,
+    coerceValue,
     isMultiReferenceField,
     handleEntityValueChange,
     renderEntityField,

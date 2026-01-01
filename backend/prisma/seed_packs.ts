@@ -91,7 +91,24 @@ const sharedChoiceLists = {
 } satisfies Record<string, ChoiceListSeed>;
 
 const fantasyChoiceLists: ChoiceListSeed[] = [
-  sharedChoiceLists.characterStatus,
+  {
+    key: "character_status_fantasy",
+    name: "Character Status",
+    options: [
+      { value: "alive", label: "Alive", order: 1 },
+      { value: "dead", label: "Dead", order: 2 },
+      { value: "unknown", label: "Unknown", order: 3 },
+      { value: "undead", label: "Undead", order: 4 }
+    ]
+  },
+  {
+    key: "character_type",
+    name: "Character Type",
+    options: [
+      { value: "trader", label: "Trader", order: 1 },
+      { value: "political", label: "Political", order: 2 }
+    ]
+  },
   {
     key: "settlement_size",
     name: "Settlement Size",
@@ -114,19 +131,6 @@ const fantasyChoiceLists: ChoiceListSeed[] = [
       { value: "swamp", label: "Swamp", order: 5 },
       { value: "tundra", label: "Tundra", order: 6 },
       { value: "coast", label: "Coast", order: 7 }
-    ]
-  },
-  {
-    key: "geographical_feature_type",
-    name: "Geographical Feature Type",
-    options: [
-      { value: "mountain_range", label: "Mountain Range", order: 1 },
-      { value: "river", label: "River", order: 2 },
-      { value: "forest", label: "Forest", order: 3 },
-      { value: "lake", label: "Lake", order: 4 },
-      { value: "desert", label: "Desert", order: 5 },
-      { value: "valley", label: "Valley", order: 6 },
-      { value: "coastline", label: "Coastline", order: 7 }
     ]
   }
 ];
@@ -316,10 +320,10 @@ const packSeeds: PackSeed[] = [
         category: "people",
         isCore: true,
         fields: [
-          { fieldKey: "status", fieldLabel: "Status", fieldType: EntityFieldType.CHOICE, choiceListKey: "character_status" },
+          { fieldKey: "characterType", fieldLabel: "Type", fieldType: EntityFieldType.CHOICE, choiceListKey: "character_type" },
           { fieldKey: "role", fieldLabel: "Role", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "background", fieldLabel: "Background", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "goals", fieldLabel: "Goals", fieldType: EntityFieldType.TEXT }
+          { fieldKey: "status", fieldLabel: "Status", fieldType: EntityFieldType.CHOICE, choiceListKey: "character_status_fantasy" },
+          { fieldKey: "raceId", fieldLabel: "Race", fieldType: EntityFieldType.ENTITY_REFERENCE }
         ]
       },
       {
@@ -328,15 +332,16 @@ const packSeeds: PackSeed[] = [
         category: "society",
         isCore: true,
         fields: [
-          { fieldKey: "purpose", fieldLabel: "Purpose", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "leader", fieldLabel: "Leader", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "influence", fieldLabel: "Influence", fieldType: EntityFieldType.TEXT }
+          { fieldKey: "leaderId", fieldLabel: "Leader", fieldType: EntityFieldType.ENTITY_REFERENCE },
+          { fieldKey: "headquartersLocationId", fieldLabel: "Headquarters", fieldType: EntityFieldType.LOCATION_REFERENCE },
+          { fieldKey: "goals", fieldLabel: "Goals", fieldType: EntityFieldType.TEXT }
         ]
       },
       {
         name: "Race",
         description: "Cultures, ancestries, or species.",
         category: "people",
+        isCore: true,
         fields: [
           { fieldKey: "origin", fieldLabel: "Origin", fieldType: EntityFieldType.TEXT },
           { fieldKey: "traits", fieldLabel: "Traits", fieldType: EntityFieldType.TEXT }
@@ -352,13 +357,13 @@ const packSeeds: PackSeed[] = [
         ]
       },
       {
-        name: "Item",
+        name: "Objects",
         description: "Artifacts, gear, and notable objects.",
         category: "items",
         fields: [
-          { fieldKey: "itemType", fieldLabel: "Type", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "rarity", fieldLabel: "Rarity", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "origin", fieldLabel: "Origin", fieldType: EntityFieldType.TEXT }
+          { fieldKey: "value", fieldLabel: "Value", fieldType: EntityFieldType.TEXT },
+          { fieldKey: "properties", fieldLabel: "Properties", fieldType: EntityFieldType.TEXT },
+          { fieldKey: "history", fieldLabel: "History", fieldType: EntityFieldType.TEXT }
         ]
       },
       {
@@ -367,11 +372,28 @@ const packSeeds: PackSeed[] = [
         category: "society",
         fields: [
           { fieldKey: "rank", fieldLabel: "Rank", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "domain", fieldLabel: "Domain", fieldType: EntityFieldType.TEXT }
+          { fieldKey: "domain", fieldLabel: "Domain", fieldType: EntityFieldType.TEXT },
+          { fieldKey: "grantedRights", fieldLabel: "Granted Rights", fieldType: EntityFieldType.TEXT }
         ]
       }
     ],
     locationTemplates: [
+      {
+        name: "Plane",
+        description: "Planes of existence and cosmological realms.",
+        isCore: true,
+        fields: [
+          { fieldKey: "description", fieldLabel: "Description", fieldType: LocationFieldType.TEXT }
+        ]
+      },
+      {
+        name: "Continent",
+        description: "Continents and major landmasses.",
+        isCore: true,
+        fields: [
+          { fieldKey: "description", fieldLabel: "Description", fieldType: LocationFieldType.TEXT }
+        ]
+      },
       {
         name: "Country",
         description: "Sovereign nations and realms.",
@@ -416,23 +438,32 @@ const packSeeds: PackSeed[] = [
         ]
       },
       {
-        name: "Geographical",
-        description: "Natural landmarks and features.",
+        name: "Dungeon",
+        description: "Dungeons, lairs, and underground complexes.",
         fields: [
-          { fieldKey: "featureType", fieldLabel: "Feature Type", fieldType: LocationFieldType.CHOICE, choiceListKey: "geographical_feature_type" },
+          { fieldKey: "description", fieldLabel: "Description", fieldType: LocationFieldType.TEXT }
+        ]
+      },
+      {
+        name: "Area",
+        description: "Notable areas within a region or settlement.",
+        fields: [
           { fieldKey: "description", fieldLabel: "Description", fieldType: LocationFieldType.TEXT }
         ]
       }
     ],
     locationRules: [
+      { parent: "Plane", child: "Continent" },
+      { parent: "Continent", child: "Country" },
       { parent: "Country", child: "Region" },
-      { parent: "Country", child: "Settlement" },
-      { parent: "Country", child: "Geographical" },
       { parent: "Region", child: "Settlement" },
-      { parent: "Region", child: "Geographical" },
       { parent: "Settlement", child: "District" },
-      { parent: "Settlement", child: "Building" },
-      { parent: "District", child: "Building" }
+      { parent: "District", child: "Building" },
+      { parent: "Region", child: "Dungeon" },
+      { parent: "Settlement", child: "Dungeon" },
+      { parent: "Region", child: "Area" },
+      { parent: "Settlement", child: "Area" },
+      { parent: "Dungeon", child: "Area" }
     ],
     relationshipTemplates: [
       {
@@ -453,7 +484,9 @@ const packSeeds: PackSeed[] = [
         toLabel: "Enemy",
         roles: [
           { fromRole: "Character", toRole: "Character" },
-          { fromRole: "Organisation", toRole: "Organisation" }
+          { fromRole: "Organisation", toRole: "Organisation" },
+          { fromRole: "Character", toRole: "Organisation" },
+          { fromRole: "Organisation", toRole: "Character" }
         ]
       },
       {
@@ -464,8 +497,60 @@ const packSeeds: PackSeed[] = [
         toLabel: "Ally",
         roles: [
           { fromRole: "Character", toRole: "Character" },
-          { fromRole: "Organisation", toRole: "Organisation" }
+          { fromRole: "Organisation", toRole: "Organisation" },
+          { fromRole: "Character", toRole: "Organisation" },
+          { fromRole: "Organisation", toRole: "Character" }
         ]
+      },
+      {
+        name: "Sibling Of",
+        description: "Characters who share family ties.",
+        isPeerable: true,
+        fromLabel: "Sibling",
+        toLabel: "Sibling",
+        roles: [{ fromRole: "Character", toRole: "Character" }]
+      },
+      {
+        name: "Parent Of",
+        description: "A parental relationship between characters.",
+        fromLabel: "Parent",
+        toLabel: "Child",
+        roles: [{ fromRole: "Character", toRole: "Character" }]
+      },
+      {
+        name: "Spouse Of",
+        description: "A spousal bond between characters.",
+        isPeerable: true,
+        fromLabel: "Spouse",
+        toLabel: "Spouse",
+        roles: [{ fromRole: "Character", toRole: "Character" }]
+      },
+      {
+        name: "Covets",
+        description: "Someone covets an object or treasure.",
+        fromLabel: "Coveter",
+        toLabel: "Coveted",
+        roles: [
+          { fromRole: "Character", toRole: "Objects" },
+          { fromRole: "Organisation", toRole: "Objects" }
+        ]
+      },
+      {
+        name: "Possesses",
+        description: "Ownership or possession of an object.",
+        fromLabel: "Owner",
+        toLabel: "Possession",
+        roles: [
+          { fromRole: "Character", toRole: "Objects" },
+          { fromRole: "Organisation", toRole: "Objects" }
+        ]
+      },
+      {
+        name: "Membership",
+        description: "A character belongs to an organisation.",
+        fromLabel: "Member",
+        toLabel: "Organisation",
+        roles: [{ fromRole: "Character", toRole: "Organisation" }]
       },
       {
         name: "Holds Title",
@@ -473,6 +558,16 @@ const packSeeds: PackSeed[] = [
         fromLabel: "Holder",
         toLabel: "Title",
         roles: [{ fromRole: "Character", toRole: "Title" }]
+      },
+      {
+        name: "Employment",
+        description: "An employer employs a character.",
+        fromLabel: "Employer",
+        toLabel: "Employee",
+        roles: [
+          { fromRole: "Organisation", toRole: "Character" },
+          { fromRole: "Character", toRole: "Character" }
+        ]
       },
       {
         name: "Ruler Of",
