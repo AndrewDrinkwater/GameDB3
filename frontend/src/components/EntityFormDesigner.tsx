@@ -44,6 +44,7 @@ export default function EntityFormDesigner({
   const [sections, setSections] = useState<FormSection[]>([]);
   const [fields, setFields] = useState<FieldDefinition[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingSectionId, setDeletingSectionId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const dragFieldId = useRef<string | null>(null);
 
@@ -212,20 +213,25 @@ export default function EntityFormDesigner({
   };
 
   const handleDeleteSection = async (sectionId: string) => {
-    if (readOnly) return;
-    if (!window.confirm("Delete this section? Fields will be unassigned.")) return;
-    const response = await fetch(`/api/entity-form-sections/${sectionId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (handleUnauthorized(response)) return;
-    if (!response.ok) return;
-    setSections((current) => current.filter((section) => section.id !== sectionId));
-    setFields((current) =>
-      current.map((field) =>
-        field.formSectionId === sectionId ? { ...field, formSectionId: null, formColumn: 1 } : field
-      )
-    );
+    if (readOnly || deletingSectionId === sectionId) return;
+    if (!window.confirm("Delete this item? Fields will be unassigned.")) return;
+    setDeletingSectionId(sectionId);
+    try {
+      const response = await fetch(`/api/entity-form-sections/${sectionId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (handleUnauthorized(response)) return;
+      if (!response.ok) return;
+      setSections((current) => current.filter((section) => section.id !== sectionId));
+      setFields((current) =>
+        current.map((field) =>
+          field.formSectionId === sectionId ? { ...field, formSectionId: null, formColumn: 1 } : field
+        )
+      );
+    } finally {
+      setDeletingSectionId(null);
+    }
   };
 
   const updateField = (fieldId: string, updater: (field: FieldDefinition) => FieldDefinition) => {
@@ -379,11 +385,11 @@ export default function EntityFormDesigner({
                 </select>
                 <button
                   type="button"
-                  className="ghost-button"
+                  className="danger-button"
                   onClick={() => handleDeleteSection(section.id)}
-                  disabled={readOnly}
+                  disabled={readOnly || deletingSectionId === section.id}
                 >
-                  Remove
+                  {deletingSectionId === section.id ? "Removing..." : "Remove"}
                 </button>
               </div>
             </div>

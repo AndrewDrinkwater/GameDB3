@@ -1,434 +1,192 @@
 import express from "express";
-import { Prisma } from "@prisma/client";
-import { prisma, requireAuth, isAdmin, isWorldArchitect, isWorldGameMaster, isWorldGm, canManageCampaign, canCreateCampaign } from "../lib/helpers";
+import { requireAuth } from "../lib/helpers";
 import type { AuthRequest } from "../lib/helpers";
+import {
+  listCampaigns,
+  createCampaign,
+  getCampaign,
+  updateCampaign,
+  deleteCampaign,
+  addCharacterToCampaign,
+  removeCharacterFromCampaign,
+  addCampaignCharacterCreator,
+  removeCampaignCharacterCreator
+} from "../services/campaignService";
+import { ServiceError } from "../services/serviceError";
+
+const handleCampaignServiceError = (res: express.Response, error: unknown, fallbackMessage: string) => {
+  if (error instanceof ServiceError) {
+    res.status(error.status).json({ error: error.message });
+    return;
+  }
+  console.error(fallbackMessage, error);
+  res.status(500).json({ error: fallbackMessage });
+};
 
 export const registerCampaignsRoutes = (app: express.Express) => {
   app.get("/api/campaigns", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-  
+    const user = (req as AuthRequest).user!;
     const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
     const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
     const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
-  
-    const accessClause: Prisma.CampaignWhereInput = isAdmin(user)
-      ? {}
-      : {
-          OR: [
-            { gmUserId: user.id },
-            { createdById: user.id },
-            { world: { primaryArchitectId: user.id } },
-            { world: { architects: { some: { userId: user.id } } } },
-            { roster: { some: { character: { playerId: user.id } } } }
-          ]
-        };
-  
-    const filters: Prisma.CampaignWhereInput[] = [accessClause];
-    if (worldId) filters.push({ worldId });
-    if (campaignId) filters.push({ id: campaignId });
-    if (characterId) filters.push({ roster: { some: { characterId } } });
-  
-    const whereClause: Prisma.CampaignWhereInput =
-      filters.length > 1 ? { AND: filters } : accessClause;
-  
-    const campaigns = await prisma.campaign.findMany({
-      where: whereClause,
-      orderBy: { name: "asc" }
-    });
-  
-    res.json(campaigns);
+
+    try {
+      const campaigns = await listCampaigns({ user, worldId, characterId, campaignId });
+      res.json(campaigns);
+    } catch (error) {
+      handleCampaignServiceError(res, error, "Failed to list campaigns.");
+    }
   });
 
   app.post("/api/campaigns", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-  
-    const { worldId, name, description, gmUserId, characterIds } = req.body as {
+    const user = (req as AuthRequest).user!;
+    const body = req.body as {
       worldId?: string;
       name?: string;
       description?: string;
       gmUserId?: string;
       characterIds?: string[];
     };
-  
-    if (!worldId || !name) {
-      res.status(400).json({ error: "worldId and name are required." });
-      return;
-    }
-  
-    if (!isAdmin(user)) {
-      const allowed = await canCreateCampaign(user.id, worldId);
-      if (!allowed) {
-        res.status(403).json({ error: "Forbidden." });
-        return;
-      }
-    }
-  
-    const isArchitect = await isWorldArchitect(user.id, worldId);
-    const finalGmId = gmUserId ?? user.id;
-  
-    if (!isAdmin(user) && !isArchitect) {
-      const gmEntry = await prisma.worldGameMaster.findFirst({
-        where: { worldId, userId: finalGmId }
+
+    try {
+      const campaign = await createCampaign({
+        user,
+        worldId: body.worldId,
+        name: body.name,
+        description: body.description,
+        gmUserId: body.gmUserId,
+        characterIds: body.characterIds
       });
-      if (!gmEntry) {
-        res.status(403).json({ error: "GM must be assigned to this world." });
-        return;
-      }
+      res.status(201).json(campaign);
+    } catch (error) {
+      handleCampaignServiceError(res, error, "Failed to create campaign.");
     }
-  
-    if (gmUserId && (isAdmin(user) || isArchitect)) {
-      await prisma.worldGameMaster.upsert({
-        where: { worldId_userId: { worldId, userId: finalGmId } },
-        update: {},
-        create: { worldId, userId: finalGmId }
-      });
-    } else if (!gmUserId && (isAdmin(user) || isArchitect)) {
-      await prisma.worldGameMaster.upsert({
-        where: { worldId_userId: { worldId, userId: finalGmId } },
-        update: {},
-        create: { worldId, userId: finalGmId }
-      });
-    }
-  
-    const campaign = await prisma.campaign.create({
-      data: {
-        name,
-        description,
-        worldId,
-        ownerId: user.id,
-        createdById: user.id,
-        gmUserId: finalGmId
-      }
-    });
-  
-    if (Array.isArray(characterIds) && characterIds.length > 0) {
-      const characters = await prisma.character.findMany({
-        where: { id: { in: characterIds } },
-        select: { id: true, worldId: true }
-      });
-  
-      const validIds = characters.filter((character) => character.worldId === worldId).map((c) => c.id);
-      if (validIds.length > 0) {
-        await prisma.characterCampaign.createMany({
-          data: validIds.map((characterId) => ({
-            campaignId: campaign.id,
-            characterId,
-            status: "ACTIVE"
-          })),
-          skipDuplicates: true
-        });
-      }
-    }
-  
-    res.status(201).json(campaign);
   });
 
   app.get("/api/campaigns/:id", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
+    const user = (req as AuthRequest).user!;
+    const campaignId = req.params.id;
+
+    try {
+      const campaign = await getCampaign({ user, campaignId });
+      res.json(campaign);
+    } catch (error) {
+      handleCampaignServiceError(res, error, "Failed to load campaign.");
     }
-  
-    const { id } = req.params;
-    const campaign = await prisma.campaign.findUnique({
-      where: { id },
-      include: {
-        world: { include: { architects: true } },
-        roster: { include: { character: { select: { playerId: true } } } }
-      }
-    });
-  
-    if (!campaign) {
-      res.status(404).json({ error: "Campaign not found." });
-      return;
-    }
-  
-    const canAccess =
-      isAdmin(user) ||
-      campaign.gmUserId === user.id ||
-      campaign.createdById === user.id ||
-      campaign.world.primaryArchitectId === user.id ||
-      campaign.world.architects.some((architect) => architect.userId === user.id) ||
-      campaign.roster.some((entry) => entry.character.playerId === user.id);
-  
-    if (!canAccess) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-  
-    res.json({
-      ...campaign,
-      characterIds: campaign.roster.map((entry) => entry.characterId)
-    });
   });
 
   app.put("/api/campaigns/:id", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-  
-    const { id } = req.params;
-    const campaign = await prisma.campaign.findUnique({
-      where: { id },
-      select: { worldId: true, gmUserId: true }
-    });
-  
-    if (!campaign) {
-      res.status(404).json({ error: "Campaign not found." });
-      return;
-    }
-  
-    const canManage = isAdmin(user) || (await canManageCampaign(user.id, id));
-    if (!canManage) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-  
-    const { name, description, gmUserId, worldId, characterIds } = req.body as {
+    const user = (req as AuthRequest).user!;
+    const campaignId = req.params.id;
+    const body = req.body as {
       name?: string;
       description?: string;
       gmUserId?: string;
       worldId?: string;
       characterIds?: string[];
     };
-  
-    if (worldId && worldId !== campaign.worldId) {
-      res.status(400).json({ error: "Campaign world cannot be changed." });
-      return;
-    }
-  
-    if (gmUserId && gmUserId !== campaign.gmUserId) {
-      const isArchitect = await isWorldArchitect(user.id, campaign.worldId);
-      const isWorldGm = await isWorldGameMaster(user.id, campaign.worldId);
-      const allowGmChange =
-        isAdmin(user) || isArchitect || isWorldGm || campaign.gmUserId === user.id;
-      if (!allowGmChange) {
-        res.status(403).json({ error: "Only admins, architects, GMs, or the current GM can change GM." });
-        return;
-      }
-  
-      if (!isAdmin(user) && !isArchitect) {
-        const gmEntry = await prisma.worldGameMaster.findFirst({
-          where: { worldId: campaign.worldId, userId: gmUserId }
-        });
-        if (!gmEntry) {
-          res.status(403).json({ error: "GM must be assigned to this world." });
-          return;
-        }
-      } else {
-        await prisma.worldGameMaster.upsert({
-          where: { worldId_userId: { worldId: campaign.worldId, userId: gmUserId } },
-          update: {},
-          create: { worldId: campaign.worldId, userId: gmUserId }
-        });
-      }
-    }
-  
-    const updated = await prisma.campaign.update({
-      where: { id },
-      data: { name, description, gmUserId }
-    });
-  
-    if (Array.isArray(characterIds)) {
-      const characters = await prisma.character.findMany({
-        where: { id: { in: characterIds } },
-        select: { id: true, worldId: true }
+
+    try {
+      const updated = await updateCampaign({
+        user,
+        campaignId,
+        name: body.name,
+        description: body.description,
+        gmUserId: body.gmUserId,
+        worldId: body.worldId,
+        characterIds: body.characterIds
       });
-      const validIds = characters.filter((c) => c.worldId === campaign.worldId).map((c) => c.id);
-  
-      await prisma.characterCampaign.deleteMany({
-        where: {
-          campaignId: id,
-          characterId: { notIn: validIds }
-        }
-      });
-  
-      if (validIds.length > 0) {
-        await prisma.characterCampaign.createMany({
-          data: validIds.map((characterId) => ({
-            campaignId: id,
-            characterId,
-            status: "ACTIVE"
-          })),
-          skipDuplicates: true
-        });
-      }
+      res.json(updated);
+    } catch (error) {
+      handleCampaignServiceError(res, error, "Failed to update campaign.");
     }
-  
-    res.json(updated);
   });
 
   app.delete("/api/campaigns/:id", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
+    const user = (req as AuthRequest).user!;
+    const campaignId = req.params.id;
+
+    try {
+      await deleteCampaign({ user, campaignId });
+      res.json({ ok: true });
+    } catch (error) {
+      handleCampaignServiceError(res, error, "Failed to delete campaign.");
     }
-  
-    const { id } = req.params;
-    const canManage = isAdmin(user) || (await canManageCampaign(user.id, id));
-    if (!canManage) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-  
-    await prisma.campaign.delete({ where: { id } });
-    res.json({ ok: true });
   });
 
   app.post("/api/campaigns/:id/character-creators", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-  
-    const { id } = req.params;
-    const { userId } = req.body as { userId?: string };
-  
-    if (!userId) {
+    const user = (req as AuthRequest).user!;
+    const campaignId = req.params.id;
+    const memberId = (req.body as { userId?: string }).userId;
+
+    if (!memberId) {
       res.status(400).json({ error: "userId is required." });
       return;
     }
-  
-    const canManage = isAdmin(user) || (await canManageCampaign(user.id, id));
-    if (!canManage) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
+
+    try {
+      const creator = await addCampaignCharacterCreator({ user, campaignId, memberId });
+      res.status(201).json(creator);
+    } catch (error) {
+      handleCampaignServiceError(res, error, "Failed to add campaign creator.");
     }
-  
-    const creator = await prisma.campaignCharacterCreator.upsert({
-      where: { campaignId_userId: { campaignId: id, userId } },
-      update: {},
-      create: { campaignId: id, userId }
-    });
-  
-    res.status(201).json(creator);
   });
 
   app.delete("/api/campaigns/:id/character-creators/:userId", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
+    const user = (req as AuthRequest).user!;
+    const campaignId = req.params.id;
+    const memberId = req.params.userId;
+
+    try {
+      await removeCampaignCharacterCreator({ user, campaignId, memberId });
+      res.json({ ok: true });
+    } catch (error) {
+      handleCampaignServiceError(res, error, "Failed to remove campaign creator.");
     }
-  
-    const { id, userId } = req.params;
-    const canManage = isAdmin(user) || (await canManageCampaign(user.id, id));
-    if (!canManage) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-  
-    await prisma.campaignCharacterCreator.delete({
-      where: { campaignId_userId: { campaignId: id, userId } }
-    });
-  
-    res.json({ ok: true });
   });
 
   app.post("/api/campaigns/:id/roster", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-  
-    const { id } = req.params;
+    const user = (req as AuthRequest).user!;
+    const campaignId = req.params.id;
     const { characterId, status } = req.body as { characterId?: string; status?: string };
-  
+
     if (!characterId) {
       res.status(400).json({ error: "characterId is required." });
       return;
     }
-  
-    const canManage = isAdmin(user) || (await canManageCampaign(user.id, id));
-    if (!canManage) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
+
+    try {
+      const rosterEntry = await addCharacterToCampaign({ user, campaignId, characterId, status });
+      res.status(201).json(rosterEntry);
+    } catch (error) {
+      handleCampaignServiceError(res, error, "Failed to add roster entry.");
     }
-  
-    const campaign = await prisma.campaign.findUnique({
-      where: { id },
-      select: { worldId: true }
-    });
-    const character = await prisma.character.findUnique({
-      where: { id: characterId },
-      select: { worldId: true }
-    });
-  
-    if (!campaign || !character || campaign.worldId !== character.worldId) {
-      res.status(400).json({ error: "World mismatch." });
-      return;
-    }
-  
-    const rosterEntry = await prisma.characterCampaign.upsert({
-      where: { characterId_campaignId: { characterId, campaignId: id } },
-      update: { status: status === "INACTIVE" ? "INACTIVE" : "ACTIVE" },
-      create: {
-        characterId,
-        campaignId: id,
-        status: status === "INACTIVE" ? "INACTIVE" : "ACTIVE"
-      }
-    });
-  
-    res.status(201).json(rosterEntry);
   });
 
   app.put("/api/campaigns/:id/roster/:characterId", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
-    }
-  
-    const { id, characterId } = req.params;
+    const user = (req as AuthRequest).user!;
+    const campaignId = req.params.id;
+    const characterId = req.params.characterId;
     const { status } = req.body as { status?: string };
-  
-    const canManage = isAdmin(user) || (await canManageCampaign(user.id, id));
-    if (!canManage) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
+
+    try {
+      const rosterEntry = await addCharacterToCampaign({ user, campaignId, characterId, status });
+      res.json(rosterEntry);
+    } catch (error) {
+      handleCampaignServiceError(res, error, "Failed to update roster entry.");
     }
-  
-    const rosterEntry = await prisma.characterCampaign.update({
-      where: { characterId_campaignId: { characterId, campaignId: id } },
-      data: { status: status === "INACTIVE" ? "INACTIVE" : "ACTIVE" }
-    });
-  
-    res.json(rosterEntry);
   });
 
   app.delete("/api/campaigns/:id/roster/:characterId", requireAuth, async (req, res) => {
-    const user = (req as AuthRequest).user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized." });
-      return;
+    const user = (req as AuthRequest).user!;
+    const campaignId = req.params.id;
+    const characterId = req.params.characterId;
+
+    try {
+      await removeCharacterFromCampaign({ user, campaignId, characterId });
+      res.json({ ok: true });
+    } catch (error) {
+      handleCampaignServiceError(res, error, "Failed to remove roster entry.");
     }
-  
-    const { id, characterId } = req.params;
-    const canManage = isAdmin(user) || (await canManageCampaign(user.id, id));
-    if (!canManage) {
-      res.status(403).json({ error: "Forbidden." });
-      return;
-    }
-  
-    await prisma.characterCampaign.delete({
-      where: { characterId_campaignId: { characterId, campaignId: id } }
-    });
-  
-    res.json({ ok: true });
   });
-  
 };

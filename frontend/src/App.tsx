@@ -1,8 +1,6 @@
 import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { dispatchUnauthorized } from "./utils/auth";
-import ListView from "./components/ListView";
-import FormView from "./components/FormView";
 import ContextBar, { ContextSelection } from "./components/ContextBar";
 import PopoutProvider from "./components/PopoutProvider";
 import { useUnsavedChangesPrompt } from "./utils/unsavedChanges";
@@ -10,6 +8,10 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import SessionsPanel from "./components/SessionsPanel";
 import WorldBuilder from "./components/WorldBuilder";
 import RuleBuilder from "./components/RuleBuilder";
+import AdminFormView from "./views/AdminFormView";
+import AdminListView from "./views/AdminListView";
+import FormRouteView from "./views/FormRouteView";
+import ListRouteView from "./views/ListRouteView";
 
 type User = {
   id: string;
@@ -1305,132 +1307,51 @@ function AppShell() {
       if (routeParts[0] === "list" && routeParts[1]) {
         const config = viewRegistry[routeParts[1]];
         if (!config) return null;
-        const extraParams =
-          routeParts[1] === "entities" && entityTypeIdParam
-            ? { entityTypeId: entityTypeIdParam }
-            : routeParts[1] === "locations" && locationTypeIdParam
-              ? { locationTypeId: locationTypeIdParam }
-              : undefined;
-        const titleOverride =
-          routeParts[1] === "entities" && selectedEntityType
-            ? selectedEntityType.name
-            : undefined;
-        const subtitleOverride =
-          routeParts[1] === "entities" && selectedEntityType ? "Entities" : undefined;
         return (
-          <section className="app__panel app__panel--wide">
-            <ListView
-              token={token}
-              viewKey={config.listKey}
-              formViewKey={config.formKey}
-              contextWorldId={context.worldId}
-              contextCampaignId={context.campaignId}
-              contextCharacterId={context.characterId}
-              extraParams={extraParams}
-              titleOverride={titleOverride}
-              subtitleOverride={subtitleOverride}
-              currentUserRole={user.role}
-              onOpenForm={(id) => {
-                if (routeParts[1] === "entities" && id === "new" && entityTypeIdParam) {
-                  navigateWithGuard(`/form/entities/new?entityTypeId=${entityTypeIdParam}`);
-                } else if (
-                  routeParts[1] === "locations" &&
-                  id === "new" &&
-                  locationTypeIdParam
-                ) {
-                  navigateWithGuard(`/form/locations/new?locationTypeId=${locationTypeIdParam}`);
-                } else {
-                  navigateWithGuard(`/form/${routeParts[1]}/${id}`);
-                }
-                handleSidebarSelect();
-              }}
-            />
-          </section>
+          <ListRouteView
+            token={token}
+            listKey={routeParts[1]}
+            config={config}
+            contextWorldId={context.worldId}
+            contextCampaignId={context.campaignId}
+            contextCharacterId={context.characterId}
+            entityTypeIdParam={entityTypeIdParam}
+            locationTypeIdParam={locationTypeIdParam}
+            selectedEntityType={selectedEntityType}
+            currentUserRole={user.role}
+            navigateWithGuard={navigateWithGuard}
+            handleSidebarSelect={handleSidebarSelect}
+          />
         );
       }
 
       if (routeParts[0] === "form" && routeParts[1] && routeParts[2]) {
         const config = viewRegistry[routeParts[1]];
         if (!config) return null;
-        const initialValues =
-          routeParts[2] === "new"
-            ? routeParts[1] === "campaigns"
-              ? context.worldId
-                ? { worldId: context.worldId }
-                : undefined
-              : routeParts[1] === "characters"
-                ? context.worldId
-                  ? { worldId: context.worldId }
-                  : undefined
-                : routeParts[1] === "entities"
-                  ? context.worldId || entityTypeIdParam
-                    ? {
-                        ...(context.worldId ? { worldId: context.worldId } : {}),
-                        ...(entityTypeIdParam ? { entityTypeId: entityTypeIdParam } : {})
-                      }
-                    : undefined
-                  : routeParts[1] === "locations"
-                    ? context.worldId || locationTypeIdParam
-                      ? {
-                          ...(context.worldId ? { worldId: context.worldId } : {}),
-                          ...(locationTypeIdParam
-                            ? { locationTypeId: locationTypeIdParam }
-                            : {})
-                        }
-                      : undefined
-                  : routeParts[1] === "entity_types"
-                    ? context.worldId
-                      ? { worldId: context.worldId }
-                      : undefined
-                    : routeParts[1] === "relationship_types"
-                      ? context.worldId
-                        ? { worldId: context.worldId }
-                        : undefined
-                    : routeParts[1] === "location_types"
-                      ? context.worldId
-                        ? { worldId: context.worldId }
-                        : undefined
-                : undefined
-            : undefined;
-        const initialLabels =
-          routeParts[2] === "new"
-            ? {
-                ...(context.worldLabel ? { worldId: context.worldLabel } : {}),
-                ...(selectedEntityType?.name
-                  ? { entityTypeId: selectedEntityType.name }
-                  : {})
-              }
-            : undefined;
-      return (
-        <section className="app__panel app__panel--wide">
-            <FormView
-              token={token}
-              viewKey={config.formKey}
-              recordId={routeParts[2]}
-                onBack={() => {
-                  if (routeParts[1] === "entities") {
-                    navigateWithGuard(lastEntitiesListRoute ?? "/list/entities");
-                    return;
-                  }
-                  const listPath = `/list/${routeParts[1]}`;
-                  navigateWithGuard(listPath);
-                }}
-              currentUserId={user.id}
-              currentUserLabel={user.name ?? user.email}
-              currentUserRole={user.role}
-              initialValues={initialValues}
-              initialLabels={initialLabels}
-              contextWorldId={context.worldId}
-              contextWorldLabel={context.worldLabel}
-              contextCampaignId={context.campaignId}
-              contextCharacterId={context.characterId}
-              onContextSwitch={handleContextSwitch}
-            />
-        </section>
-      );
-    }
+        return (
+          <FormRouteView
+            token={token}
+            entityKey={routeParts[1]}
+            config={config}
+            recordId={routeParts[2]}
+            currentUserId={user.id}
+            currentUserLabel={user.name ?? user.email}
+            currentUserRole={user.role}
+            contextWorldId={context.worldId}
+            contextWorldLabel={context.worldLabel}
+            contextCampaignId={context.campaignId}
+            contextCharacterId={context.characterId}
+            entityTypeIdParam={entityTypeIdParam}
+            locationTypeIdParam={locationTypeIdParam}
+            selectedEntityType={selectedEntityType}
+            lastEntitiesListRoute={lastEntitiesListRoute}
+            navigateWithGuard={navigateWithGuard}
+            onContextSwitch={handleContextSwitch}
+          />
+        );
+      }
 
-    if (routeParts[0] === "admin" && routeParts[1]) {
+      if (routeParts[0] === "admin" && routeParts[1]) {
       if (user.role !== "ADMIN") {
         return (
           <section className="app__panel">
@@ -1445,37 +1366,30 @@ function AppShell() {
 
       if (routeParts[2]) {
         return (
-          <section className="app__panel app__panel--wide">
-            <FormView
-              token={token}
-              viewKey={config.formKey}
-              recordId={routeParts[2]}
-              onBack={() => {
-                navigateWithGuard(`/admin/${routeParts[1]}`);
-              }}
-              currentUserId={user.id}
-              currentUserLabel={user.name ?? user.email}
-              currentUserRole={user.role}
-              contextWorldLabel={context.worldLabel}
-              onContextSwitch={handleContextSwitch}
-            />
-          </section>
+          <AdminFormView
+            token={token}
+            adminKey={routeParts[1]}
+            config={config}
+            recordId={routeParts[2]}
+            currentUserId={user.id}
+            currentUserLabel={user.name ?? user.email}
+            currentUserRole={user.role}
+            contextWorldLabel={context.worldLabel}
+            navigateWithGuard={navigateWithGuard}
+            onContextSwitch={handleContextSwitch}
+          />
         );
       }
 
       return (
-        <section className="app__panel app__panel--wide">
-            <ListView
-              token={token}
-              viewKey={config.listKey}
-              formViewKey={config.formKey}
-              currentUserRole={user.role}
-              onOpenForm={(id) => {
-                navigateWithGuard(`/admin/${routeParts[1]}/${id}`);
-                handleSidebarSelect();
-              }}
-            />
-        </section>
+        <AdminListView
+          token={token}
+          adminKey={routeParts[1]}
+          config={config}
+          currentUserRole={user.role}
+          navigateWithGuard={navigateWithGuard}
+          handleSidebarSelect={handleSidebarSelect}
+        />
       );
     }
 
@@ -1592,7 +1506,12 @@ function AppShell() {
                 </button>
                 {profileOpen ? (
                   <>
-                    <div className="profile-menu__overlay" onClick={() => setProfileOpen(false)} />
+                    <button
+                      type="button"
+                      className="profile-menu__overlay"
+                      aria-label="Close profile menu"
+                      onClick={() => setProfileOpen(false)}
+                    />
                     <div className="profile-menu" role="menu">
                     <div className="profile-menu__header">
                       <div className="profile-menu__name">{user.name ?? user.email}</div>
@@ -1618,7 +1537,12 @@ function AppShell() {
 
           <div className="app__body">
             {isSidebarOpen && !isSidebarPinned ? (
-              <div className="sidebar__overlay" onClick={handleSidebarClose} />
+              <button
+                type="button"
+                className="sidebar__overlay"
+                aria-label="Close sidebar"
+                onClick={handleSidebarClose}
+              />
             ) : null}
             <aside
               className={`sidebar ${isSidebarOpen ? "sidebar--open" : ""}`}
@@ -2074,9 +1998,13 @@ function AppShell() {
                   </nav>
                 ) : null}
                 {sidebarMode === "favorites" ? (
-                  <div className="sidebar__empty" onClick={handleSidebarSelect}>
+                  <button
+                    type="button"
+                    className="sidebar__empty"
+                    onClick={handleSidebarSelect}
+                  >
                     No favorites yet.
-                  </div>
+                  </button>
                 ) : null}
                 {sidebarMode === "collapsed" ? (
                   <div className="sidebar__empty">Select Menu or Favorites.</div>

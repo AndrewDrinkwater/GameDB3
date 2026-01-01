@@ -1510,7 +1510,7 @@ export default function EntityRelationships({
                         ) : null}
                         <button
                           type="button"
-                          className="ghost-button relationship-table__delete"
+                          className="danger-button relationship-table__delete"
                           onClick={() => handleDelete(item)}
                         >
                           Delete

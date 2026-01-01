@@ -143,6 +143,7 @@ export default function EntityNotes({
   const [editBody, setEditBody] = useState("");
   const [editVisibility, setEditVisibility] = useState<"PRIVATE" | "SHARED" | "GM">("PRIVATE");
   const [editSaving, setEditSaving] = useState(false);
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
   const [editOriginalBody, setEditOriginalBody] = useState("");
   const [editOriginalVisibility, setEditOriginalVisibility] = useState<
     "PRIVATE" | "SHARED" | "GM"
@@ -575,7 +576,9 @@ export default function EntityNotes({
   };
 
   const handleDelete = async (noteId: string) => {
-    if (!window.confirm("Delete this note?")) return;
+    if (deletingNoteId === noteId) return;
+    if (!window.confirm("Delete this item?")) return;
+    setDeletingNoteId(noteId);
     setError(null);
     try {
       const response = await fetch(`/api/notes/${noteId}`, {
@@ -596,6 +599,8 @@ export default function EntityNotes({
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to delete note.");
+    } finally {
+      setDeletingNoteId(null);
     }
   };
 
@@ -790,10 +795,11 @@ export default function EntityNotes({
                             </button>
                             <button
                               type="button"
-                              className="ghost-button"
+                              className="danger-button"
                               onClick={() => handleDelete(note.id)}
+                              disabled={deletingNoteId === note.id}
                             >
-                              Delete
+                              {deletingNoteId === note.id ? "Deleting..." : "Delete"}
                             </button>
                           </div>
                         ) : null}

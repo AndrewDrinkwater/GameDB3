@@ -5,9 +5,23 @@
     "dev": "concurrently -k -n backend,frontend -c blue,magenta \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
     "install:all": "npm --prefix backend install && npm --prefix frontend install",
     "test": "npm --prefix backend test && npm --prefix frontend test",
+    "lint": "eslint \"backend/src/**/*.{ts,tsx}\" \"frontend/src/**/*.{ts,tsx}\"",
+    "lint:fix": "eslint \"backend/src/**/*.{ts,tsx}\" \"frontend/src/**/*.{ts,tsx}\" --fix",
     "db:unlock": "powershell -File backend/scripts/unlock_migrations.ps1"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "@testing-library/react": "^16.3.1",
+    "@types/jest": "^30.0.0",
+    "@types/react": "^18.3.5",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "concurrently": "^8.2.2",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-react": "^7.35.0",
+    "jest": "^30.2.0",
+    "prettier": "^3.0.0",
+    "ts-jest": "^29.4.6"
   }
 }
