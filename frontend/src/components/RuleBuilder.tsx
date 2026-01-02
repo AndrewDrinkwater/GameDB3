@@ -24,9 +24,16 @@ type RuleSummary = {
 type RuleBuilderProps = {
   token: string;
   contextWorldId?: string | null;
+  initialRelationshipTypeId?: string;
+  lockedRelationshipTypeId?: string;
 };
 
-const RuleBuilder = ({ token, contextWorldId }: RuleBuilderProps) => {
+const RuleBuilder = ({
+  token,
+  contextWorldId,
+  initialRelationshipTypeId,
+  lockedRelationshipTypeId
+}: RuleBuilderProps) => {
   const [relationshipTypes, setRelationshipTypes] = useState<RelationshipType[]>([]);
   const [selectedRelationshipTypeId, setSelectedRelationshipTypeId] = useState<string>("");
   const [rules, setRules] = useState<RuleSummary[]>([]);
@@ -71,6 +78,16 @@ const RuleBuilder = ({ token, contextWorldId }: RuleBuilderProps) => {
       ignore = true;
     };
   }, [headers, contextWorldId]);
+
+  useEffect(() => {
+    if (lockedRelationshipTypeId) {
+      setSelectedRelationshipTypeId(lockedRelationshipTypeId);
+      return;
+    }
+    if (initialRelationshipTypeId) {
+      setSelectedRelationshipTypeId(initialRelationshipTypeId);
+    }
+  }, [initialRelationshipTypeId, lockedRelationshipTypeId]);
 
   useEffect(() => {
     let ignore = false;
@@ -285,6 +302,7 @@ const RuleBuilder = ({ token, contextWorldId }: RuleBuilderProps) => {
           <select
             value={selectedRelationshipTypeId}
             onChange={(event) => setSelectedRelationshipTypeId(event.target.value)}
+            disabled={Boolean(lockedRelationshipTypeId)}
           >
             <option value="">Select a relationship type...</option>
             {relationshipTypes.map((type) => (

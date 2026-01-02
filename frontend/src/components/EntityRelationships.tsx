@@ -700,17 +700,14 @@ export default function EntityRelationships({
 
   const previewText = useMemo(() => {
     if (!selectedRelationshipType || !targetEntity) return null;
-    if (selectedRelationshipType.isPeerable) {
-      return `${currentEntityLabel} ${selectedRelationshipType.fromLabel} ${targetEntity.label}`;
-    }
-    const fromName = direction === "outgoing" ? currentEntityLabel : targetEntity.label;
-    const toName = direction === "outgoing" ? targetEntity.label : currentEntityLabel;
-    const label =
-      direction === "outgoing"
-        ? selectedRelationshipType.fromLabel
-        : selectedRelationshipType.toLabel;
-    return `${fromName} ${label} ${toName}`;
-  }, [selectedRelationshipType, targetEntity, direction, currentEntityLabel]);
+    const fromLabel = selectedRelationshipType.fromLabel || "relates to";
+    const toLabel = selectedRelationshipType.toLabel || "relates to";
+    const sourceLabel = direction === "incoming" ? targetEntity.label : currentEntityLabel;
+    const targetLabel = direction === "incoming" ? currentEntityLabel : targetEntity.label;
+    const forward = `${sourceLabel} ${fromLabel} ${targetLabel}`;
+    const reverse = `${targetLabel} ${toLabel} ${sourceLabel}`;
+    return `${forward} / ${reverse}`;
+  }, [selectedRelationshipType, targetEntity, currentEntityLabel, direction]);
 
   useEffect(() => {
     if (!relationshipTypeId) return;

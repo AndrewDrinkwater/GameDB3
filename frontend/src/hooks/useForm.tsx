@@ -237,6 +237,7 @@ export function useForm({
   const [relationshipTypeWorldId, setRelationshipTypeWorldId] = useState<string | null>(null);
   const [entityPanelId, setEntityPanelId] = useState<string | null>(null);
   const [entityTypePromptOptions, setEntityTypePromptOptions] = useState<Choice[]>([]);
+  const [locationTypePromptOptions, setLocationTypePromptOptions] = useState<Choice[]>([]);
   const [conditionFieldOptions, setConditionFieldOptions] = useState<ConditionFieldOption[]>([]);
   const [entityTab, setEntityTab] = useState<
     "info" | "config" | "relationships" | "access" | "notes" | "audit"
@@ -257,6 +258,8 @@ export function useForm({
   const suppressDirtyRef = useRef(false);
   const entityTypePromptShownRef = useRef(false);
   const entityTypeSelectionRef = useRef<string>("");
+  const locationTypePromptShownRef = useRef(false);
+  const locationTypeSelectionRef = useRef<string>("");
 
   const isNew = recordId === "new";
   const { permissions } = usePermissions({
@@ -514,6 +517,8 @@ export function useForm({
     suppressDirtyRef.current = false;
     entityTypePromptShownRef.current = false;
     entityTypeSelectionRef.current = "";
+    locationTypePromptShownRef.current = false;
+    locationTypeSelectionRef.current = "";
     setIsDirty(false);
   }, [viewKey, recordId]);
 
@@ -1039,6 +1044,107 @@ export function useForm({
     isNew,
     formData.entityTypeId,
     entityTypePromptOptions,
+    showPopout
+  ]);
+
+  useEffect(() => {
+    let ignore = false;
+    if (!view || view.entityKey !== "locations") return;
+    if (!isNew) return;
+    if (formData.locationTypeId) return;
+    const worldId = (formData.worldId as string | undefined) ?? contextWorldId;
+    if (!worldId) return;
+
+    const loadLocationTypes = async () => {
+      const params = new URLSearchParams({ entityKey: "location_types" });
+      params.set("worldId", worldId);
+      params.set("scope", "location_type");
+      const response = await fetch(`/api/references?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (handleUnauthorized(response)) return;
+      if (!response.ok) return;
+      const data = (await response.json()) as Array<{ id: string; label: string }>;
+      if (!ignore) {
+        setLocationTypePromptOptions(data.map((item) => ({ value: item.id, label: item.label })));
+      }
+    };
+
+    void loadLocationTypes();
+
+    return () => {
+      ignore = true;
+    };
+  }, [view, isNew, formData.locationTypeId, formData.worldId, contextWorldId, token]);
+
+  useEffect(() => {
+    if (!view || view.entityKey !== "locations") return;
+    if (!isNew) return;
+    if (formData.locationTypeId) return;
+    if (locationTypePromptShownRef.current) return;
+    if (locationTypePromptOptions.length === 0) return;
+
+    locationTypePromptShownRef.current = true;
+    locationTypeSelectionRef.current = locationTypePromptOptions[0]?.value ?? "";
+
+    const LocationTypePrompt = () => {
+      const [value, setValue] = useState(locationTypeSelectionRef.current);
+      return (
+        <label className="form-view__field">
+          <span className="form-view__label">Location type</span>
+          <select
+            value={value}
+            onChange={(event) => {
+              const next = event.target.value;
+              setValue(next);
+              locationTypeSelectionRef.current = next;
+            }}
+          >
+            {locationTypePromptOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      );
+    };
+
+    showPopout({
+      title: "What type of Location are you creating?",
+      message: <LocationTypePrompt />,
+      dismissOnBackdrop: false,
+      actions: [
+        {
+          label: "Set type",
+          tone: "primary",
+          onClick: () => {
+            const selected = locationTypeSelectionRef.current;
+            if (!selected) return;
+            const option = locationTypePromptOptions.find((item) => item.value === selected);
+            setFormData((current) => ({ ...current, locationTypeId: selected }));
+            if (option) {
+              setReferenceLabels((current) => ({
+                ...current,
+                locationTypeId: option.label
+              }));
+            }
+          }
+        },
+        {
+          label: "Cancel",
+          tone: "ghost",
+          onClick: () => {
+            handleNavigateAway(onBack);
+          }
+        }
+      ]
+    });
+  }, [
+    view,
+    isNew,
+    formData.locationTypeId,
+    locationTypePromptOptions,
     showPopout
   ]);
 
