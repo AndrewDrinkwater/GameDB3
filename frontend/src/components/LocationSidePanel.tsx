@@ -9,6 +9,7 @@ type LocationSummary = {
   worldId: string;
   status?: string | null;
   fieldValues?: Record<string, unknown>;
+  recordImages?: RecordImageSummary[];
 };
 
 type LocationSidePanelProps = {
@@ -29,6 +30,33 @@ type LocationFieldDefinition = {
   formOrder: number;
   listOrder: number;
   choices?: Array<{ value: string; label: string }>;
+};
+
+type RecordImageVariant = {
+  id: string;
+  variant: string;
+  url: string | null;
+};
+
+type RecordImageAsset = {
+  id: string;
+  variants: RecordImageVariant[];
+};
+
+type RecordImageSummary = {
+  id: string;
+  isPrimary: boolean;
+  asset: RecordImageAsset;
+  caption?: string | null;
+};
+
+const pickPreviewVariant = (variants: RecordImageVariant[]) => {
+  const order = ["SMALL", "MEDIUM", "LARGE", "THUMB"];
+  for (const preferred of order) {
+    const match = variants.find((variant) => variant.variant === preferred && variant.url);
+    if (match) return match;
+  }
+  return variants.find((variant) => Boolean(variant.url)) ?? null;
 };
 
 const formatFieldValue = (value: unknown) => {
@@ -58,6 +86,13 @@ export default function LocationSidePanel({
   const [locationReferenceLabels, setLocationReferenceLabels] = useState<Record<string, string>>(
     {}
   );
+  const primaryImage =
+    location?.recordImages?.find((image) => image.isPrimary) ??
+    location?.recordImages?.[0] ??
+    null;
+  const primaryImageVariant = primaryImage
+    ? pickPreviewVariant(primaryImage.asset.variants)
+    : null;
 
   useEffect(() => {
     let ignore = false;
@@ -269,6 +304,15 @@ export default function LocationSidePanel({
           <div>
             <span className="entity-panel__eyebrow">Location</span>
             <h2 className="entity-panel__title">{location?.name ?? "Loading..."}</h2>
+            {primaryImageVariant?.url ? (
+              <div className="entity-panel__image">
+                <img
+                  src={primaryImageVariant.url}
+                  alt={primaryImage?.caption ?? location?.name ?? "Location image"}
+                  loading="lazy"
+                />
+              </div>
+            ) : null}
             {locationTypeLabel ? (
               <div className="entity-panel__meta">{locationTypeLabel}</div>
             ) : null}

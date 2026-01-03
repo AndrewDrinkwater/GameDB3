@@ -97,6 +97,13 @@ enum EntityFormSectionLayout {
   TWO_COLUMN
 }
 
+enum ImageVariantType {
+  THUMB
+  SMALL
+  MEDIUM
+  LARGE
+}
+
 enum NoteVisibility {
   PRIVATE
   SHARED
@@ -162,6 +169,7 @@ model User {
   sessionNotesAuthored SessionNote[]     @relation("SessionNoteAuthor")
   createdRelationships Relationship[]    @relation("RelationshipCreator")
   createdPacks      Pack[]               @relation("PackCreator")
+  createdImageAssets ImageAsset[]        @relation("ImageAssetCreator")
 }
 
 model World {
@@ -191,6 +199,7 @@ model World {
   relationships     Relationship[]
   sessions          Session[]
   choiceLists       ChoiceList[]
+  imageAssets       ImageAsset[]         @relation("ImageAssetWorld")
 
   @@index([primaryArchitectId])
 }
@@ -532,6 +541,7 @@ model Entity {
   values     EntityFieldValue[]
   access     EntityAccess[]
   notes      Note[]
+  recordImages RecordImage[]
   relationshipsFrom Relationship[] @relation("RelationshipFrom")
   relationshipsTo Relationship[] @relation("RelationshipTo")
 
@@ -563,11 +573,76 @@ model Location {
   access         LocationAccess[]
   fieldValues    LocationFieldValue[]
   notes          Note[]
+  recordImages   RecordImage[]
 
   @@index([worldId])
   @@index([locationTypeId])
   @@index([parentLocationId])
   @@index([createdById])
+}
+
+model ImageAsset {
+  id               String   @id @default(uuid())
+  worldId          String
+  createdById      String
+  originalFileName String?
+  contentType      String
+  sizeBytes        Int
+  width            Int?
+  height           Int?
+  contentHash      String
+  originalKey      String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  world        World         @relation("ImageAssetWorld", fields: [worldId], references: [id])
+  createdBy    User          @relation("ImageAssetCreator", fields: [createdById], references: [id])
+  variants     ImageVariant[]
+  recordImages RecordImage[]
+
+  @@unique([worldId, contentHash])
+  @@index([worldId])
+}
+
+model ImageVariant {
+  id           String           @id @default(uuid())
+  imageAssetId String
+  variant      ImageVariantType
+  key          String
+  contentType  String
+  sizeBytes    Int
+  width        Int?
+  height       Int?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  imageAsset ImageAsset @relation(fields: [imageAssetId], references: [id])
+
+  @@unique([imageAssetId, variant])
+  @@index([imageAssetId])
+}
+
+model RecordImage {
+  id           String   @id @default(uuid())
+  imageAssetId String
+  entityId     String?
+  locationId   String?
+  isPrimary    Boolean  @default(false)
+  sortOrder    Int      @default(0)
+  caption      String?
+  focalX       Int      @default(50)
+  focalY       Int      @default(50)
+  zoom         Float    @default(1.0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  imageAsset ImageAsset @relation(fields: [imageAssetId], references: [id])
+  entity     Entity?    @relation(fields: [entityId], references: [id])
+  location   Location?  @relation(fields: [locationId], references: [id])
+
+  @@index([imageAssetId])
+  @@index([entityId])
+  @@index([locationId])
 }
 
 model RelationshipType {

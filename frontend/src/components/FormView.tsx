@@ -5,6 +5,7 @@ import EntitySidePanel from "./EntitySidePanel";
 import EntityNotes from "./EntityNotes";
 import EntityRelationships from "./EntityRelationships";
 import RelatedLists from "./RelatedLists";
+import RecordImages from "./RecordImages";
 import Toast from "./Toast";
 import ErrorState from "./ui/ErrorState";
 import LoadingState from "./ui/LoadingState";
@@ -73,6 +74,8 @@ export default function FormView(props: FormViewProps) {
     setEntityAuditLoading,
     entityAuditError,
     setEntityAuditError,
+    recordImages,
+    setRecordImages,
     openAuditEntryId,
     setOpenAuditEntryId,
     entityTypeWorldId,
@@ -354,6 +357,21 @@ export default function FormView(props: FormViewProps) {
                   {shouldUseCustomRows ? customRemainingFields.map(renderField) : null}
                 </>
               )}
+            {isRecordView && !isNew ? (
+              <div className="form-view__section">
+                <h2>Images</h2>
+                <RecordImages
+                  recordType={isEntityView ? "entities" : "locations"}
+                  recordId={recordId as string}
+                  worldId={
+                    typeof formData.worldId === "string" ? formData.worldId : contextWorldId
+                  }
+                  images={recordImages}
+                  onImagesChange={setRecordImages}
+                  canEdit={canEditRecord}
+                />
+              </div>
+            ) : null}
             {isRecordView ? (
               <div className="form-view__section">
                 <h2>Fields</h2>

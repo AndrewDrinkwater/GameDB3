@@ -8,6 +8,7 @@ type EntitySummary = {
   entityTypeId: string;
   worldId: string;
   fieldValues?: Record<string, unknown>;
+  recordImages?: RecordImageSummary[];
 };
 
 type EntitySidePanelProps = {
@@ -30,6 +31,33 @@ type EntityFieldDefinition = {
   conditions?: unknown;
   choices?: Array<{ value: string; label: string }>;
   referenceEntityTypeId?: string | null;
+};
+
+type RecordImageVariant = {
+  id: string;
+  variant: string;
+  url: string | null;
+};
+
+type RecordImageAsset = {
+  id: string;
+  variants: RecordImageVariant[];
+};
+
+type RecordImageSummary = {
+  id: string;
+  isPrimary: boolean;
+  asset: RecordImageAsset;
+  caption?: string | null;
+};
+
+const pickPreviewVariant = (variants: RecordImageVariant[]) => {
+  const order = ["SMALL", "MEDIUM", "LARGE", "THUMB"];
+  for (const preferred of order) {
+    const match = variants.find((variant) => variant.variant === preferred && variant.url);
+    if (match) return match;
+  }
+  return variants.find((variant) => Boolean(variant.url)) ?? null;
 };
 
 type ConditionRule = {
@@ -335,6 +363,13 @@ export default function EntitySidePanel({
   };
 
   const hasDescription = Boolean(entity?.description && entity.description.trim() !== "");
+  const primaryImage =
+    entity?.recordImages?.find((image) => image.isPrimary) ??
+    entity?.recordImages?.[0] ??
+    null;
+  const primaryImageVariant = primaryImage
+    ? pickPreviewVariant(primaryImage.asset.variants)
+    : null;
 
   return (
     <>
@@ -348,6 +383,15 @@ export default function EntitySidePanel({
           <div>
             <span className="entity-panel__eyebrow">Entity</span>
             <h2 className="entity-panel__title">{entity?.name ?? "Loading..."}</h2>
+            {primaryImageVariant?.url ? (
+              <div className="entity-panel__image">
+                <img
+                  src={primaryImageVariant.url}
+                  alt={primaryImage?.caption ?? entity?.name ?? "Entity image"}
+                  loading="lazy"
+                />
+              </div>
+            ) : null}
             {entityTypeLabel ? (
               <div className="entity-panel__meta">{entityTypeLabel}</div>
             ) : null}

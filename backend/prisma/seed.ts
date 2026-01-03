@@ -176,6 +176,126 @@ async function main() {
     }
   });
 
+  await prisma.systemProperty.upsert({
+    where: { key: "images.max_bytes" },
+    update: {
+      valueType: "INTEGER",
+      value: "10485760",
+      description: "Maximum allowed image upload size in bytes."
+    },
+    create: {
+      key: "images.max_bytes",
+      valueType: "INTEGER",
+      value: "10485760",
+      description: "Maximum allowed image upload size in bytes."
+    }
+  });
+
+  await prisma.systemProperty.upsert({
+    where: { key: "images.allowed_mime_types" },
+    update: {
+      valueType: "STRING",
+      value: "image/jpeg,image/png,image/webp",
+      description: "Comma-separated list of allowed image MIME types."
+    },
+    create: {
+      key: "images.allowed_mime_types",
+      valueType: "STRING",
+      value: "image/jpeg,image/png,image/webp",
+      description: "Comma-separated list of allowed image MIME types."
+    }
+  });
+
+  await prisma.systemProperty.upsert({
+    where: { key: "images.upload_url_expiry_seconds" },
+    update: {
+      valueType: "INTEGER",
+      value: "600",
+      description: "Signed upload URL expiry in seconds."
+    },
+    create: {
+      key: "images.upload_url_expiry_seconds",
+      valueType: "INTEGER",
+      value: "600",
+      description: "Signed upload URL expiry in seconds."
+    }
+  });
+
+  await prisma.systemProperty.upsert({
+    where: { key: "images.variant.thumb_px" },
+    update: {
+      valueType: "INTEGER",
+      value: "128",
+      description: "Thumbnail size (largest edge) in pixels."
+    },
+    create: {
+      key: "images.variant.thumb_px",
+      valueType: "INTEGER",
+      value: "128",
+      description: "Thumbnail size (largest edge) in pixels."
+    }
+  });
+
+  await prisma.systemProperty.upsert({
+    where: { key: "images.variant.small_px" },
+    update: {
+      valueType: "INTEGER",
+      value: "256",
+      description: "Small variant size (largest edge) in pixels."
+    },
+    create: {
+      key: "images.variant.small_px",
+      valueType: "INTEGER",
+      value: "256",
+      description: "Small variant size (largest edge) in pixels."
+    }
+  });
+
+  await prisma.systemProperty.upsert({
+    where: { key: "images.variant.medium_px" },
+    update: {
+      valueType: "INTEGER",
+      value: "512",
+      description: "Medium variant size (largest edge) in pixels."
+    },
+    create: {
+      key: "images.variant.medium_px",
+      valueType: "INTEGER",
+      value: "512",
+      description: "Medium variant size (largest edge) in pixels."
+    }
+  });
+
+  await prisma.systemProperty.upsert({
+    where: { key: "images.variant.large_px" },
+    update: {
+      valueType: "INTEGER",
+      value: "1024",
+      description: "Large variant size (largest edge) in pixels."
+    },
+    create: {
+      key: "images.variant.large_px",
+      valueType: "INTEGER",
+      value: "1024",
+      description: "Large variant size (largest edge) in pixels."
+    }
+  });
+
+  await prisma.systemProperty.upsert({
+    where: { key: "images.variant.large_min_px" },
+    update: {
+      valueType: "INTEGER",
+      value: "1024",
+      description: "Only generate large variant when the source exceeds this size."
+    },
+    create: {
+      key: "images.variant.large_min_px",
+      valueType: "INTEGER",
+      value: "1024",
+      description: "Only generate large variant when the source exceeds this size."
+    }
+  });
+
   const choiceData = [
     { listKey: "dm_label", value: "dungeon_master", label: "Dungeon Master", sortOrder: 1 },
     { listKey: "dm_label", value: "game_master", label: "Game Master", sortOrder: 2 },

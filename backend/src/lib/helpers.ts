@@ -61,6 +61,13 @@ const getSystemPropertyNumber = async (key: string, fallback: number) => {
   return parsed ?? fallback;
 };
 
+const getSystemPropertyString = async (key: string, fallback: string) => {
+  const property = await prisma.systemProperty.findUnique({ where: { key } });
+  if (!property) return fallback;
+  const value = property.value?.trim();
+  return value ? value : fallback;
+};
+
 const hashToken = (token: string) =>
   createHash("sha256").update(token).digest("hex");
 
@@ -2135,6 +2142,7 @@ export {
   defaultRefreshTokenDays,
   getCookieValue,
   getSystemPropertyNumber,
+  getSystemPropertyString,
   hashToken,
   createRefreshToken,
   setRefreshCookie,

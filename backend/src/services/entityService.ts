@@ -23,6 +23,7 @@ import {
   isWorldGm,
   normalizeListViewFilters
 } from "../lib/helpers";
+import { serializeRecordImages } from "./imageService";
 import type { FilterOperator, FilterRule } from "../types/filters";
 
 type EntityListQuery = {
@@ -224,7 +225,8 @@ export const getEntityById = async ({
   const entity = await prisma.entity.findUnique({
     where: { id: entityId },
     include: {
-      values: { include: { field: true } }
+      values: { include: { field: true } },
+      recordImages: { include: { imageAsset: { include: { variants: true } } } }
     }
   });
   if (!entity) {
@@ -241,7 +243,8 @@ export const getEntityById = async ({
     createdById: entity.createdById,
     createdAt: entity.createdAt,
     updatedAt: entity.updatedAt,
-    fieldValues: buildFieldValuesMap(entity.values ?? [])
+    fieldValues: buildFieldValuesMap(entity.values ?? []),
+    recordImages: serializeRecordImages(entity.recordImages ?? [])
   };
 
   if (isAdmin(user)) {

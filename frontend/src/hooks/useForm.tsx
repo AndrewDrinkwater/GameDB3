@@ -100,6 +100,37 @@ type EntityAuditPayload = {
   changes: EntityAuditChange[];
 };
 
+type RecordImageVariant = {
+  id: string;
+  variant: string;
+  width?: number | null;
+  height?: number | null;
+  contentType: string;
+  sizeBytes: number;
+  url: string | null;
+};
+
+type RecordImageAsset = {
+  id: string;
+  contentType: string;
+  width?: number | null;
+  height?: number | null;
+  originalFileName?: string | null;
+  variants: RecordImageVariant[];
+};
+
+type RecordImage = {
+  id: string;
+  imageAssetId: string;
+  isPrimary: boolean;
+  sortOrder: number;
+  caption?: string | null;
+  focalX?: number | null;
+  focalY?: number | null;
+  zoom?: number | null;
+  asset: RecordImageAsset;
+};
+
 export type FormViewProps = {
   token: string;
   viewKey: string;
@@ -232,6 +263,7 @@ export function useForm({
   const [entityAuditAllowed, setEntityAuditAllowed] = useState(false);
   const [entityAuditLoading, setEntityAuditLoading] = useState(false);
   const [entityAuditError, setEntityAuditError] = useState<string | null>(null);
+  const [recordImages, setRecordImages] = useState<RecordImage[]>([]);
   const [openAuditEntryId, setOpenAuditEntryId] = useState<string | null>(null);
   const [entityTypeWorldId, setEntityTypeWorldId] = useState<string | null>(null);
   const [relationshipTypeWorldId, setRelationshipTypeWorldId] = useState<string | null>(null);
@@ -382,6 +414,7 @@ export function useForm({
         setEntityPanelId(null);
         setConditionFieldOptions([]);
         setEntitySections([]);
+        setRecordImages([]);
       try {
         const viewResponse = await fetch(`/api/views/${viewKey}`, {
           headers: { Authorization: `Bearer ${token}` }
@@ -469,6 +502,12 @@ export function useForm({
               record.fieldValues
             ) {
               setEntityValues(record.fieldValues as Record<string, unknown>);
+            }
+            if (
+              (viewData.entityKey === "entities" || viewData.entityKey === "locations") &&
+              Array.isArray(record.recordImages)
+            ) {
+              setRecordImages(record.recordImages as RecordImage[]);
             }
             if (viewData.entityKey === "entities" || viewData.entityKey === "locations") {
               const accessAllowed = (record as { accessAllowed?: boolean }).accessAllowed;
@@ -2479,6 +2518,8 @@ export function useForm({
     setEntityAuditLoading,
     entityAuditError,
     setEntityAuditError,
+    recordImages,
+    setRecordImages,
     openAuditEntryId,
     setOpenAuditEntryId,
     entityTypeWorldId,

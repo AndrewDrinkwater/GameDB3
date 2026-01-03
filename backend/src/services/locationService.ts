@@ -20,6 +20,7 @@ import {
   buildEntityAccessFilter,
   normalizeListViewFilters
 } from "../lib/helpers";
+import { serializeRecordImages } from "./imageService";
 import { hasLocationCycle, getAllowedLocationParentTypeIds } from "../routes/shared";
 import type { FilterOperator, FilterRule } from "../types/filters";
 
@@ -223,7 +224,8 @@ export const getLocationById = async ({
   const location = await prisma.location.findUnique({
     where: { id: locationId },
     include: {
-      fieldValues: { include: { field: true } }
+      fieldValues: { include: { field: true } },
+      recordImages: { include: { imageAsset: { include: { variants: true } } } }
     }
   });
   if (!location) {
@@ -242,7 +244,8 @@ export const getLocationById = async ({
     createdById: location.createdById,
     createdAt: location.createdAt,
     updatedAt: location.updatedAt,
-    fieldValues: buildFieldValuesMap(location.fieldValues ?? [])
+    fieldValues: buildFieldValuesMap(location.fieldValues ?? []),
+    recordImages: serializeRecordImages(location.recordImages ?? [])
   };
 
   if (isAdmin(user)) {

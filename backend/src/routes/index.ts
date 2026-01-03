@@ -18,6 +18,7 @@ import { registerSystemRoutes } from "./system";
 import { registerTagsRoutes } from "./tags";
 import { registerUserPreferencesRoutes } from "./userPreferences";
 import { registerWorldsRoutes } from "./worlds";
+import { registerImageRoutes } from "./images";
 
 export const registerRoutes = (app: express.Express) => {
   registerAuthRoutes(app);
@@ -39,4 +40,5 @@ export const registerRoutes = (app: express.Express) => {
   registerPackRoutes(app);
   registerWorldBuilderRoutes(app);
   registerTagsRoutes(app);
+  registerImageRoutes(app);
 };

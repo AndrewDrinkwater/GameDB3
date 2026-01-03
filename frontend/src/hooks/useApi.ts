@@ -72,6 +72,7 @@ export function useApi() {
       get: <T>(url: string) => performRequest<T>("GET", url),
       post: <T>(url: string, body: unknown) => performRequest<T>("POST", url, body),
       put: <T>(url: string, body: unknown) => performRequest<T>("PUT", url, body),
+      patch: <T>(url: string, body: unknown) => performRequest<T>("PATCH", url, body),
       delete: <T>(url: string) => performRequest<T>("DELETE", url)
     }),
     [performRequest]
