@@ -53,15 +53,17 @@ export default function RelationshipSelectorCard({
           <span className={`relationship-card__status ${getStatusClass(status)}`}>
             {getStatusLabel(status)}
           </span>
-          <button
-            type="button"
-            className="ghost-button"
-            disabled={!editRulesEnabled}
-            onClick={onEditRules}
-            title={editRulesEnabled ? undefined : "Available after structure is created"}
-          >
-            Edit rules
-          </button>
+          {includeChecked ? (
+            <button
+              type="button"
+              className="ghost-button"
+              disabled={!editRulesEnabled}
+              onClick={onEditRules}
+              title={editRulesEnabled ? undefined : "Available after structure is created"}
+            >
+              Edit rules
+            </button>
+          ) : null}
         </div>
       </div>
       {description ? <p className="relationship-card__description">{description}</p> : null}

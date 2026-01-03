@@ -6,6 +6,7 @@ type ClickableTypeCardProps = {
   badge?: "CORE" | "OPTIONAL" | "CUSTOM";
   status?: "READY" | "NEEDS_ATTENTION" | "DISABLED";
   includeChecked: boolean;
+  includeDisabled?: boolean;
   fieldCount?: number;
   isExpanded: boolean;
   onToggleInclude?: () => void;
@@ -34,6 +35,7 @@ export default function ClickableTypeCard({
   badge,
   status = "READY",
   includeChecked,
+  includeDisabled = false,
   fieldCount,
   isExpanded,
   onToggleInclude,
@@ -78,6 +80,7 @@ export default function ClickableTypeCard({
               type="checkbox"
               checked={includeChecked}
               onChange={onToggleInclude}
+              disabled={includeDisabled}
             />
             <span>Include</span>
           </label>

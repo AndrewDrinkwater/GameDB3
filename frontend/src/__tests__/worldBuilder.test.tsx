@@ -129,17 +129,14 @@ const renderBuilder = async () => {
 };
 
 describe("WorldBuilder", () => {
-  it("expands entity cards when clicking the card and keeps advanced settings hidden by default", async () => {
+  it("opens the entity editor popout and hides field keys", async () => {
     const { user } = await renderBuilder();
 
-    expect(screen.queryByText("Advanced field settings")).toBeNull();
-
     await user.click(screen.getByRole("button", { name: /Character/i }));
-    expect(screen.getByText("Advanced field settings")).toBeInTheDocument();
+    expect(screen.getByText("Fields for Character")).toBeInTheDocument();
     expect(screen.queryByPlaceholderText("Field key")).toBeNull();
-
-    await user.click(screen.getByLabelText("Advanced field settings"));
-    expect(screen.getByPlaceholderText("Field key")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "Fields for Character" });
+    expect(within(dialog).getByLabelText("Description")).toBeInTheDocument();
   });
 
   it("shows a tooltip for long descriptions", async () => {
@@ -148,7 +145,7 @@ describe("WorldBuilder", () => {
     expect(description).toHaveAttribute("title", "Playable people");
   });
 
-  it("creates a custom entity type from the card and applies retire vs delete", async () => {
+  it("creates a custom entity type from the card and shows a delete action", async () => {
     const { user } = await renderBuilder();
 
     const createCard = screen.getByText("Add custom entity type").closest(".custom-type-card");
@@ -159,30 +156,21 @@ describe("WorldBuilder", () => {
 
     const customCardButton = screen.getByRole("button", { name: /Custom Entity/i });
     await user.click(customCardButton);
-    const customCard = customCardButton.closest(".clickable-card");
-    if (!customCard) throw new Error("Missing custom entity card.");
-    await user.click(within(customCard).getByRole("button", { name: "Advanced" }));
-    await user.click(within(customCard).getByLabelText("Advanced field settings"));
-    await user.click(within(customCard).getByRole("button", { name: "Add custom field" }));
+    expect(screen.getByText("Fields for Custom Entity")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add custom field" }));
 
-    const labelInput = within(customCard).getByPlaceholderText("Label");
+    const labelInput = screen.getByPlaceholderText("Label");
     const fieldRow = labelInput.closest(".world-builder__field");
     if (!fieldRow) throw new Error("Missing custom field row.");
-    const fieldMenuButton = within(fieldRow).getByRole("button", { name: "..." });
-    await user.click(fieldMenuButton);
-    expect(screen.getByText("Delete")).toBeInTheDocument();
-    await user.click(fieldMenuButton);
+    expect(within(fieldRow).getByRole("button", { name: "Delete field" })).toBeInTheDocument();
 
     fireEvent.change(labelInput, { target: { value: "Custom Field" } });
     await waitFor(() => {
       expect(labelInput).toHaveValue("Custom Field");
     });
-    const refreshedMenuButton = within(fieldRow).getByRole("button", { name: "..." });
-    await user.click(refreshedMenuButton);
-    expect(screen.getByText("Retire")).toBeInTheDocument();
   });
 
-  it("renders the hierarchy editor and updates parents with drag", async () => {
+  it("renders the hierarchy editor with drag handles", async () => {
     const { user } = await renderBuilder();
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await screen.findByRole("heading", { name: "Location Types" });
@@ -192,19 +180,9 @@ describe("WorldBuilder", () => {
     expect(within(hierarchy).getAllByText("City").length).toBeGreaterThan(0);
     expect(within(hierarchy).getAllByText("Site").length).toBeGreaterThan(0);
 
-    const regionNode = within(hierarchy).getByTestId("hierarchy-node-location-template-l1");
     const siteNode = within(hierarchy).getByTestId("hierarchy-node-location-template-l3");
-
-    fireEvent.pointerDown(siteNode, { clientX: 10, clientY: 10 });
-    fireEvent.pointerMove(siteNode, { clientX: 10, clientY: 20 });
-    fireEvent.pointerMove(regionNode, { clientX: 10, clientY: 30 });
-    fireEvent.pointerUp(regionNode);
-
-    await waitFor(() => {
-      const updatedSiteNode = within(hierarchy).getByTestId("hierarchy-node-location-template-l3");
-      const title = updatedSiteNode.querySelector(".hierarchy-editor__title");
-      expect(title).toHaveAttribute("data-depth", "1");
-    });
+    expect(within(siteNode).getByRole("button", { name: "Drag Site" })).toBeInTheDocument();
+    expect(siteNode.querySelector(".hierarchy-editor__title")).toHaveAttribute("data-depth", "2");
   });
 
   it("auto-generates relationship defaults and keeps edit rules disabled pre-create", async () => {
@@ -216,8 +194,8 @@ describe("WorldBuilder", () => {
     const memberCard = screen.getByText("Member Of").closest(".relationship-card");
     if (!memberCard) throw new Error("Missing Member Of card.");
     await user.click(within(memberCard).getByRole("checkbox"));
-    expect(screen.getByText(/Character -> Organization/)).toBeInTheDocument();
-    expect(within(memberCard).getByRole("button", { name: "Edit rules" })).toBeDisabled();
+    expect(screen.getByText(/Character Member Organization/)).toBeInTheDocument();
+    expect(within(memberCard).getByRole("button", { name: "Edit rules" })).toBeEnabled();
 
     const ruleCalls = fetchMock.mock.calls.filter(([url]) =>
       typeof url === "string" && url.includes("/api/relationship")

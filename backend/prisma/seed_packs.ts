@@ -138,17 +138,6 @@ const fantasyChoiceLists: ChoiceListSeed[] = [
 const utopianChoiceLists: ChoiceListSeed[] = [
   sharedChoiceLists.characterStatus,
   {
-    key: "city_type",
-    name: "City Type",
-    options: [
-      { value: "capital", label: "Capital", order: 1 },
-      { value: "arcology", label: "Arcology", order: 2 },
-      { value: "garden_city", label: "Garden City", order: 3 },
-      { value: "research_hub", label: "Research Hub", order: 4 },
-      { value: "spaceport", label: "Spaceport", order: 5 }
-    ]
-  },
-  {
     key: "system_class",
     name: "System Class",
     options: [
@@ -156,6 +145,106 @@ const utopianChoiceLists: ChoiceListSeed[] = [
       { value: "binary", label: "Binary", order: 2 },
       { value: "multiple", label: "Multiple", order: 3 },
       { value: "anomalous", label: "Anomalous", order: 4 }
+    ]
+  },
+  {
+    key: "planet_class",
+    name: "Planet Class",
+    options: [
+      { value: "terrestrial", label: "Terrestrial", order: 1 },
+      { value: "gas_giant", label: "Gas Giant", order: 2 },
+      { value: "ice", label: "Ice", order: 3 },
+      { value: "ocean", label: "Ocean", order: 4 },
+      { value: "desert", label: "Desert", order: 5 }
+    ]
+  },
+  {
+    key: "habitability",
+    name: "Habitability",
+    options: [
+      { value: "habitable", label: "Habitable", order: 1 },
+      { value: "marginal", label: "Marginal", order: 2 },
+      { value: "uninhabitable", label: "Uninhabitable", order: 3 }
+    ]
+  },
+  {
+    key: "station_type",
+    name: "Station Type",
+    options: [
+      { value: "orbital", label: "Orbital", order: 1 },
+      { value: "deep_space", label: "Deep Space", order: 2 },
+      { value: "mining", label: "Mining", order: 3 },
+      { value: "research", label: "Research", order: 4 },
+      { value: "military", label: "Military", order: 5 }
+    ]
+  },
+  {
+    key: "settlement_type",
+    name: "Settlement Type",
+    options: [
+      { value: "colony", label: "Colony", order: 1 },
+      { value: "outpost", label: "Outpost", order: 2 },
+      { value: "hub", label: "Hub", order: 3 },
+      { value: "refuge", label: "Refuge", order: 4 }
+    ]
+  },
+  {
+    key: "facility_type",
+    name: "Facility Type",
+    options: [
+      { value: "research", label: "Research", order: 1 },
+      { value: "industrial", label: "Industrial", order: 2 },
+      { value: "military", label: "Military", order: 3 },
+      { value: "medical", label: "Medical", order: 4 },
+      { value: "agricultural", label: "Agricultural", order: 5 }
+    ]
+  },
+  {
+    key: "location_status",
+    name: "Location Status",
+    options: [
+      { value: "active", label: "Active", order: 1 },
+      { value: "abandoned", label: "Abandoned", order: 2 },
+      { value: "quarantined", label: "Quarantined", order: 3 },
+      { value: "restricted", label: "Restricted", order: 4 }
+    ]
+  },
+  {
+    key: "security_level",
+    name: "Security Level",
+    options: [
+      { value: "low", label: "Low", order: 1 },
+      { value: "medium", label: "Medium", order: 2 },
+      { value: "high", label: "High", order: 3 },
+      { value: "black", label: "Black", order: 4 }
+    ]
+  },
+  {
+    key: "hazard_level",
+    name: "Hazard Level",
+    options: [
+      { value: "low", label: "Low", order: 1 },
+      { value: "moderate", label: "Moderate", order: 2 },
+      { value: "severe", label: "Severe", order: 3 },
+      { value: "extreme", label: "Extreme", order: 4 }
+    ]
+  },
+  {
+    key: "ship_class",
+    name: "Ship Class",
+    options: [
+      { value: "light", label: "Light", order: 1 },
+      { value: "medium", label: "Medium", order: 2 },
+      { value: "heavy", label: "Heavy", order: 3 }
+    ]
+  },
+  {
+    key: "ship_type",
+    name: "Ship Type",
+    options: [
+      { value: "combat", label: "Combat", order: 1 },
+      { value: "freight", label: "Freight", order: 2 },
+      { value: "exploration", label: "Exploration", order: 3 }
     ]
   }
 ];
@@ -225,16 +314,6 @@ const grittyChoiceLists: ChoiceListSeed[] = [
     ]
   },
   {
-    key: "derelict_type",
-    name: "Derelict Type",
-    options: [
-      { value: "ship", label: "Ship", order: 1 },
-      { value: "station", label: "Station", order: 2 },
-      { value: "habitat", label: "Habitat", order: 3 },
-      { value: "ruin", label: "Ruin", order: 4 }
-    ]
-  },
-  {
     key: "location_status",
     name: "Location Status",
     options: [
@@ -255,6 +334,24 @@ const grittyChoiceLists: ChoiceListSeed[] = [
     ]
   },
   {
+    key: "ship_class",
+    name: "Ship Class",
+    options: [
+      { value: "light", label: "Light", order: 1 },
+      { value: "medium", label: "Medium", order: 2 },
+      { value: "heavy", label: "Heavy", order: 3 }
+    ]
+  },
+  {
+    key: "ship_type",
+    name: "Ship Type",
+    options: [
+      { value: "combat", label: "Combat", order: 1 },
+      { value: "freight", label: "Freight", order: 2 },
+      { value: "exploration", label: "Exploration", order: 3 }
+    ]
+  },
+  {
     key: "hazard_level",
     name: "Hazard Level",
     options: [
@@ -268,6 +365,15 @@ const grittyChoiceLists: ChoiceListSeed[] = [
 
 const cyberpunkChoiceLists: ChoiceListSeed[] = [
   sharedChoiceLists.characterStatus,
+  {
+    key: "crew_type",
+    name: "Crew Type",
+    options: [
+      { value: "tactical", label: "Tactical", order: 1 },
+      { value: "corporate", label: "Corporate", order: 2 },
+      { value: "street", label: "Street", order: 3 }
+    ]
+  },
   {
     key: "industry_sector",
     name: "Industry Sector",
@@ -291,6 +397,16 @@ const cyberpunkChoiceLists: ChoiceListSeed[] = [
       { value: "corporate", label: "Corporate", order: 4 },
       { value: "slums", label: "Slums", order: 5 },
       { value: "entertainment", label: "Entertainment", order: 6 }
+    ]
+  },
+  {
+    key: "building_purpose",
+    name: "Building Purpose",
+    options: [
+      { value: "corporate", label: "Corporate", order: 1 },
+      { value: "commercial", label: "Commercial", order: 2 },
+      { value: "residential", label: "Residential", order: 3 },
+      { value: "industrial", label: "Industrial", order: 4 }
     ]
   }
 ];
@@ -321,7 +437,6 @@ const packSeeds: PackSeed[] = [
         isCore: true,
         fields: [
           { fieldKey: "characterType", fieldLabel: "Type", fieldType: EntityFieldType.CHOICE, choiceListKey: "character_type" },
-          { fieldKey: "role", fieldLabel: "Role", fieldType: EntityFieldType.TEXT },
           { fieldKey: "status", fieldLabel: "Status", fieldType: EntityFieldType.CHOICE, choiceListKey: "character_status_fantasy" },
           { fieldKey: "raceId", fieldLabel: "Race", fieldType: EntityFieldType.ENTITY_REFERENCE }
         ]
@@ -345,15 +460,6 @@ const packSeeds: PackSeed[] = [
         fields: [
           { fieldKey: "origin", fieldLabel: "Origin", fieldType: EntityFieldType.TEXT },
           { fieldKey: "traits", fieldLabel: "Traits", fieldType: EntityFieldType.TEXT }
-        ]
-      },
-      {
-        name: "Creature",
-        description: "Monsters and beasts that shape the wilds.",
-        category: "creatures",
-        fields: [
-          { fieldKey: "creatureType", fieldLabel: "Type", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "threatLevel", fieldLabel: "Threat Level", fieldType: EntityFieldType.NUMBER }
         ]
       },
       {
@@ -382,17 +488,13 @@ const packSeeds: PackSeed[] = [
         name: "Plane",
         description: "Planes of existence and cosmological realms.",
         isCore: true,
-        fields: [
-          { fieldKey: "description", fieldLabel: "Description", fieldType: LocationFieldType.TEXT }
-        ]
+        fields: []
       },
       {
         name: "Continent",
         description: "Continents and major landmasses.",
         isCore: true,
-        fields: [
-          { fieldKey: "description", fieldLabel: "Description", fieldType: LocationFieldType.TEXT }
-        ]
+        fields: []
       },
       {
         name: "Country",
@@ -440,16 +542,12 @@ const packSeeds: PackSeed[] = [
       {
         name: "Dungeon",
         description: "Dungeons, lairs, and underground complexes.",
-        fields: [
-          { fieldKey: "description", fieldLabel: "Description", fieldType: LocationFieldType.TEXT }
-        ]
+        fields: []
       },
       {
         name: "Area",
         description: "Notable areas within a region or settlement.",
-        fields: [
-          { fieldKey: "description", fieldLabel: "Description", fieldType: LocationFieldType.TEXT }
-        ]
+        fields: []
       }
     ],
     locationRules: [
@@ -459,29 +557,26 @@ const packSeeds: PackSeed[] = [
       { parent: "Region", child: "Settlement" },
       { parent: "Settlement", child: "District" },
       { parent: "District", child: "Building" },
-      { parent: "Region", child: "Dungeon" },
-      { parent: "Settlement", child: "Dungeon" },
-      { parent: "Region", child: "Area" },
-      { parent: "Settlement", child: "Area" },
-      { parent: "Dungeon", child: "Area" }
+      { parent: "Building", child: "Dungeon" },
+      { parent: "District", child: "Area" }
     ],
     relationshipTemplates: [
       {
-        name: "Member Of",
-        description: "A person or group belongs to a larger organization.",
-        fromLabel: "Member",
-        toLabel: "Organization",
+        name: "Membership",
+        description: "A group or character belongs to a larger organization.",
+        fromLabel: "has member",
+        toLabel: "member of",
         roles: [
-          { fromRole: "Character", toRole: "Organisation" },
-          { fromRole: "Organisation", toRole: "Organisation" }
+          { fromRole: "Organisation", toRole: "Organisation" },
+          { fromRole: "Organisation", toRole: "Character" }
         ]
       },
       {
-        name: "Enemy Of",
+        name: "Enemy",
         description: "Two parties are in conflict.",
         isPeerable: true,
-        fromLabel: "Enemy",
-        toLabel: "Enemy",
+        fromLabel: "enemy of",
+        toLabel: "enemy of",
         roles: [
           { fromRole: "Character", toRole: "Character" },
           { fromRole: "Organisation", toRole: "Organisation" },
@@ -490,11 +585,11 @@ const packSeeds: PackSeed[] = [
         ]
       },
       {
-        name: "Ally Of",
+        name: "Ally",
         description: "Two parties are allied.",
         isPeerable: true,
-        fromLabel: "Ally",
-        toLabel: "Ally",
+        fromLabel: "ally of",
+        toLabel: "ally of",
         roles: [
           { fromRole: "Character", toRole: "Character" },
           { fromRole: "Organisation", toRole: "Organisation" },
@@ -503,77 +598,70 @@ const packSeeds: PackSeed[] = [
         ]
       },
       {
-        name: "Sibling Of",
+        name: "Sibling",
         description: "Characters who share family ties.",
         isPeerable: true,
-        fromLabel: "Sibling",
-        toLabel: "Sibling",
+        fromLabel: "sibling of",
+        toLabel: "sibling of",
         roles: [{ fromRole: "Character", toRole: "Character" }]
       },
       {
-        name: "Parent Of",
+        name: "Parent",
         description: "A parental relationship between characters.",
-        fromLabel: "Parent",
-        toLabel: "Child",
+        fromLabel: "parent of",
+        toLabel: "child of",
         roles: [{ fromRole: "Character", toRole: "Character" }]
       },
       {
-        name: "Spouse Of",
+        name: "Spouse",
         description: "A spousal bond between characters.",
         isPeerable: true,
-        fromLabel: "Spouse",
-        toLabel: "Spouse",
+        fromLabel: "spouse of",
+        toLabel: "spouse of",
         roles: [{ fromRole: "Character", toRole: "Character" }]
       },
       {
-        name: "Covets",
+        name: "Coveting",
         description: "Someone covets an object or treasure.",
-        fromLabel: "Coveter",
-        toLabel: "Coveted",
+        fromLabel: "covets",
+        toLabel: "coveted by",
         roles: [
           { fromRole: "Character", toRole: "Objects" },
           { fromRole: "Organisation", toRole: "Objects" }
         ]
       },
       {
-        name: "Possesses",
+        name: "Possession",
         description: "Ownership or possession of an object.",
-        fromLabel: "Owner",
-        toLabel: "Possession",
+        fromLabel: "owns",
+        toLabel: "owned by",
         roles: [
           { fromRole: "Character", toRole: "Objects" },
           { fromRole: "Organisation", toRole: "Objects" }
         ]
       },
       {
-        name: "Membership",
-        description: "A character belongs to an organisation.",
-        fromLabel: "Member",
-        toLabel: "Organisation",
-        roles: [{ fromRole: "Character", toRole: "Organisation" }]
-      },
-      {
-        name: "Holds Title",
+        name: "Title Holding",
         description: "A character holds an honorific or position.",
-        fromLabel: "Holder",
-        toLabel: "Title",
+        fromLabel: "holds title",
+        toLabel: "held by",
         roles: [{ fromRole: "Character", toRole: "Title" }]
       },
       {
         name: "Employment",
         description: "An employer employs a character.",
-        fromLabel: "Employer",
-        toLabel: "Employee",
+        fromLabel: "employs",
+        toLabel: "employed by",
         roles: [
           { fromRole: "Organisation", toRole: "Character" },
           { fromRole: "Character", toRole: "Character" }
         ]
       },
       {
-        name: "Ruler Of",
+        name: "Rule",
         description: "A character or organization rules a settlement or region.",
-        fromLabel: "Ruler",
-        toLabel: "Location",
+        fromLabel: "rules",
+        toLabel: "ruled by",
         roles: [
           { fromRole: "Character", toRole: "Settlement" },
           { fromRole: "Organisation", toRole: "Settlement" },
@@ -595,7 +683,6 @@ const packSeeds: PackSeed[] = [
         isCore: true,
         fields: [
           { fieldKey: "status", fieldLabel: "Status", fieldType: EntityFieldType.CHOICE, choiceListKey: "character_status" },
-          { fieldKey: "role", fieldLabel: "Role", fieldType: EntityFieldType.TEXT },
           { fieldKey: "specialty", fieldLabel: "Specialty", fieldType: EntityFieldType.TEXT }
         ]
       },
@@ -619,116 +706,152 @@ const packSeeds: PackSeed[] = [
         ]
       },
       {
-        name: "Technology",
-        description: "Key technologies or innovations.",
-        category: "technology",
+        name: "Race",
+        description: "Species, cultures, or peoples.",
+        category: "people",
         fields: [
-          { fieldKey: "function", fieldLabel: "Function", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "tier", fieldLabel: "Tier", fieldType: EntityFieldType.TEXT }
+          { fieldKey: "homeworldLocationId", fieldLabel: "Homeworld", fieldType: EntityFieldType.LOCATION_REFERENCE },
+          { fieldKey: "ideology", fieldLabel: "Ideology", fieldType: EntityFieldType.TEXT }
         ]
       },
       {
-        name: "Role",
-        description: "Societal roles and responsibilities.",
-        category: "people",
+        name: "Starship",
+        description: "Ships and vessels that travel between worlds.",
+        category: "technology",
         fields: [
-          { fieldKey: "responsibilities", fieldLabel: "Responsibilities", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "authority", fieldLabel: "Authority", fieldType: EntityFieldType.TEXT }
+          { fieldKey: "shipClass", fieldLabel: "Class", fieldType: EntityFieldType.CHOICE, choiceListKey: "ship_class" },
+          { fieldKey: "shipType", fieldLabel: "Type", fieldType: EntityFieldType.CHOICE, choiceListKey: "ship_type" },
+          { fieldKey: "captainId", fieldLabel: "Captain", fieldType: EntityFieldType.ENTITY_REFERENCE }
         ]
       }
     ],
     locationTemplates: [
+      {
+        name: "Sector",
+        description: "Large regions of space.",
+        isCore: true,
+        fields: [
+          { fieldKey: "hazardLevel", fieldLabel: "Hazard Level", fieldType: LocationFieldType.CHOICE, choiceListKey: "hazard_level" }
+        ]
+      },
       {
         name: "Star System",
         description: "Primary stellar systems.",
         isCore: true,
         fields: [
           { fieldKey: "systemClass", fieldLabel: "System Class", fieldType: LocationFieldType.CHOICE, choiceListKey: "system_class" },
-          { fieldKey: "notes", fieldLabel: "Notes", fieldType: LocationFieldType.TEXT }
+          { fieldKey: "hazards", fieldLabel: "Hazards", fieldType: LocationFieldType.TEXT }
         ]
       },
       {
         name: "Planet",
-        description: "Worlds within a system.",
+        description: "Planets and settled worlds.",
         isCore: true,
         fields: [
-          { fieldKey: "climate", fieldLabel: "Climate", fieldType: LocationFieldType.TEXT },
-          { fieldKey: "population", fieldLabel: "Population", fieldType: LocationFieldType.NUMBER }
+          { fieldKey: "planetClass", fieldLabel: "Planet Class", fieldType: LocationFieldType.CHOICE, choiceListKey: "planet_class" },
+          { fieldKey: "habitability", fieldLabel: "Habitability", fieldType: LocationFieldType.CHOICE, choiceListKey: "habitability" }
         ]
       },
       {
-        name: "City",
-        description: "Urban hubs and arcologies.",
-        isCore: true,
+        name: "Moon",
+        description: "Moons and satellites.",
         fields: [
-          { fieldKey: "cityType", fieldLabel: "City Type", fieldType: LocationFieldType.CHOICE, choiceListKey: "city_type" },
-          { fieldKey: "population", fieldLabel: "Population", fieldType: LocationFieldType.NUMBER }
+          { fieldKey: "locationStatus", fieldLabel: "Status", fieldType: LocationFieldType.CHOICE, choiceListKey: "location_status" }
         ]
       },
       {
-        name: "Orbital",
-        description: "Stations, habitats, and orbital structures.",
+        name: "Station",
+        description: "Orbital or deep-space stations.",
+        isCore: true,
         fields: [
-          { fieldKey: "purpose", fieldLabel: "Purpose", fieldType: LocationFieldType.TEXT },
-          { fieldKey: "status", fieldLabel: "Status", fieldType: LocationFieldType.TEXT }
+          { fieldKey: "stationType", fieldLabel: "Station Type", fieldType: LocationFieldType.CHOICE, choiceListKey: "station_type" },
+          { fieldKey: "locationStatus", fieldLabel: "Status", fieldType: LocationFieldType.CHOICE, choiceListKey: "location_status" },
+          { fieldKey: "securityLevel", fieldLabel: "Security Level", fieldType: LocationFieldType.CHOICE, choiceListKey: "security_level" }
+        ]
+      },
+      {
+        name: "Settlement",
+        description: "Colonies, outposts, and settlements.",
+        fields: [
+          { fieldKey: "settlementType", fieldLabel: "Settlement Type", fieldType: LocationFieldType.CHOICE, choiceListKey: "settlement_type" },
+          { fieldKey: "securityLevel", fieldLabel: "Security Level", fieldType: LocationFieldType.CHOICE, choiceListKey: "security_level" }
         ]
       },
       {
         name: "Facility",
-        description: "Labs, shipyards, and special-purpose sites.",
+        description: "Factories, labs, and industrial sites.",
         fields: [
-          { fieldKey: "function", fieldLabel: "Function", fieldType: LocationFieldType.TEXT },
-          { fieldKey: "operator", fieldLabel: "Operator", fieldType: LocationFieldType.TEXT }
+          { fieldKey: "facilityType", fieldLabel: "Facility Type", fieldType: LocationFieldType.CHOICE, choiceListKey: "facility_type" }
         ]
       }
     ],
     locationRules: [
+      { parent: "Sector", child: "Star System" },
       { parent: "Star System", child: "Planet" },
-      { parent: "Star System", child: "Orbital" },
-      { parent: "Planet", child: "City" },
-      { parent: "Planet", child: "Facility" },
-      { parent: "City", child: "Facility" }
+      { parent: "Planet", child: "Moon" },
+      { parent: "Moon", child: "Settlement" },
+      { parent: "Moon", child: "Station" },
+      { parent: "Moon", child: "Facility" }
     ],
     relationshipTemplates: [
       {
-        name: "Member Of",
-        description: "A character or organization belongs to an institution.",
-        fromLabel: "Member",
-        toLabel: "Institution",
+        name: "Membership",
+        description: "An institution or organisation claims members.",
+        fromLabel: "has member",
+        toLabel: "member of",
         roles: [
-          { fromRole: "Character", toRole: "Institution" },
-          { fromRole: "Organisation", toRole: "Institution" }
+          { fromRole: "Institution", toRole: "Character" },
+          { fromRole: "Organisation", toRole: "Character" }
         ]
       },
       {
-        name: "Oversees",
+        name: "Oversight",
         description: "An institution oversees an organization or facility.",
-        fromLabel: "Overseer",
-        toLabel: "Subject",
+        fromLabel: "oversees",
+        toLabel: "overseen by",
         roles: [
           { fromRole: "Institution", toRole: "Organisation" },
           { fromRole: "Institution", toRole: "Facility" }
         ]
       },
       {
-        name: "Affiliated With",
+        name: "Affiliation",
         description: "Two parties maintain a cooperative relationship.",
         isPeerable: true,
-        fromLabel: "Affiliate",
-        toLabel: "Affiliate",
+        fromLabel: "affiliated with",
+        toLabel: "affiliated with",
         roles: [
           { fromRole: "Character", toRole: "Organisation" },
           { fromRole: "Organisation", toRole: "Organisation" }
         ]
       },
       {
-        name: "Assigned To",
-        description: "A character is assigned to an organization or facility.",
-        fromLabel: "Assignee",
-        toLabel: "Assignment",
+        name: "Assignment",
+        description: "An organization or facility assigns a character.",
+        fromLabel: "assigns",
+        toLabel: "assigned to",
         roles: [
-          { fromRole: "Character", toRole: "Organisation" },
-          { fromRole: "Character", toRole: "Facility" }
+          { fromRole: "Organisation", toRole: "Character" },
+          { fromRole: "Facility", toRole: "Character" }
+        ]
+      },
+      {
+        name: "Crew Member",
+        description: "A character serves on a ship.",
+        fromLabel: "crew member of",
+        toLabel: "has crew member",
+        roles: [
+          { fromRole: "Character", toRole: "Starship" }
+        ]
+      },
+      {
+        name: "Service",
+        description: "A starship serves an institution or organisation.",
+        fromLabel: "serves",
+        toLabel: "served by",
+        roles: [
+          { fromRole: "Starship", toRole: "Institution" },
+          { fromRole: "Starship", toRole: "Organisation" }
         ]
       }
     ]
@@ -746,7 +869,6 @@ const packSeeds: PackSeed[] = [
         isCore: true,
         fields: [
           { fieldKey: "status", fieldLabel: "Status", fieldType: EntityFieldType.CHOICE, choiceListKey: "character_status" },
-          { fieldKey: "callSign", fieldLabel: "Call Sign", fieldType: EntityFieldType.TEXT },
           { fieldKey: "skills", fieldLabel: "Skills", fieldType: EntityFieldType.TEXT }
         ]
       },
@@ -756,17 +878,17 @@ const packSeeds: PackSeed[] = [
         category: "society",
         isCore: true,
         fields: [
-          { fieldKey: "ideology", fieldLabel: "Ideology", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "resources", fieldLabel: "Resources", fieldType: EntityFieldType.TEXT }
+          { fieldKey: "objectives", fieldLabel: "Objectives", fieldType: EntityFieldType.TEXT }
         ]
       },
       {
-        name: "Crew",
-        description: "Teams, ships, and tight-knit groups.",
-        category: "people",
+        name: "Starship",
+        description: "Ships and vessels that travel between worlds.",
+        category: "technology",
         fields: [
-          { fieldKey: "focus", fieldLabel: "Focus", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "ship", fieldLabel: "Ship", fieldType: EntityFieldType.TEXT }
+          { fieldKey: "shipClass", fieldLabel: "Class", fieldType: EntityFieldType.CHOICE, choiceListKey: "ship_class" },
+          { fieldKey: "shipType", fieldLabel: "Type", fieldType: EntityFieldType.CHOICE, choiceListKey: "ship_type" },
+          { fieldKey: "captainId", fieldLabel: "Captain", fieldType: EntityFieldType.ENTITY_REFERENCE }
         ]
       },
       {
@@ -811,6 +933,7 @@ const packSeeds: PackSeed[] = [
       {
         name: "Sector",
         description: "Large regions of space.",
+        isCore: true,
         fields: [
           { fieldKey: "hazardLevel", fieldLabel: "Hazard Level", fieldType: LocationFieldType.CHOICE, choiceListKey: "hazard_level" }
         ]
@@ -820,13 +943,6 @@ const packSeeds: PackSeed[] = [
         description: "Moons and satellites.",
         fields: [
           { fieldKey: "locationStatus", fieldLabel: "Status", fieldType: LocationFieldType.CHOICE, choiceListKey: "location_status" }
-        ]
-      },
-      {
-        name: "Orbital",
-        description: "Orbital structures and rings.",
-        fields: [
-          { fieldKey: "purpose", fieldLabel: "Purpose", fieldType: LocationFieldType.TEXT }
         ]
       },
       {
@@ -843,77 +959,55 @@ const packSeeds: PackSeed[] = [
         fields: [
           { fieldKey: "facilityType", fieldLabel: "Facility Type", fieldType: LocationFieldType.CHOICE, choiceListKey: "facility_type" }
         ]
-      },
-      {
-        name: "Derelict",
-        description: "Wrecks and abandoned structures.",
-        fields: [
-          { fieldKey: "derelictType", fieldLabel: "Derelict Type", fieldType: LocationFieldType.CHOICE, choiceListKey: "derelict_type" },
-          { fieldKey: "hazardLevel", fieldLabel: "Hazard Level", fieldType: LocationFieldType.CHOICE, choiceListKey: "hazard_level" }
-        ]
-      },
-      {
-        name: "Jump Point",
-        description: "Transit gates and jump routes.",
-        fields: [
-          { fieldKey: "locationStatus", fieldLabel: "Status", fieldType: LocationFieldType.CHOICE, choiceListKey: "location_status" }
-        ]
       }
     ],
     locationRules: [
+      { parent: "Sector", child: "Star System" },
       { parent: "Star System", child: "Planet" },
-      { parent: "Star System", child: "Station" },
-      { parent: "Star System", child: "Sector" },
-      { parent: "Star System", child: "Jump Point" },
       { parent: "Planet", child: "Moon" },
-      { parent: "Planet", child: "Settlement" },
-      { parent: "Planet", child: "Facility" },
-      { parent: "Station", child: "Facility" },
-      { parent: "Station", child: "Settlement" },
-      { parent: "Sector", child: "Station" },
-      { parent: "Settlement", child: "Facility" }
+      { parent: "Moon", child: "Settlement" },
+      { parent: "Moon", child: "Station" },
+      { parent: "Moon", child: "Facility" }
     ],
     relationshipTemplates: [
       {
-        name: "Member Of",
-        description: "A character belongs to a faction or crew.",
-        fromLabel: "Member",
-        toLabel: "Group",
+        name: "Membership",
+        description: "A faction claims members.",
+        fromLabel: "has member",
+        toLabel: "member of",
         roles: [
-          { fromRole: "Character", toRole: "Faction" },
-          { fromRole: "Character", toRole: "Crew" }
+          { fromRole: "Faction", toRole: "Character" }
         ]
       },
       {
-        name: "Enemy Of",
+        name: "Enemy",
         description: "Two parties are in conflict.",
         isPeerable: true,
-        fromLabel: "Enemy",
-        toLabel: "Enemy",
+        fromLabel: "enemy of",
+        toLabel: "enemy of",
         roles: [
           { fromRole: "Faction", toRole: "Faction" },
           { fromRole: "Character", toRole: "Character" }
         ]
       },
       {
-        name: "Controls",
-        description: "A faction or crew controls an asset or location.",
-        fromLabel: "Controller",
-        toLabel: "Asset",
+        name: "Ally",
+        description: "Two parties are allied.",
+        isPeerable: true,
+        fromLabel: "ally of",
+        toLabel: "ally of",
         roles: [
-          { fromRole: "Faction", toRole: "Asset" },
-          { fromRole: "Crew", toRole: "Asset" },
-          { fromRole: "Faction", toRole: "Station" }
+          { fromRole: "Faction", toRole: "Faction" },
+          { fromRole: "Character", toRole: "Character" }
         ]
       },
       {
-        name: "Betrayed",
-        description: "A character or faction has betrayed another.",
-        fromLabel: "Betrayer",
-        toLabel: "Betrayed",
+        name: "Crew Member",
+        description: "A character serves on a ship.",
+        fromLabel: "crew member of",
+        toLabel: "has crew member",
         roles: [
-          { fromRole: "Character", toRole: "Character" },
-          { fromRole: "Faction", toRole: "Faction" }
+          { fromRole: "Character", toRole: "Starship" }
         ]
       }
     ]
@@ -931,8 +1025,15 @@ const packSeeds: PackSeed[] = [
         isCore: true,
         fields: [
           { fieldKey: "status", fieldLabel: "Status", fieldType: EntityFieldType.CHOICE, choiceListKey: "character_status" },
-          { fieldKey: "crew", fieldLabel: "Crew", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "streetRep", fieldLabel: "Street Rep", fieldType: EntityFieldType.NUMBER }
+          { fieldKey: "crew", fieldLabel: "Crew", fieldType: EntityFieldType.ENTITY_REFERENCE }
+        ]
+      },
+      {
+        name: "Crew",
+        description: "Teams and crews that operate together.",
+        category: "society",
+        fields: [
+          { fieldKey: "crewType", fieldLabel: "Crew Type", fieldType: EntityFieldType.CHOICE, choiceListKey: "crew_type" }
         ]
       },
       {
@@ -942,7 +1043,7 @@ const packSeeds: PackSeed[] = [
         isCore: true,
         fields: [
           { fieldKey: "industrySector", fieldLabel: "Industry Sector", fieldType: EntityFieldType.CHOICE, choiceListKey: "industry_sector" },
-          { fieldKey: "influence", fieldLabel: "Influence", fieldType: EntityFieldType.NUMBER }
+          { fieldKey: "leaderId", fieldLabel: "Leader", fieldType: EntityFieldType.ENTITY_REFERENCE }
         ]
       },
       {
@@ -950,17 +1051,10 @@ const packSeeds: PackSeed[] = [
         description: "Street crews and underground groups.",
         category: "society",
         fields: [
+          { fieldKey: "homeTerritory", fieldLabel: "Home Territory", fieldType: EntityFieldType.LOCATION_REFERENCE },
+          { fieldKey: "objectives", fieldLabel: "Objectives", fieldType: EntityFieldType.TEXT },
           { fieldKey: "turf", fieldLabel: "Turf", fieldType: EntityFieldType.TEXT },
           { fieldKey: "specialty", fieldLabel: "Specialty", fieldType: EntityFieldType.TEXT }
-        ]
-      },
-      {
-        name: "Augmentation",
-        description: "Cyberware and enhancements.",
-        category: "technology",
-        fields: [
-          { fieldKey: "augmentationType", fieldLabel: "Type", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "grade", fieldLabel: "Grade", fieldType: EntityFieldType.TEXT }
         ]
       }
     ],
@@ -979,15 +1073,19 @@ const packSeeds: PackSeed[] = [
         description: "City districts and neighborhoods.",
         isCore: true,
         fields: [
-          { fieldKey: "districtType", fieldLabel: "District Type", fieldType: LocationFieldType.CHOICE, choiceListKey: "district_type" },
-          { fieldKey: "notes", fieldLabel: "Notes", fieldType: LocationFieldType.TEXT }
+          { fieldKey: "districtType", fieldLabel: "District Type", fieldType: LocationFieldType.CHOICE, choiceListKey: "district_type" }
         ]
+      },
+      {
+        name: "Area",
+        description: "Neighborhood areas and sub-districts.",
+        fields: []
       },
       {
         name: "Building",
         description: "Skyscrapers, apartments, and compounds.",
         fields: [
-          { fieldKey: "purpose", fieldLabel: "Purpose", fieldType: LocationFieldType.TEXT }
+          { fieldKey: "purpose", fieldLabel: "Purpose", fieldType: LocationFieldType.CHOICE, choiceListKey: "building_purpose" }
         ]
       },
       {
@@ -1000,51 +1098,67 @@ const packSeeds: PackSeed[] = [
     ],
     locationRules: [
       { parent: "City", child: "District" },
-      { parent: "City", child: "Building" },
-      { parent: "City", child: "Facility" },
-      { parent: "District", child: "Building" },
-      { parent: "District", child: "Facility" },
-      { parent: "Building", child: "Facility" }
+      { parent: "District", child: "Area" },
+      { parent: "Area", child: "Building" },
+      { parent: "Area", child: "Facility" }
     ],
     relationshipTemplates: [
       {
-        name: "Employed By",
-        description: "A character works for a corporation.",
-        fromLabel: "Employee",
-        toLabel: "Employer",
+        name: "Employment",
+        description: "A corporation employs a character.",
+        fromLabel: "employs",
+        toLabel: "employed by",
         roles: [
-          { fromRole: "Character", toRole: "Corporation" }
+          { fromRole: "Corporation", toRole: "Character" }
         ]
       },
       {
-        name: "Controls",
-        description: "A corporation or gang controls a territory or asset.",
-        fromLabel: "Controller",
-        toLabel: "Controlled",
+        name: "Membership",
+        description: "A gang claims members.",
+        fromLabel: "has member",
+        toLabel: "member of",
         roles: [
-          { fromRole: "Corporation", toRole: "District" },
-          { fromRole: "Gang", toRole: "District" }
+          { fromRole: "Gang", toRole: "Character" }
         ]
       },
       {
-        name: "Rival Of",
+        name: "Rival",
         description: "Two parties are rivals.",
         isPeerable: true,
-        fromLabel: "Rival",
-        toLabel: "Rival",
+        fromLabel: "rival of",
+        toLabel: "rival of",
         roles: [
           { fromRole: "Corporation", toRole: "Corporation" },
           { fromRole: "Gang", toRole: "Gang" }
         ]
       },
       {
-        name: "Blackmails",
-        description: "One party holds leverage over another.",
-        fromLabel: "Blackmailer",
-        toLabel: "Target",
+        name: "Ally",
+        description: "Two parties are allied.",
+        isPeerable: true,
+        fromLabel: "ally of",
+        toLabel: "ally of",
         roles: [
           { fromRole: "Character", toRole: "Character" },
-          { fromRole: "Gang", toRole: "Corporation" }
+          { fromRole: "Gang", toRole: "Gang" },
+          { fromRole: "Corporation", toRole: "Corporation" }
+        ]
+      },
+      {
+        name: "Control",
+        description: "A party controls another party.",
+        fromLabel: "controls",
+        toLabel: "controlled by",
+        roles: [
+          { fromRole: "Character", toRole: "Character" },
+          { fromRole: "Character", toRole: "Gang" },
+          { fromRole: "Character", toRole: "Corporation" },
+          { fromRole: "Gang", toRole: "Character" },
+          { fromRole: "Gang", toRole: "Gang" },
+          { fromRole: "Gang", toRole: "Corporation" },
+          { fromRole: "Corporation", toRole: "Character" },
+          { fromRole: "Corporation", toRole: "Gang" },
+          { fromRole: "Corporation", toRole: "Corporation" }
         ]
       }
     ]
@@ -1062,8 +1176,7 @@ const packSeeds: PackSeed[] = [
         isCore: true,
         fields: [
           { fieldKey: "status", fieldLabel: "Status", fieldType: EntityFieldType.CHOICE, choiceListKey: "person_status" },
-          { fieldKey: "occupation", fieldLabel: "Occupation", fieldType: EntityFieldType.TEXT },
-          { fieldKey: "alibi", fieldLabel: "Alibi", fieldType: EntityFieldType.TEXT }
+          { fieldKey: "occupation", fieldLabel: "Occupation", fieldType: EntityFieldType.TEXT }
         ]
       },
       {
@@ -1074,14 +1187,6 @@ const packSeeds: PackSeed[] = [
         fields: [
           { fieldKey: "purpose", fieldLabel: "Purpose", fieldType: EntityFieldType.TEXT },
           { fieldKey: "influence", fieldLabel: "Influence", fieldType: EntityFieldType.TEXT }
-        ]
-      },
-      {
-        name: "Role",
-        description: "Roles held by people in the setting.",
-        category: "people",
-        fields: [
-          { fieldKey: "responsibilities", fieldLabel: "Responsibilities", fieldType: EntityFieldType.TEXT }
         ]
       },
       {
@@ -1108,8 +1213,7 @@ const packSeeds: PackSeed[] = [
         description: "Cities and towns.",
         isCore: true,
         fields: [
-          { fieldKey: "population", fieldLabel: "Population", fieldType: LocationFieldType.NUMBER },
-          { fieldKey: "notes", fieldLabel: "Notes", fieldType: LocationFieldType.TEXT }
+          { fieldKey: "population", fieldLabel: "Population", fieldType: LocationFieldType.NUMBER }
         ]
       },
       {
@@ -1126,29 +1230,29 @@ const packSeeds: PackSeed[] = [
     ],
     relationshipTemplates: [
       {
-        name: "Employed By",
-        description: "A person works for an organization.",
-        fromLabel: "Employee",
-        toLabel: "Employer",
+        name: "Employment",
+        description: "An organization employs a person.",
+        fromLabel: "employs",
+        toLabel: "employed by",
         roles: [
-          { fromRole: "Person", toRole: "Organisation" }
+          { fromRole: "Organisation", toRole: "Person" }
         ]
       },
       {
-        name: "Reports To",
+        name: "Reporting",
         description: "A person reports to another.",
-        fromLabel: "Reporter",
-        toLabel: "Manager",
+        fromLabel: "reports to",
+        toLabel: "manages",
         roles: [
           { fromRole: "Person", toRole: "Person" }
         ]
       },
       {
-        name: "Colleague Of",
+        name: "Colleague",
         description: "Two people work together.",
         isPeerable: true,
-        fromLabel: "Colleague",
-        toLabel: "Colleague",
+        fromLabel: "colleague of",
+        toLabel: "colleague of",
         roles: [
           { fromRole: "Person", toRole: "Person" }
         ]
@@ -1165,9 +1269,7 @@ const packSeeds: PackSeed[] = [
         name: "Character",
         description: "An optional character template.",
         category: "people",
-        fields: [
-          { fieldKey: "notes", fieldLabel: "Notes", fieldType: EntityFieldType.TEXT }
-        ]
+        fields: []
       },
       {
         name: "Organisation",
@@ -1182,9 +1284,7 @@ const packSeeds: PackSeed[] = [
       {
         name: "Location",
         description: "A generic place template.",
-        fields: [
-          { fieldKey: "description", fieldLabel: "Description", fieldType: LocationFieldType.TEXT }
-        ]
+        fields: []
       }
     ],
     locationRules: [],

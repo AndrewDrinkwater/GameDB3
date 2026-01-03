@@ -96,7 +96,7 @@ describe("EntityRelationships", () => {
     const targetButton = await within(dialog).findByRole("button", { name: "Target B" });
     await userEvent.click(targetButton);
 
-    expect(await within(dialog).findByText("Hero Mentor Target B")).toBeInTheDocument();
+    expect(await within(dialog).findByText(/Hero Mentor Target B/)).toBeInTheDocument();
   });
 
   it("filters targets by relationship type and shows swap when both directions exist", async () => {

@@ -184,6 +184,13 @@ const toRoleKey = (value: string, fallback: string) => {
   return next || fallback;
 };
 
+const toFieldKey = (value: string) =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "");
+
 const pickTypeByKeywords = (types: BuilderType[], keywords: string[]) =>
   types.find((type) => keywords.some((keyword) => normalize(type.name).includes(keyword)));
 
@@ -295,17 +302,24 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
     fromTypeKey: "",
     toTypeKey: ""
   });
-  const [expandedEntityTypes, setExpandedEntityTypes] = useState<Set<string>>(new Set());
+  const [entityFieldEditorId, setEntityFieldEditorId] = useState<string | null>(null);
   const [expandedLocationTypes, setExpandedLocationTypes] = useState<Set<string>>(new Set());
-  const [advancedFieldSettings, setAdvancedFieldSettings] = useState<Record<string, boolean>>({});
-  const [showRetiredEntities, setShowRetiredEntities] = useState(false);
-  const [showRetiredLocations, setShowRetiredLocations] = useState(false);
+  const [openChoiceEditors, setOpenChoiceEditors] = useState<Set<string>>(new Set());
   const [packPreviewId, setPackPreviewId] = useState<string | null>(null);
   const [packPreviewLoading, setPackPreviewLoading] = useState(false);
   const [packPreviews, setPackPreviews] = useState<Record<string, PackDetail>>({});
   const [locationParents, setLocationParents] = useState<Record<string, string | null>>({});
   const [locationOrder, setLocationOrder] = useState<string[]>([]);
   const [relationshipEditorKey, setRelationshipEditorKey] = useState<string | null>(null);
+  const [relationshipEditKey, setRelationshipEditKey] = useState<string | null>(null);
+  const [relationshipEditDraft, setRelationshipEditDraft] = useState<{
+    name: string;
+    description: string;
+    isPeerable: boolean;
+    fromLabel: string;
+    toLabel: string;
+    mappings: Array<{ id: string; fromTypeKey: string; toTypeKey: string }>;
+  } | null>(null);
   const [showCommitConfirm, setShowCommitConfirm] = useState(false);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [structureCreated, setStructureCreated] = useState(false);
@@ -471,11 +485,9 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
         setEntityTypes(entitySeed);
         setLocationTypes(locationSeed);
         setRelationships(relationshipSeed);
-        setExpandedEntityTypes(new Set());
+        setEntityFieldEditorId(null);
         setExpandedLocationTypes(new Set());
-        setAdvancedFieldSettings({});
-        setShowRetiredEntities(false);
-        setShowRetiredLocations(false);
+        setOpenChoiceEditors(new Set());
         setLocationDraftParentId(null);
         setLocationDraft({ name: "", description: "" });
         setLocationFieldEditorId(null);
@@ -514,9 +526,8 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
   );
 
   const visibleLocationTypes = useMemo(
-    () =>
-      locationTypes.filter((type) => (showRetiredLocations ? true : type.status === "active")),
-    [locationTypes, showRetiredLocations]
+    () => locationTypes.filter((type) => type.status === "active"),
+    [locationTypes]
   );
 
   const locationTypeById = useMemo(
@@ -542,18 +553,6 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
     }
   };
 
-  const toggleExpandedEntity = (key: string) => {
-    setExpandedEntityTypes((current) => {
-      const next = new Set(current);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
-  };
-
   const toggleExpandedLocation = (key: string) => {
     setExpandedLocationTypes((current) => {
       const next = new Set(current);
@@ -566,11 +565,16 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
     });
   };
 
-  const toggleAdvancedFields = (key: string) => {
-    setAdvancedFieldSettings((current) => ({
-      ...current,
-      [key]: !current[key]
-    }));
+  const toggleChoiceEditor = (key: string) => {
+    setOpenChoiceEditors((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
   };
 
   const addCustomEntityType = () => {
@@ -590,7 +594,7 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
       }
     ]);
     setCustomEntityDraft({ name: "", description: "" });
-    setExpandedEntityTypes((current) => new Set([...current, key]));
+    setEntityFieldEditorId(key);
   };
 
   const insertLocationAfterParent = (
@@ -1253,23 +1257,26 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
     const isRetired = type.status !== "active";
     const canEditStructure = type.enabled && !isRetired;
     const toggleLabel = type.enabled ? "Disable" : "Enable";
+    const canToggleEnabled = !isRetired && !type.isCore;
     return (
       <>
         <button
           type="button"
-          className="hierarchy-editor__action-button"
+          className="world-builder__icon-button"
           onClick={() => startLocationDraft(type.key)}
           disabled={!canEditStructure}
+          aria-label="Add child"
         >
-          Add child
+          +
         </button>
         <div className="world-builder__menu">
           <button
             type="button"
-            className="ghost-button"
+            className="world-builder__icon-button"
             onClick={() =>
               setActiveMenu((current) => (current === menuKey ? null : menuKey))
             }
+            aria-label="More actions"
           >
             ...
           </button>
@@ -1283,11 +1290,12 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
                   }}
                   disabled={!canEditStructure}
                 >
-                  Add fields
+                  Manage fields
                 </button>
                 <button
                   type="button"
                   onClick={() => {
+                    if (!canToggleEnabled) return;
                     updateType(
                       type.key,
                       (current) => ({ ...current, enabled: !current.enabled }),
@@ -1295,7 +1303,7 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
                     );
                     setActiveMenu(null);
                   }}
-                  disabled={isRetired}
+                  disabled={!canToggleEnabled}
                 >
                   {toggleLabel}
                 </button>
@@ -1345,6 +1353,112 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
   const activeLocationType = locationFieldEditorId
     ? locationTypeById.get(locationFieldEditorId) ?? null
     : null;
+  const activeEntityType = entityFieldEditorId
+    ? entityTypes.find((type) => type.key === entityFieldEditorId) ?? null
+    : null;
+
+  const resolveRelationshipTypeName = (typeKey: string) =>
+    entityTypes.find((type) => type.key === typeKey)?.name ?? typeKey;
+
+  const getPostureLabel = (posture: Pack["posture"]) =>
+    posture === "opinionated" ? "Pre-Defined" : "Minimal";
+
+  const buildRelationshipPreview = (
+    fromTypeKey: string,
+    toTypeKey: string,
+    fromLabel: string,
+    toLabel: string
+  ) => {
+    if (!fromTypeKey || !toTypeKey) return "Select types to preview.";
+    const fromTypeName = resolveRelationshipTypeName(fromTypeKey);
+    const toTypeName = resolveRelationshipTypeName(toTypeKey);
+    const forward = `${fromTypeName} ${fromLabel} ${toTypeName}`;
+    const reverse = `${toTypeName} ${toLabel} ${fromTypeName}`;
+    return `${forward} / ${reverse}`;
+  };
+
+  const startRelationshipEdit = (relationship: BuilderRelationship) => {
+    setRelationshipEditKey(relationship.key);
+    setRelationshipEditDraft({
+      name: relationship.name,
+      description: relationship.description ?? "",
+      isPeerable: relationship.isPeerable,
+      fromLabel: relationship.fromLabel,
+      toLabel: relationship.toLabel,
+      mappings: relationship.ruleMappings.map((mapping) => ({
+        id: mapping.id,
+        fromTypeKey: mapping.fromTypeKey ?? "",
+        toTypeKey: mapping.toTypeKey ?? ""
+      }))
+    });
+  };
+
+  const updateRelationshipEditDraft = (
+    updater: (current: NonNullable<typeof relationshipEditDraft>) => typeof relationshipEditDraft
+  ) => {
+    setRelationshipEditDraft((current) => (current ? updater(current) : current));
+  };
+
+  const addRelationshipMapping = () => {
+    updateRelationshipEditDraft((current) => ({
+      ...current,
+      mappings: [
+        ...current.mappings,
+        { id: createId(), fromTypeKey: "", toTypeKey: "" }
+      ]
+    }));
+  };
+
+  const removeRelationshipMapping = (id: string) => {
+    updateRelationshipEditDraft((current) => ({
+      ...current,
+      mappings: current.mappings.filter((mapping) => mapping.id !== id)
+    }));
+  };
+
+  const saveRelationshipEdit = () => {
+    if (!relationshipEditKey || !relationshipEditDraft) return;
+    const fromLabel = relationshipEditDraft.fromLabel.trim();
+    const toLabel = relationshipEditDraft.toLabel.trim();
+    if (!relationshipEditDraft.name.trim() || !fromLabel || !toLabel) return;
+    const fromRole = toRoleKey(fromLabel, "from");
+    const toRole = toRoleKey(toLabel, "to");
+    setRelationships((current) =>
+      current.map((rel) => {
+        if (rel.key !== relationshipEditKey) return rel;
+        const isPeerable = relationshipEditDraft.isPeerable;
+        const mappings = relationshipEditDraft.mappings.map((mapping) => ({
+          id: mapping.id,
+          fromRole,
+          toRole,
+          fromTypeKey: mapping.fromTypeKey,
+          toTypeKey: isPeerable ? mapping.fromTypeKey : mapping.toTypeKey
+        }));
+        return {
+          ...rel,
+          name: relationshipEditDraft.name.trim(),
+          description: relationshipEditDraft.description.trim(),
+          isPeerable,
+          fromLabel,
+          toLabel,
+          roles:
+            rel.roles.length > 0
+              ? rel.roles.map((role) => ({ ...role, fromRole, toRole }))
+              : [
+                  {
+                    id: `role-${createId()}`,
+                    fromRole,
+                    toRole
+                  }
+                ],
+          ruleMappings: mappings,
+          rulesSource: "custom"
+        };
+      })
+    );
+    setRelationshipEditKey(null);
+    setRelationshipEditDraft(null);
+  };
 
   return (
     <div className="world-builder">
@@ -1393,7 +1507,7 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
             items={packs.map((pack) => ({
               id: pack.id,
               title: pack.name,
-              subtitle: pack.posture,
+              subtitle: getPostureLabel(pack.posture),
               description: pack.description ?? "",
               recommended: recommendedPackIds.has(pack.id)
             }))}
@@ -1439,18 +1553,9 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
           <p className="world-builder__hint">
             Start with the core types. Expand a card only when you need to edit fields.
           </p>
-          <label className="world-builder__toggle">
-            <input
-              type="checkbox"
-              checked={showRetiredEntities}
-              onChange={(event) => setShowRetiredEntities(event.target.checked)}
-            />
-            <span>Show retired</span>
-          </label>
           {entityTypes
-            .filter((type) => (showRetiredEntities ? true : type.status === "active"))
+            .filter((type) => type.status === "active")
             .map((type) => {
-              const isOpen = expandedEntityTypes.has(type.key);
               const fieldCount = type.fields.filter(
                 (field) => field.enabled && field.status === "active"
               ).length;
@@ -1470,11 +1575,14 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
                   status={!type.enabled ? "DISABLED" : hasIssues ? "NEEDS_ATTENTION" : "READY"}
                   includeChecked={type.enabled}
                   fieldCount={fieldCount}
-                  isExpanded={isOpen}
-                  onToggleInclude={() =>
-                    updateType(type.key, (current) => ({ ...current, enabled: !type.enabled }), "entity")
-                  }
-                  onToggleExpanded={() => toggleExpandedEntity(type.key)}
+                  isExpanded={false}
+                  onToggleInclude={() => {
+                    if (type.isCore) return;
+                    updateType(type.key, (current) => ({ ...current, enabled: !type.enabled }), "entity");
+                  }}
+                  includeDisabled={type.isCore}
+                  onToggleExpanded={() => setEntityFieldEditorId(type.key)}
+                  onOpenAdvanced={() => setEntityFieldEditorId(type.key)}
                   actions={
                     type.source === "custom" ? (
                       <div className="world-builder__menu">
@@ -1522,305 +1630,7 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
                       </div>
                     ) : null
                   }
-                >
-                  <div className="world-builder__field world-builder__field--stacked">
-                    <label>
-                      <span>Name</span>
-                      <input
-                        value={type.name}
-                        onChange={(event) =>
-                          updateType(
-                            type.key,
-                            (current) => ({ ...current, name: event.target.value }),
-                            "entity"
-                          )
-                        }
-                      />
-                    </label>
-                    <label>
-                      <span>Description</span>
-                      <input
-                        value={type.description ?? ""}
-                        placeholder="Description"
-                        onChange={(event) =>
-                          updateType(
-                            type.key,
-                            (current) => ({ ...current, description: event.target.value }),
-                            "entity"
-                          )
-                        }
-                      />
-                    </label>
-                  </div>
-                  <div className="world-builder__field-actions">
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={Boolean(advancedFieldSettings[type.key])}
-                        onChange={() => toggleAdvancedFields(type.key)}
-                      />
-                      <span>Advanced field settings</span>
-                    </label>
-                  </div>
-                  <div className="world-builder__fields">
-                    {type.fields
-                      .filter((field) => (showRetiredEntities ? true : field.status === "active"))
-                      .map((field) => (
-                        <div key={field.id} className="world-builder__field world-builder__field--stacked">
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={field.enabled}
-                              onChange={(event) =>
-                                updateField(
-                                  type.key,
-                                  field.id,
-                                  (current) => ({ ...current, enabled: event.target.checked }),
-                                  "entity"
-                                )
-                              }
-                            />
-                            <span>Include</span>
-                          </label>
-                          <input
-                            placeholder="Label"
-                            value={field.fieldLabel}
-                            onChange={(event) =>
-                              updateField(
-                                type.key,
-                                field.id,
-                                (current) => ({ ...current, fieldLabel: event.target.value }),
-                                "entity"
-                              )
-                            }
-                          />
-                          {advancedFieldSettings[type.key] ? (
-                            <>
-                              <input
-                                placeholder="Field key"
-                                value={field.fieldKey}
-                                onChange={(event) =>
-                                  updateField(
-                                    type.key,
-                                    field.id,
-                                    (current) => ({ ...current, fieldKey: event.target.value }),
-                                    "entity"
-                                  )
-                                }
-                              />
-                              <select
-                                value={field.fieldType}
-                                onChange={(event) =>
-                                  updateField(
-                                    type.key,
-                                    field.id,
-                                    (current) => {
-                                      const nextType = event.target.value;
-                                      let nextChoiceListKey = current.choiceListKey ?? null;
-                                      if (nextType === "CHOICE") {
-                                        if (!nextChoiceListKey) {
-                                          nextChoiceListKey =
-                                            choiceLists[0]?.id ?? createChoiceList();
-                                        }
-                                      } else {
-                                        nextChoiceListKey = null;
-                                      }
-                                      return {
-                                        ...current,
-                                        fieldType: nextType,
-                                        choiceListKey: nextChoiceListKey
-                                      };
-                                    },
-                                    "entity"
-                                  )
-                                }
-                              >
-                                {entityFieldTypes.map((option) => (
-                                  <option key={option} value={option}>
-                                    {option}
-                                  </option>
-                                ))}
-                              </select>
-                              <label>
-                                <input
-                                  type="checkbox"
-                                  checked={field.required}
-                                  onChange={(event) =>
-                                    updateField(
-                                      type.key,
-                                      field.id,
-                                      (current) => ({ ...current, required: event.target.checked }),
-                                      "entity"
-                                    )
-                                  }
-                                />
-                                <span>Required</span>
-                              </label>
-                              {field.fieldType === "CHOICE" ? (
-                                <div className="world-builder__choice-editor">
-                                  <label>
-                                    Choice List
-                                    <select
-                                      value={field.choiceListKey ?? ""}
-                                      onChange={(event) => {
-                                        const value = event.target.value;
-                                        if (value === "__new") {
-                                          const created = createChoiceList();
-                                          updateField(
-                                            type.key,
-                                            field.id,
-                                            (current) => ({ ...current, choiceListKey: created }),
-                                            "entity"
-                                          );
-                                          return;
-                                        }
-                                        updateField(
-                                          type.key,
-                                          field.id,
-                                          (current) => ({
-                                            ...current,
-                                            choiceListKey: value ? value : null
-                                          }),
-                                          "entity"
-                                        );
-                                      }}
-                                    >
-                                      <option value="">Select a list...</option>
-                                      {choiceLists.map((list) => (
-                                        <option key={list.id} value={list.id}>
-                                          {list.name}
-                                        </option>
-                                      ))}
-                                      <option value="__new">+ New list</option>
-                                    </select>
-                                  </label>
-                                  {field.choiceListKey ? (
-                                    <div className="world-builder__choice-options">
-                                      {(
-                                        choiceLists.find((list) => list.id === field.choiceListKey)
-                                          ?.options ?? []
-                                      ).map((option) => (
-                                        <div key={option.id} className="world-builder__choice-row">
-                                          <input
-                                            placeholder="Value"
-                                            value={option.value}
-                                            onChange={(event) =>
-                                              updateChoiceList(field.choiceListKey as string, (list) => ({
-                                                ...list,
-                                                options: list.options.map((item) =>
-                                                  item.id === option.id
-                                                    ? { ...item, value: event.target.value }
-                                                    : item
-                                                )
-                                              }))
-                                            }
-                                          />
-                                          <input
-                                            placeholder="Label"
-                                            value={option.label}
-                                            onChange={(event) =>
-                                              updateChoiceList(field.choiceListKey as string, (list) => ({
-                                                ...list,
-                                                options: list.options.map((item) =>
-                                                  item.id === option.id
-                                                    ? { ...item, label: event.target.value }
-                                                    : item
-                                                )
-                                              }))
-                                            }
-                                          />
-                                          <button
-                                            type="button"
-                                            className="ghost-button"
-                                            onClick={() =>
-                                              removeChoiceOption(
-                                                field.choiceListKey as string,
-                                                option.id
-                                              )
-                                            }
-                                          >
-                                            Remove
-                                          </button>
-                                        </div>
-                                      ))}
-                                      <button
-                                        type="button"
-                                        className="ghost-button"
-                                        onClick={() => addChoiceOption(field.choiceListKey as string)}
-                                      >
-                                        Add option
-                                      </button>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              ) : null}
-                              {field.source === "custom" ? (
-                                <div className="world-builder__menu">
-                                  <button
-                                    type="button"
-                                    className="ghost-button"
-                                    onClick={() =>
-                                      setActiveMenu((current) =>
-                                        current === field.id ? null : field.id
-                                      )
-                                    }
-                                  >
-                                    ...
-                                  </button>
-                                  {activeMenu === field.id ? (
-                                    <div className="world-builder__menu-list">
-                                      {isFieldUsed(field) ? (
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            updateField(
-                                              type.key,
-                                              field.id,
-                                              (current) => ({
-                                                ...current,
-                                                status: "retired",
-                                                enabled: false
-                                              }),
-                                              "entity"
-                                            )
-                                          }
-                                        >
-                                          Retire
-                                        </button>
-                                      ) : (
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            updateType(
-                                              type.key,
-                                              (current) => ({
-                                                ...current,
-                                                fields: current.fields.filter((item) => item.id !== field.id)
-                                              }),
-                                              "entity"
-                                            )
-                                          }
-                                        >
-                                          Delete
-                                        </button>
-                                      )}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              ) : null}
-                            </>
-                          ) : null}
-                        </div>
-                      ))}
-                  </div>
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    onClick={() => addCustomField(type.key, "entity")}
-                  >
-                    Add custom field
-                  </button>
-                </ClickableTypeCard>
+                />
               );
             })}
           <CustomTypeCreateCard
@@ -1874,7 +1684,7 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
                     className="ghost-button"
                     onClick={() => startLocationDraft(null)}
                   >
-                    Add top-level type
+                    Add Location
                   </button>
                 </div>
               </>
@@ -1896,6 +1706,7 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
                   description: type.description ?? "",
                   parentId: locationParents[type.key] ?? null,
                   status: type.status,
+                  disabled: !type.enabled,
                   badge: type.isCore ? "core" : type.source === "custom" ? "custom" : "optional"
                 }));
             })()}
@@ -1909,14 +1720,6 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
             renderNodeActions={renderLocationActions}
             renderAfterNode={renderLocationAfterNode}
           />
-          <label className="world-builder__toggle">
-            <input
-              type="checkbox"
-              checked={showRetiredLocations}
-              onChange={(event) => setShowRetiredLocations(event.target.checked)}
-            />
-            <span>Show retired</span>
-          </label>
           <div className="world-builder__actions">
             <button type="button" className="ghost-button" onClick={() => setStep(1)}>
               Back
@@ -1989,14 +1792,10 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
                           ? "READY"
                           : "NEEDS_RULES"
                       }
-                      editRulesEnabled={structureCreated && rel.enabled}
+                      editRulesEnabled={rel.enabled}
                       onToggleInclude={(checked) => toggleRelationship(rel.key, checked)}
                       onEditRules={
-                        structureCreated && rel.enabled
-                          ? () => {
-                              setRelationshipEditorKey(rel.key);
-                            }
-                          : undefined
+                        rel.enabled ? () => startRelationshipEdit(rel) : undefined
                       }
                     />
                   );
@@ -2320,6 +2119,295 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
 
       <InlineAdvancedEditorFrame
         title={
+          activeEntityType
+            ? `Fields for ${activeEntityType.name}`
+            : "Entity type fields"
+        }
+        isOpen={Boolean(entityFieldEditorId)}
+        onClose={() => setEntityFieldEditorId(null)}
+      >
+        {activeEntityType ? (
+          <>
+            <label className="world-builder__field">
+              <span>Name</span>
+              <input
+                value={activeEntityType.name}
+                onChange={(event) =>
+                  updateType(
+                    activeEntityType.key,
+                    (current) => ({ ...current, name: event.target.value }),
+                    "entity"
+                  )
+                }
+              />
+            </label>
+            <label className="world-builder__field">
+              <span>Description</span>
+              <textarea
+                rows={3}
+                value={activeEntityType.description ?? ""}
+                placeholder="Description"
+                onChange={(event) =>
+                  updateType(
+                    activeEntityType.key,
+                    (current) => ({ ...current, description: event.target.value }),
+                    "entity"
+                  )
+                }
+              />
+            </label>
+            <div className="world-builder__fields">
+              {activeEntityType.fields
+                .filter((field) => field.status === "active")
+                .map((field) => (
+                  <div key={field.id} className="world-builder__field world-builder__field--stacked">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={field.enabled}
+                        onChange={(event) =>
+                          updateField(
+                            activeEntityType.key,
+                            field.id,
+                            (current) => ({ ...current, enabled: event.target.checked }),
+                            "entity"
+                          )
+                        }
+                      />
+                      <span>Include</span>
+                    </label>
+                    <input
+                      placeholder="Label"
+                      value={field.fieldLabel}
+                      onChange={(event) => {
+                        const nextLabel = event.target.value;
+                        updateField(
+                          activeEntityType.key,
+                          field.id,
+                          (current) => ({
+                            ...current,
+                            fieldLabel: nextLabel,
+                            fieldKey: toFieldKey(nextLabel)
+                          }),
+                          "entity"
+                        );
+                      }}
+                    />
+                    <select
+                      value={field.fieldType}
+                      onChange={(event) =>
+                        updateField(
+                          activeEntityType.key,
+                          field.id,
+                          (current) => {
+                            const nextType = event.target.value;
+                            let nextChoiceListKey = current.choiceListKey ?? null;
+                            if (nextType === "CHOICE") {
+                              if (!nextChoiceListKey) {
+                                nextChoiceListKey = choiceLists[0]?.id ?? createChoiceList();
+                              }
+                            } else {
+                              nextChoiceListKey = null;
+                            }
+                            return {
+                              ...current,
+                              fieldType: nextType,
+                              choiceListKey: nextChoiceListKey
+                            };
+                          },
+                          "entity"
+                        )
+                      }
+                    >
+                      {entityFieldTypes.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={field.required}
+                        onChange={(event) =>
+                          updateField(
+                            activeEntityType.key,
+                            field.id,
+                            (current) => ({ ...current, required: event.target.checked }),
+                            "entity"
+                          )
+                        }
+                      />
+                      <span>Required</span>
+                    </label>
+                    {field.fieldType === "CHOICE" ? (
+                      <div className="world-builder__choice-editor">
+                        <div className="world-builder__choice-header">
+                          <span>Choices</span>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() =>
+                              toggleChoiceEditor(`entity:${field.id}`)
+                            }
+                          >
+                            {openChoiceEditors.has(`entity:${field.id}`) ? "Hide" : "Show"}
+                          </button>
+                        </div>
+                        {openChoiceEditors.has(`entity:${field.id}`) ? (
+                          <>
+                            <label>
+                              Choice List
+                              <select
+                                value={field.choiceListKey ?? ""}
+                                onChange={(event) => {
+                                  const value = event.target.value;
+                                  if (value === "__new") {
+                                    const created = createChoiceList();
+                                    updateField(
+                                      activeEntityType.key,
+                                      field.id,
+                                      (current) => ({ ...current, choiceListKey: created }),
+                                      "entity"
+                                    );
+                                    return;
+                                  }
+                                  updateField(
+                                    activeEntityType.key,
+                                    field.id,
+                                    (current) => ({
+                                      ...current,
+                                      choiceListKey: value ? value : null
+                                    }),
+                                    "entity"
+                                  );
+                                }}
+                              >
+                                <option value="">Select a list...</option>
+                                {choiceLists.map((list) => (
+                                  <option key={list.id} value={list.id}>
+                                    {list.name}
+                                  </option>
+                                ))}
+                                <option value="__new">+ New list</option>
+                              </select>
+                            </label>
+                            {field.choiceListKey ? (
+                              <div className="world-builder__choice-options">
+                                {(
+                                  choiceLists.find((list) => list.id === field.choiceListKey)
+                                    ?.options ?? []
+                                ).map((option) => (
+                                  <div key={option.id} className="world-builder__choice-row">
+                                    <input
+                                      placeholder="Value"
+                                      value={option.value}
+                                      onChange={(event) =>
+                                        updateChoiceList(field.choiceListKey as string, (list) => ({
+                                          ...list,
+                                          options: list.options.map((item) =>
+                                            item.id === option.id
+                                              ? { ...item, value: event.target.value }
+                                              : item
+                                          )
+                                        }))
+                                      }
+                                    />
+                                    <input
+                                      placeholder="Label"
+                                      value={option.label}
+                                      onChange={(event) =>
+                                        updateChoiceList(field.choiceListKey as string, (list) => ({
+                                          ...list,
+                                          options: list.options.map((item) =>
+                                            item.id === option.id
+                                              ? { ...item, label: event.target.value }
+                                              : item
+                                          )
+                                        }))
+                                      }
+                                    />
+                                    <button
+                                      type="button"
+                                      className="ghost-button"
+                                      onClick={() =>
+                                        removeChoiceOption(
+                                          field.choiceListKey as string,
+                                          option.id
+                                        )
+                                      }
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  className="ghost-button"
+                                  onClick={() => addChoiceOption(field.choiceListKey as string)}
+                                >
+                                  Add option
+                                </button>
+                              </div>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {field.source === "custom" ? (
+                      <button
+                        type="button"
+                        className="world-builder__field-delete"
+                        aria-label="Delete field"
+                        onClick={() => {
+                          const message = isFieldUsed(field)
+                            ? "This field is in use. Retire it?"
+                            : "Delete this field?";
+                          if (!window.confirm(message)) return;
+                          if (isFieldUsed(field)) {
+                            updateField(
+                              activeEntityType.key,
+                              field.id,
+                              (current) => ({
+                                ...current,
+                                status: "retired",
+                                enabled: false
+                              }),
+                              "entity"
+                            );
+                          } else {
+                            updateType(
+                              activeEntityType.key,
+                              (current) => ({
+                                ...current,
+                                fields: current.fields.filter((item) => item.id !== field.id)
+                              }),
+                              "entity"
+                            );
+                          }
+                        }}
+                      >
+                        X
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+            </div>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => addCustomField(activeEntityType.key, "entity")}
+            >
+              Add custom field
+            </button>
+          </>
+        ) : (
+          <div className="world-builder__hint">Entity type unavailable.</div>
+        )}
+      </InlineAdvancedEditorFrame>
+
+      <InlineAdvancedEditorFrame
+        title={
           activeLocationType
             ? `Fields for ${activeLocationType.name}`
             : "Location type fields"
@@ -2329,19 +2417,9 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
       >
         {activeLocationType ? (
           <>
-            <div className="world-builder__field-actions">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={Boolean(advancedFieldSettings[activeLocationType.key])}
-                  onChange={() => toggleAdvancedFields(activeLocationType.key)}
-                />
-                <span>Advanced field settings</span>
-              </label>
-            </div>
             <div className="world-builder__fields">
               {activeLocationType.fields
-                .filter((field) => (showRetiredLocations ? true : field.status === "active"))
+                .filter((field) => field.status === "active")
                 .map((field) => (
                   <div key={field.id} className="world-builder__field world-builder__field--stacked">
                     <label>
@@ -2371,69 +2449,81 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
                         )
                       }
                     />
-                    {advancedFieldSettings[activeLocationType.key] ? (
-                      <>
-                        <input
-                          placeholder="Field key"
-                          value={field.fieldKey}
-                          onChange={(event) =>
-                            updateField(
-                              activeLocationType.key,
-                              field.id,
-                              (current) => ({ ...current, fieldKey: event.target.value }),
-                              "location"
-                            )
-                          }
-                        />
-                        <select
-                          value={field.fieldType}
-                          onChange={(event) =>
-                            updateField(
-                              activeLocationType.key,
-                              field.id,
-                              (current) => {
-                                const nextType = event.target.value;
-                                let nextChoiceListKey = current.choiceListKey ?? null;
-                                if (nextType === "CHOICE") {
-                                  if (!nextChoiceListKey) {
-                                    nextChoiceListKey = choiceLists[0]?.id ?? createChoiceList();
-                                  }
-                                } else {
-                                  nextChoiceListKey = null;
-                                }
-                                return {
-                                  ...current,
-                                  fieldType: nextType,
-                                  choiceListKey: nextChoiceListKey
-                                };
-                              },
-                              "location"
-                            )
-                          }
-                        >
-                          {locationFieldTypes.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={field.required}
-                            onChange={(event) =>
-                              updateField(
-                                activeLocationType.key,
-                                field.id,
-                                (current) => ({ ...current, required: event.target.checked }),
-                                "location"
-                              )
+                    <input
+                      placeholder="Field key"
+                      value={field.fieldKey}
+                      onChange={(event) =>
+                        updateField(
+                          activeLocationType.key,
+                          field.id,
+                          (current) => ({ ...current, fieldKey: event.target.value }),
+                          "location"
+                        )
+                      }
+                    />
+                    <select
+                      value={field.fieldType}
+                      onChange={(event) =>
+                        updateField(
+                          activeLocationType.key,
+                          field.id,
+                          (current) => {
+                            const nextType = event.target.value;
+                            let nextChoiceListKey = current.choiceListKey ?? null;
+                            if (nextType === "CHOICE") {
+                              if (!nextChoiceListKey) {
+                                nextChoiceListKey = choiceLists[0]?.id ?? createChoiceList();
+                              }
+                            } else {
+                              nextChoiceListKey = null;
                             }
-                          />
-                          <span>Required</span>
-                        </label>
-                        {field.fieldType === "CHOICE" ? (
-                          <div className="world-builder__choice-editor">
+                            return {
+                              ...current,
+                              fieldType: nextType,
+                              choiceListKey: nextChoiceListKey
+                            };
+                          },
+                          "location"
+                        )
+                      }
+                    >
+                      {locationFieldTypes.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={field.required}
+                        onChange={(event) =>
+                          updateField(
+                            activeLocationType.key,
+                            field.id,
+                            (current) => ({ ...current, required: event.target.checked }),
+                            "location"
+                          )
+                        }
+                      />
+                      <span>Required</span>
+                    </label>
+                    {field.fieldType === "CHOICE" ? (
+                      <div className="world-builder__choice-editor">
+                        <div className="world-builder__choice-header">
+                          <span>Choices</span>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() =>
+                              toggleChoiceEditor(`location:${field.id}`)
+                            }
+                          >
+                            {openChoiceEditors.has(`location:${field.id}`) ? "Hide" : "Show"}
+                          </button>
+                        </div>
+                        {openChoiceEditors.has(`location:${field.id}`) ? (
+                          <>
                             <label>
                               Choice List
                               <select
@@ -2528,63 +2618,45 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
                                 </button>
                               </div>
                             ) : null}
-                          </div>
+                          </>
                         ) : null}
-                        {field.source === "custom" ? (
-                          <div className="world-builder__menu">
-                            <button
-                              type="button"
-                              className="ghost-button"
-                              onClick={() =>
-                                setActiveMenu((current) =>
-                                  current === field.id ? null : field.id
-                                )
-                              }
-                            >
-                              ...
-                            </button>
-                            {activeMenu === field.id ? (
-                              <div className="world-builder__menu-list">
-                                {isFieldUsed(field) ? (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      updateField(
-                                        activeLocationType.key,
-                                        field.id,
-                                        (current) => ({
-                                          ...current,
-                                          status: "retired",
-                                          enabled: false
-                                        }),
-                                        "location"
-                                      )
-                                    }
-                                  >
-                                    Retire
-                                  </button>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      updateType(
-                                        activeLocationType.key,
-                                        (current) => ({
-                                          ...current,
-                                          fields: current.fields.filter((item) => item.id !== field.id)
-                                        }),
-                                        "location"
-                                      )
-                                    }
-                                  >
-                                    Delete
-                                  </button>
-                                )}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </>
+                      </div>
+                    ) : null}
+                    {field.source === "custom" ? (
+                      <button
+                        type="button"
+                        className="world-builder__field-delete"
+                        aria-label="Delete field"
+                        onClick={() => {
+                          const message = isFieldUsed(field)
+                            ? "This field is in use. Retire it?"
+                            : "Delete this field?";
+                          if (!window.confirm(message)) return;
+                          if (isFieldUsed(field)) {
+                            updateField(
+                              activeLocationType.key,
+                              field.id,
+                              (current) => ({
+                                ...current,
+                                status: "retired",
+                                enabled: false
+                              }),
+                              "location"
+                            );
+                          } else {
+                            updateType(
+                              activeLocationType.key,
+                              (current) => ({
+                                ...current,
+                                fields: current.fields.filter((item) => item.id !== field.id)
+                              }),
+                              "location"
+                            );
+                          }
+                        }}
+                      >
+                        X
+                      </button>
                     ) : null}
                   </div>
                 ))}
@@ -2694,7 +2766,11 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
             <span>From label</span>
             <input
               value={relationshipDraft.fromLabel}
-              placeholder="From label"
+              placeholder={
+                relationshipDraft.isPeerable
+                  ? "Sibling of / Colleague of / Ally of / Peer of / Enemy of"
+                  : "Parent of / Employs / Has member / Leads / Oversees"
+              }
               onChange={(event) =>
                 setRelationshipDraft((current) => ({
                   ...current,
@@ -2707,7 +2783,11 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
             <span>To label</span>
             <input
               value={relationshipDraft.toLabel}
-              placeholder="To label"
+              placeholder={
+                relationshipDraft.isPeerable
+                  ? "Sibling of / Colleague of / Ally of / Peer of / Enemy of"
+                  : "Child of / Employed by / Member of / Reports to / Overseen by"
+              }
               onChange={(event) =>
                 setRelationshipDraft((current) => ({
                   ...current,
@@ -2716,7 +2796,7 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
               }
             />
           </label>
-          <label className="world-builder__toggle">
+          <div className="world-builder__toggle">
             <input
               type="checkbox"
               checked={relationshipDraft.isPeerable}
@@ -2729,7 +2809,7 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
               }
             />
             <span>Peerable (same type on both sides)</span>
-          </label>
+          </div>
           <label>
             <span>From type</span>
             <select
@@ -2816,6 +2896,210 @@ export default function WorldBuilder({ token, worldId, worldLabel, onApplied }: 
               relationships.find((rel) => rel.key === relationshipEditorKey)?.templateId
             }
           />
+        ) : null}
+      </InlineAdvancedEditorFrame>
+
+      <InlineAdvancedEditorFrame
+        title="Manage relationship"
+        isOpen={Boolean(relationshipEditKey)}
+        onClose={() => {
+          setRelationshipEditKey(null);
+          setRelationshipEditDraft(null);
+        }}
+      >
+        {relationshipEditDraft ? (
+          <div className="world-builder__relationship-editor">
+            <label className="world-builder__field">
+              <span>Name</span>
+              <input
+                value={relationshipEditDraft.name}
+                onChange={(event) =>
+                  updateRelationshipEditDraft((current) => ({
+                    ...current,
+                    name: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <label className="world-builder__field">
+              <span>Description</span>
+              <input
+                value={relationshipEditDraft.description}
+                placeholder="Description (optional)"
+                onChange={(event) =>
+                  updateRelationshipEditDraft((current) => ({
+                    ...current,
+                    description: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <label className="world-builder__field">
+              <span>From label</span>
+              <input
+                value={relationshipEditDraft.fromLabel}
+                placeholder={
+                  relationshipEditDraft.isPeerable
+                    ? "Sibling of / Colleague of / Ally of / Peer of / Enemy of"
+                    : "Parent of / Employs / Has member / Leads / Oversees"
+                }
+                onChange={(event) =>
+                  updateRelationshipEditDraft((current) => ({
+                    ...current,
+                    fromLabel: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <label className="world-builder__field">
+              <span>To label</span>
+              <input
+                value={relationshipEditDraft.toLabel}
+                placeholder={
+                  relationshipEditDraft.isPeerable
+                    ? "Sibling of / Colleague of / Ally of / Peer of / Enemy of"
+                    : "Child of / Employed by / Member of / Reports to / Overseen by"
+                }
+                onChange={(event) =>
+                  updateRelationshipEditDraft((current) => ({
+                    ...current,
+                    toLabel: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <div className="world-builder__toggle">
+              <input
+                type="checkbox"
+                checked={relationshipEditDraft.isPeerable}
+                onChange={(event) =>
+                  updateRelationshipEditDraft((current) => ({
+                    ...current,
+                    isPeerable: event.target.checked,
+                    mappings: current.mappings.map((mapping) => ({
+                      ...mapping,
+                      toTypeKey: event.target.checked ? mapping.fromTypeKey : mapping.toTypeKey
+                    }))
+                    }))
+                }
+              />
+              <span>Peerable (same type on both sides)</span>
+            </div>
+            <div className="world-builder__rules">
+              {relationshipEditDraft.mappings.map((mapping) => (
+                <div key={mapping.id} className="world-builder__rule">
+                  <span>Types</span>
+                  <select
+                    value={mapping.fromTypeKey}
+                    onChange={(event) =>
+                      updateRelationshipEditDraft((current) => ({
+                        ...current,
+                        mappings: current.mappings.map((entry) =>
+                          entry.id === mapping.id
+                            ? {
+                                ...entry,
+                                fromTypeKey: event.target.value,
+                                toTypeKey: current.isPeerable
+                                  ? event.target.value
+                                  : entry.toTypeKey
+                              }
+                            : entry
+                        )
+                      }))
+                    }
+                  >
+                    <option value="">Select type...</option>
+                    {entityTypes
+                      .filter((type) => type.status === "active")
+                      .map((type) => (
+                        <option key={type.key} value={type.key}>
+                          {type.name}
+                        </option>
+                      ))}
+                  </select>
+                  <select
+                    value={
+                      relationshipEditDraft.isPeerable
+                        ? mapping.fromTypeKey
+                        : mapping.toTypeKey
+                    }
+                    onChange={(event) =>
+                      updateRelationshipEditDraft((current) => ({
+                        ...current,
+                        mappings: current.mappings.map((entry) =>
+                          entry.id === mapping.id
+                            ? { ...entry, toTypeKey: event.target.value }
+                            : entry
+                        )
+                      }))
+                    }
+                    disabled={relationshipEditDraft.isPeerable}
+                  >
+                    <option value="">Select type...</option>
+                    {entityTypes
+                      .filter((type) => type.status === "active")
+                      .map((type) => (
+                        <option key={type.key} value={type.key}>
+                          {type.name}
+                        </option>
+                      ))}
+                  </select>
+                  <span
+                    className="world-builder__info"
+                    title={buildRelationshipPreview(
+                      mapping.fromTypeKey,
+                      relationshipEditDraft.isPeerable
+                        ? mapping.fromTypeKey
+                        : mapping.toTypeKey,
+                      relationshipEditDraft.fromLabel.trim() || "relates to",
+                      relationshipEditDraft.toLabel.trim() || "relates to"
+                    )}
+                    aria-label="Relationship preview"
+                  >
+                    i
+                  </span>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => removeRelationshipMapping(mapping.id)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={addRelationshipMapping}
+              >
+                Add relationship mapping
+              </button>
+            </div>
+            <div className="world-builder__actions">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => {
+                  setRelationshipEditKey(null);
+                  setRelationshipEditDraft(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={saveRelationshipEdit}
+                disabled={
+                  !relationshipEditDraft.name.trim() ||
+                  !relationshipEditDraft.fromLabel.trim() ||
+                  !relationshipEditDraft.toLabel.trim()
+                }
+              >
+                Save
+              </button>
+            </div>
+          </div>
         ) : null}
       </InlineAdvancedEditorFrame>
     </div>

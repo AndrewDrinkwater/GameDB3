@@ -40,7 +40,7 @@ export const registerCoreRoutes = (app: express.Express) => {
           { value: "INACTIVE", label: "Inactive", sortOrder: 2 }
         ],
         pack_posture: [
-          { value: "opinionated", label: "Opinionated", sortOrder: 1 },
+          { value: "opinionated", label: "Pre-Defined", sortOrder: 1 },
           { value: "minimal", label: "Minimal", sortOrder: 2 }
         ],
         location_field_type: [

@@ -20,6 +20,7 @@ export type HierarchyNode = {
   description?: string;
   parentId: string | null;
   status?: "active" | "retired";
+  disabled?: boolean;
   badge?: "core" | "optional" | "custom";
 };
 
@@ -223,7 +224,9 @@ const DraggableRow = ({
       }}
       className={`hierarchy-editor__node ${isOver ? "is-over" : ""} ${
         isRetired ? "is-retired" : ""
-      } ${isDragging ? "is-dragging" : ""} ${isSelected ? "is-selected" : ""} ${
+      } ${node.disabled ? "is-disabled" : ""} ${isDragging ? "is-dragging" : ""} ${
+        isSelected ? "is-selected" : ""
+      } ${
         dropEnabled && isOver ? (canDropInside ? "is-drop-valid" : "is-drop-invalid") : ""
       }`}
       style={{
@@ -310,15 +313,25 @@ const DropZone = ({
 
   if (hidden || disabled) return null;
 
+  const position =
+    id === "root"
+      ? "root"
+      : id.startsWith("before")
+        ? "before"
+        : id.startsWith("after")
+          ? "after"
+          : "inside";
+
   return (
     <div
       ref={setNodeRef}
-      style={{ marginLeft: `${indent}px` }}
+      style={{ ["--indent" as string]: `${indent}px` }}
       className={`hierarchy-editor__dropzone ${isOver ? "is-over" : ""} ${
         isOver ? (isAllowed ? "is-allowed" : "is-blocked") : ""
       }`}
       aria-label={label}
       data-testid={`hierarchy-dropzone-${id}`}
+      data-position={position}
     />
   );
 };

@@ -1727,6 +1727,22 @@ export function useForm({
     );
   };
 
+  const prepareForRedirectAfterCreate = () => {
+    hasSnapshotRef.current = false;
+    snapshotKeyRef.current = "";
+    initialSnapshotRef.current = "";
+    suppressDirtyRef.current = true;
+    setIsDirty(false);
+    window.dispatchEvent(
+      new CustomEvent("ttrpg:form-dirty", { detail: { dirty: false } })
+    );
+  };
+
+  const redirectToSavedRecord = (entityKey: string, id: string) => {
+    prepareForRedirectAfterCreate();
+    window.location.hash = `/form/${entityKey}/${id}`;
+  };
+
   const saveRecord = async () => {
     if (!view) return false;
     setError(null);
@@ -1916,27 +1932,14 @@ export function useForm({
       window.dispatchEvent(
         new CustomEvent("ttrpg:form-saved", { detail: { recordId: savedId } })
       );
-      if (isNew && view.entityKey === "entities" && savedId && savedId !== recordId) {
-        hasSnapshotRef.current = false;
-        snapshotKeyRef.current = "";
-        initialSnapshotRef.current = "";
-        suppressDirtyRef.current = true;
-        setIsDirty(false);
-        window.dispatchEvent(
-          new CustomEvent("ttrpg:form-dirty", { detail: { dirty: false } })
-        );
-        window.location.hash = `/form/entities/${savedId}`;
-      }
-      if (isNew && view.entityKey === "locations" && savedId && savedId !== recordId) {
-        hasSnapshotRef.current = false;
-        snapshotKeyRef.current = "";
-        initialSnapshotRef.current = "";
-        suppressDirtyRef.current = true;
-        setIsDirty(false);
-        window.dispatchEvent(
-          new CustomEvent("ttrpg:form-dirty", { detail: { dirty: false } })
-        );
-        window.location.hash = `/form/locations/${savedId}`;
+      const shouldRedirectAfterCreate =
+        isNew &&
+        savedId &&
+        savedId !== recordId &&
+        view.entityKey &&
+        ["entities", "locations", "worlds", "campaigns", "characters"].includes(view.entityKey);
+      if (shouldRedirectAfterCreate) {
+        redirectToSavedRecord(view.entityKey, savedId);
       }
       return true;
     } catch (err) {
@@ -2389,8 +2392,30 @@ export function useForm({
       );
     };
 
+  const savedRecordEntityLabel = (() => {
+    const key = view?.entityKey;
+    if (!key) return undefined;
+    if (key === "worlds") return "World";
+    if (key === "campaigns") return "Campaign";
+    if (key === "characters") return "Character";
+    return undefined;
+  })();
+
+  const savedRecordName = (() => {
+    if (isNew) return undefined;
+    if (typeof formData.name !== "string") return undefined;
+    const trimmed = formData.name.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  })();
+
   const formTitle =
-    isRecordView && !isNew && formData.name ? String(formData.name) : view?.title ?? "";
+    savedRecordName
+      ? savedRecordEntityLabel
+        ? `${savedRecordEntityLabel}: ${savedRecordName}`
+        : isRecordView
+          ? savedRecordName
+          : view?.title ?? ""
+      : view?.title ?? "";
 
     return {
     token,

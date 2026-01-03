@@ -186,7 +186,7 @@ async function main() {
     { listKey: "character_status", value: "dead", label: "Dead", sortOrder: 2 },
     { listKey: "user_role", value: "ADMIN", label: "Admin", sortOrder: 1 },
     { listKey: "user_role", value: "USER", label: "User", sortOrder: 2 },
-    { listKey: "pack_posture", value: "opinionated", label: "Opinionated", sortOrder: 1 },
+    { listKey: "pack_posture", value: "opinionated", label: "Pre-Defined", sortOrder: 1 },
     { listKey: "pack_posture", value: "minimal", label: "Minimal", sortOrder: 2 },
     { listKey: "world_entity_permission", value: "ARCHITECT", label: "Architects only", sortOrder: 1 },
     { listKey: "world_entity_permission", value: "ARCHITECT_GM", label: "Architects and GMs", sortOrder: 2 },
