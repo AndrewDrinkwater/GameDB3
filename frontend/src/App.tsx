@@ -12,6 +12,7 @@ import AdminFormView from "./views/AdminFormView";
 import AdminListView from "./views/AdminListView";
 import FormRouteView from "./views/FormRouteView";
 import ListRouteView from "./views/ListRouteView";
+import LocationExplorerView from "./views/LocationExplorerView";
 
 type User = {
   id: string;
@@ -1325,6 +1326,25 @@ function AppShell() {
         );
       }
 
+      if (routeParts[0] === "locations" && routeParts[1] === "explorer") {
+        return (
+          <LocationExplorerView
+            token={token}
+            worldId={context.worldId}
+            campaignId={context.campaignId}
+            characterId={context.characterId}
+            onOpenEntityRecord={(entityId) => {
+              navigateWithGuard(`/form/entities/${entityId}`);
+              handleSidebarSelect();
+            }}
+            onOpenLocationRecord={(locationId) => {
+              navigateWithGuard(`/form/locations/${locationId}`);
+              handleSidebarSelect();
+            }}
+          />
+        );
+      }
+
       if (routeParts[0] === "form" && routeParts[1] && routeParts[2]) {
         const config = viewRegistry[routeParts[1]];
         if (!config) return null;
@@ -1661,6 +1681,16 @@ function AppShell() {
                       <div className="sidebar__section">
                         <span className="sidebar__section-title">Locations</span>
                         <div className="sidebar__section-body sidebar__entity-list">
+                          <button
+                            type="button"
+                            className="sidebar__entity-item"
+                            onClick={() => {
+                              navigateWithGuard("/locations/explorer");
+                              handleSidebarSelect();
+                            }}
+                          >
+                            <span>Location Explorer</span>
+                          </button>
                           <button
                             type="button"
                             className="sidebar__entity-item"

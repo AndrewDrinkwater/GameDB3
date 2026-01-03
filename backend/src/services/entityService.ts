@@ -308,10 +308,10 @@ export const createEntity = async ({
     access
   } = payload;
 
-  if (!worldId || !entityTypeId || !currentLocationId || !name) {
+  if (!worldId || !entityTypeId || !name) {
     throw new ServiceError(
       400,
-      "worldId, entityTypeId, currentLocationId, and name are required."
+      "worldId, entityTypeId, and name are required."
     );
   }
 
@@ -323,19 +323,21 @@ export const createEntity = async ({
     throw new ServiceError(400, "Entity type must belong to the selected world.");
   }
 
-  const location = await prisma.location.findUnique({
-    where: { id: currentLocationId },
-    select: { id: true, worldId: true }
-  });
-  if (!location || location.worldId !== worldId) {
-    throw new ServiceError(400, "Location must belong to the selected world.");
+  if (currentLocationId) {
+    const location = await prisma.location.findUnique({
+      where: { id: currentLocationId },
+      select: { id: true, worldId: true }
+    });
+    if (!location || location.worldId !== worldId) {
+      throw new ServiceError(400, "Location must belong to the selected world.");
+    }
   }
 
   if (!isAdmin(user) && !(await canCreateEntityInWorld(user.id, worldId))) {
     throw new ServiceError(403, "Forbidden.");
   }
 
-  if (!isAdmin(user)) {
+  if (!isAdmin(user) && currentLocationId) {
     const locationAccessFilter = await buildLocationAccessFilter(
       user,
       worldId,

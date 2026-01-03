@@ -5,6 +5,7 @@ import type { AuthRequest, LocationFieldRecord, LocationFieldValueWrite, Locatio
 import { hasLocationCycle, getAllowedLocationParentTypeIds, getWorldAccessUserIds } from "./shared";
 import { listLocations, getLocationById, createLocation, updateLocation, deleteLocation } from "../services/locationService";
 import { ServiceError } from "../services/serviceError";
+import { buildPublicUrl } from "../lib/imageStorage";
 
 const handleLocationServiceError = (res: express.Response, error: unknown, fallbackMessage: string) => {
   if (error instanceof ServiceError) {
@@ -16,6 +17,75 @@ const handleLocationServiceError = (res: express.Response, error: unknown, fallb
 };
 
 export const registerLocationsRoutes = (app: express.Express) => {
+  app.get("/api/locations/tree", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user!;
+    const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
+    const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+    const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+
+    if (!worldId && !isAdmin(user)) {
+      res.status(400).json({ error: "World ID is required." });
+      return;
+    }
+
+    try {
+      let whereClause: Prisma.LocationWhereInput = {};
+      if (worldId) {
+        if (isAdmin(user)) {
+          whereClause = { worldId };
+        } else {
+          if (!(await canAccessWorld(user.id, worldId))) {
+            res.json({ locations: [] });
+            return;
+          }
+          whereClause = await buildLocationAccessFilter(user, worldId, campaignId, characterId);
+        }
+      }
+
+      const locations = await prisma.location.findMany({
+        where: whereClause,
+        orderBy: { name: "asc" },
+        include: {
+          locationType: { select: { id: true, name: true } },
+          recordImages: {
+            select: {
+              id: true,
+              isPrimary: true,
+              caption: true,
+              imageAsset: {
+                select: {
+                  variants: {
+                    where: { variant: "THUMB" },
+                    select: { id: true, variant: true, key: true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+
+      const serialized = locations.map((location) => ({
+        id: location.id,
+        name: location.name,
+        description: location.description,
+        parentId: location.parentLocationId,
+        locationType: location.locationType,
+        recordImages: location.recordImages.map((recordImage) => ({
+          id: recordImage.id,
+          isPrimary: recordImage.isPrimary,
+          caption: recordImage.caption,
+          thumbnailUrl: recordImage.imageAsset.variants[0]
+            ? buildPublicUrl(recordImage.imageAsset.variants[0].key)
+            : null
+        }))
+      }));
+
+      res.json({ locations: serialized });
+    } catch (error) {
+      handleLocationServiceError(res, error, "Failed to load location tree.");
+    }
+  });
   app.get("/api/locations", requireAuth, async (req, res) => {
     const user = (req as AuthRequest).user!;
     const worldId = typeof req.query.worldId === "string" ? req.query.worldId : undefined;
@@ -99,6 +169,69 @@ export const registerLocationsRoutes = (app: express.Express) => {
       res.json(location);
     } catch (error) {
       handleLocationServiceError(res, error, "Failed to load location.");
+    }
+  });
+  app.get("/api/locations/:id/entities", requireAuth, async (req, res) => {
+    const user = (req as AuthRequest).user!;
+    const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : undefined;
+    const characterId = typeof req.query.characterId === "string" ? req.query.characterId : undefined;
+    const locationId = req.params.id;
+
+    try {
+      const location = await prisma.location.findUnique({
+        where: { id: locationId },
+        select: { id: true, worldId: true }
+      });
+      if (!location) {
+        res.status(404).json({ error: "Location not found." });
+        return;
+      }
+
+      if (!isAdmin(user) && !(await canAccessWorld(user.id, location.worldId))) {
+        res.status(403).json({ error: "Forbidden." });
+        return;
+      }
+
+      const locationAccessFilter = await buildLocationAccessFilter(
+        user,
+        location.worldId,
+        campaignId,
+        characterId
+      );
+      const canReadLocation = await prisma.location.findFirst({
+        where: { id: locationId, ...locationAccessFilter },
+        select: { id: true }
+      });
+      if (!canReadLocation) {
+        res.status(403).json({ error: "Forbidden." });
+        return;
+      }
+
+      const entityAccessFilter = await buildEntityAccessFilter(
+        user,
+        location.worldId,
+        campaignId,
+        characterId
+      );
+      const entities = await prisma.entity.findMany({
+        where: { currentLocationId: locationId, ...entityAccessFilter },
+        orderBy: { name: "asc" },
+        select: {
+          id: true,
+          name: true,
+          entityType: { select: { id: true, name: true } }
+        }
+      });
+
+      res.json({
+        entities: entities.map((entity) => ({
+          id: entity.id,
+          name: entity.name,
+          entityType: entity.entityType
+        }))
+      });
+    } catch (error) {
+      handleLocationServiceError(res, error, "Failed to load location entities.");
     }
   });
   app.put("/api/locations/:id", requireAuth, async (req, res) => {

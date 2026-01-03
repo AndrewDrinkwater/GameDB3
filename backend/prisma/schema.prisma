@@ -527,7 +527,7 @@ model Entity {
   id           String   @id @default(uuid())
   worldId      String
   entityTypeId String
-  currentLocationId String
+  currentLocationId String?
   name         String
   description  String?
   createdById  String
@@ -536,7 +536,7 @@ model Entity {
 
   world      World             @relation(fields: [worldId], references: [id])
   entityType EntityType        @relation(fields: [entityTypeId], references: [id])
-  currentLocation Location     @relation("EntityCurrentLocation", fields: [currentLocationId], references: [id])
+  currentLocation Location?    @relation("EntityCurrentLocation", fields: [currentLocationId], references: [id])
   createdBy  User              @relation("EntityCreator", fields: [createdById], references: [id])
   values     EntityFieldValue[]
   access     EntityAccess[]

@@ -711,7 +711,7 @@ const entityViewSeeds: Record<string, ViewSeed> = {
       { fieldKey: "name", label: "Name", fieldType: SystemFieldType.TEXT, listOrder: 1, formOrder: 1, required: true },
       { fieldKey: "worldId", label: "World", fieldType: SystemFieldType.REFERENCE, listOrder: 2, formOrder: 2, required: true, referenceEntityKey: "worlds" },
       { fieldKey: "entityTypeId", label: "Type", fieldType: SystemFieldType.REFERENCE, listOrder: 3, formOrder: 3, required: true, referenceEntityKey: "entity_types", referenceScope: "entity_type" },
-      { fieldKey: "currentLocationId", label: "Location", fieldType: SystemFieldType.REFERENCE, listOrder: 4, formOrder: 4, required: true, referenceEntityKey: "locations", referenceScope: "location_reference" },
+      { fieldKey: "currentLocationId", label: "Location", fieldType: SystemFieldType.REFERENCE, listOrder: 4, formOrder: 4, referenceEntityKey: "locations", referenceScope: "location_reference" },
       { fieldKey: "description", label: "Description", fieldType: SystemFieldType.TEXTAREA, listOrder: 5, formOrder: 5 }
     ]
   },

@@ -2032,6 +2032,216 @@ body {
   gap: 0.75rem;
 }
 
+.location-explorer {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(320px, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.location-explorer__tree,
+.location-explorer__inspector {
+  background: color-mix(in srgb, var(--surface) 96%, var(--surface-2));
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  padding: 1rem 1.2rem;
+}
+
+.location-explorer__tree h2,
+.location-explorer__inspector h2 {
+  margin: 0 0 0.5rem;
+}
+
+.location-explorer__nodes {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.location-explorer__node {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.location-explorer__toggle {
+  width: 1.4rem;
+  height: 1.4rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.location-explorer__toggle:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.location-explorer__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.6rem;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+}
+
+.location-explorer__node.is-selected .location-explorer__label {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.location-explorer__label img {
+  width: 28px;
+  height: 28px;
+  border-radius: 0.4rem;
+  object-fit: cover;
+}
+
+.location-explorer__thumb-placeholder {
+  width: 28px;
+  height: 28px;
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--surface-3) 80%, transparent);
+}
+
+.location-explorer__name {
+  font-weight: 600;
+}
+
+.location-explorer__type {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.location-explorer__header {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.location-explorer__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.location-explorer__open {
+  font-size: 0.85rem;
+  padding: 0.35rem 0.75rem;
+  white-space: nowrap;
+}
+
+.location-explorer__eyebrow {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.location-explorer__meta {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.location-explorer__section {
+  margin-top: 0.85rem;
+}
+
+.location-explorer__section h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}
+
+.location-explorer__breadcrumbs,
+.location-explorer__child-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.location-explorer__breadcrumbs button,
+.location-explorer__child-list button {
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.location-explorer__gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 0.5rem;
+}
+
+.location-explorer__thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 0.6rem;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface-3) 80%, transparent);
+}
+
+.location-explorer__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.location-explorer__entity-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.location-explorer__entity-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+}
+
+.location-explorer__entity {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.location-explorer__entity-type {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.location-explorer__state {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 960px) {
+  .location-explorer {
+    grid-template-columns: 1fr;
+  }
+}
+
 .field-choices__row {
   display: grid;
   grid-template-columns: minmax(140px, 1.2fr) minmax(180px, 1.6fr) minmax(120px, 0.7fr) minmax(120px, 0.7fr) minmax(90px, 0.4fr) minmax(140px, 0.8fr);
