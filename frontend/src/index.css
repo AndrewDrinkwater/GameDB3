@@ -1709,9 +1709,13 @@ body {
 
 .record-images__controls {
   display: grid;
-  gap: 0.75rem;
-  grid-template-columns: minmax(160px, max-content) minmax(200px, 1fr);
+  gap: 0.5rem;
+  grid-template-columns: 1fr;
   align-items: center;
+}
+
+.record-images__add {
+  justify-content: center;
 }
 
 .record-images__upload {
@@ -1905,6 +1909,127 @@ body {
 
 .record-images__focus-controls input[type="range"] {
   width: 100%;
+}
+
+.image-wizard {
+  display: grid;
+  gap: 1rem;
+}
+
+.image-wizard__step {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.image-wizard__upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 0.9rem;
+  border-radius: 0.75rem;
+  border: 1px dashed color-mix(in srgb, var(--border) 75%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.image-wizard__upload input {
+  display: none;
+}
+
+.image-wizard__meta {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.image-wizard__preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.image-wizard__preview {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.image-wizard__label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.image-wizard__frame {
+  width: 100%;
+  background: color-mix(in srgb, var(--surface-3) 75%, transparent);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  cursor: grab;
+}
+
+.image-wizard__frame:active {
+  cursor: grabbing;
+}
+
+.image-wizard__frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  user-select: none;
+  pointer-events: none;
+}
+
+.image-wizard__frame--card {
+  width: 200px;
+  height: 140px;
+  margin: 0 auto;
+}
+
+.image-wizard__frame--circle {
+  width: 96px;
+  height: 96px;
+  border-radius: 999px;
+  margin: 0 auto;
+}
+
+
+.image-wizard__controls {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.image-wizard__controls label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.image-wizard__controls input[type="range"] {
+  width: 100%;
+}
+
+.image-wizard__caption input {
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  color: var(--text);
+}
+
+.image-wizard__error {
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+
+.image-wizard__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
 }
 
 .field-choices__row {

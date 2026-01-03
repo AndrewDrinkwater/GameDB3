@@ -318,6 +318,9 @@ export const registerImageRoutes = (app: express.Express) => {
       imageAssetId?: string;
       caption?: string;
       isPrimary?: boolean;
+      focalX?: number;
+      focalY?: number;
+      zoom?: number;
     };
 
     try {
@@ -359,6 +362,17 @@ export const registerImageRoutes = (app: express.Express) => {
         });
         const shouldSetPrimary = body.isPrimary ?? !hasPrimary;
 
+        const nextFocalX =
+          typeof body.focalX === "number"
+            ? Math.max(0, Math.min(100, Math.round(body.focalX)))
+            : undefined;
+        const nextFocalY =
+          typeof body.focalY === "number"
+            ? Math.max(0, Math.min(100, Math.round(body.focalY)))
+            : undefined;
+        const nextZoom =
+          typeof body.zoom === "number" ? Math.max(1, Math.min(3, body.zoom)) : undefined;
+
         await prisma.$transaction(async (tx) => {
           if (shouldSetPrimary) {
             await tx.recordImage.updateMany({
@@ -372,7 +386,10 @@ export const registerImageRoutes = (app: express.Express) => {
               entityId: recordId,
               caption: body.caption ?? null,
               isPrimary: shouldSetPrimary,
-              sortOrder: nextOrder + 1
+              sortOrder: nextOrder + 1,
+              focalX: nextFocalX ?? 50,
+              focalY: nextFocalY ?? 50,
+              zoom: nextZoom ?? 1
             }
           });
         });
@@ -407,6 +424,17 @@ export const registerImageRoutes = (app: express.Express) => {
         });
         const shouldSetPrimary = body.isPrimary ?? !hasPrimary;
 
+        const nextFocalX =
+          typeof body.focalX === "number"
+            ? Math.max(0, Math.min(100, Math.round(body.focalX)))
+            : undefined;
+        const nextFocalY =
+          typeof body.focalY === "number"
+            ? Math.max(0, Math.min(100, Math.round(body.focalY)))
+            : undefined;
+        const nextZoom =
+          typeof body.zoom === "number" ? Math.max(1, Math.min(3, body.zoom)) : undefined;
+
         await prisma.$transaction(async (tx) => {
           if (shouldSetPrimary) {
             await tx.recordImage.updateMany({
@@ -420,7 +448,10 @@ export const registerImageRoutes = (app: express.Express) => {
               locationId: recordId,
               caption: body.caption ?? null,
               isPrimary: shouldSetPrimary,
-              sortOrder: nextOrder + 1
+              sortOrder: nextOrder + 1,
+              focalX: nextFocalX ?? 50,
+              focalY: nextFocalY ?? 50,
+              zoom: nextZoom ?? 1
             }
           });
         });

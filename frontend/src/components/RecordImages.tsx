@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApi } from "../hooks/useApi";
+import { usePopout } from "./PopoutProvider";
+import ImageUploadWizard from "./ImageUploadWizard";
 
 type ImageVariant = {
   id: string;
@@ -59,9 +61,7 @@ export default function RecordImages({
   canEdit
 }: RecordImagesProps) {
   const api = useApi();
-  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [captionDraft, setCaptionDraft] = useState("");
   const [openImageId, setOpenImageId] = useState<string | null>(null);
   const [captionDrafts, setCaptionDrafts] = useState<Record<string, string>>({});
   const dragStateRef = useRef<{ id: string; focalX: number; focalY: number } | null>(
@@ -101,6 +101,7 @@ export default function RecordImages({
     setCaptionDrafts(next);
   }, [images]);
 
+  const { showPopout, closePopout } = usePopout();
   const updateRecordImage = async (
     id: string,
     updates: Partial<Pick<RecordImage, "focalX" | "focalY" | "zoom" | "caption">>
@@ -178,58 +179,24 @@ export default function RecordImages({
     void updateRecordImage(state.id, { focalX: state.focalX, focalY: state.focalY });
   };
 
-  const handleUpload = async (file: File) => {
-    if (!worldId) {
-      setError("Select a world before uploading images.");
-      return;
-    }
-    if (uploading) return;
-    setUploading(true);
-    setError(null);
-
-    try {
-      const init = await api.post<{ uploadUrl: string; uploadKey: string }>(
-        "/api/images/init",
-        {
-          worldId,
-          fileName: file.name,
-          contentType: file.type,
-          sizeBytes: file.size
-        }
-      );
-
-      const uploadResponse = await fetch(init.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": file.type },
-        body: file
-      });
-
-      if (!uploadResponse.ok) {
-        throw new Error("Upload failed.");
-      }
-
-      const complete = await api.post<{ assetId: string }>("/api/images/complete", {
-        worldId,
-        uploadKey: init.uploadKey,
-        fileName: file.name
-      });
-
-      const attach = await api.post<{ recordImages: RecordImage[] }>(
-        `/api/records/${recordType}/${recordId}/images`,
-        {
-          imageAssetId: complete.assetId,
-          isPrimary: images.length === 0,
-          caption: captionDraft.trim() || undefined
-        }
-      );
-
-      onImagesChange(attach.recordImages);
-      setCaptionDraft("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
-    } finally {
-      setUploading(false);
-    }
+  const openUploadWizard = () => {
+    const id = showPopout({
+      title: "Add image",
+      dismissOnBackdrop: false,
+      message: (
+        <ImageUploadWizard
+          recordType={recordType}
+          recordId={recordId}
+          worldId={worldId}
+          makePrimary={images.length === 0}
+          onSaved={(recordImages) => {
+            onImagesChange(recordImages as RecordImage[]);
+          }}
+          onClose={() => closePopout(id)}
+        />
+      ),
+      actions: []
+    });
   };
 
   const handlePrimary = async (id: string) => {
@@ -264,29 +231,13 @@ export default function RecordImages({
     <div className="record-images">
       {canEdit ? (
         <div className="record-images__controls">
-          <label className="record-images__upload">
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) {
-                  void handleUpload(file);
-                }
-                event.target.value = "";
-              }}
-              disabled={uploading}
-            />
-            <span>{uploading ? "Uploading..." : "Add image"}</span>
-          </label>
-          <input
-            type="text"
-            className="record-images__caption"
-            value={captionDraft}
-            placeholder="Optional caption"
-            onChange={(event) => setCaptionDraft(event.target.value)}
-            disabled={uploading}
-          />
+          <button
+            type="button"
+            className="ghost-button record-images__add"
+            onClick={openUploadWizard}
+          >
+            Add image
+          </button>
         </div>
       ) : null}
       {error ? <div className="record-images__error">{error}</div> : null}
