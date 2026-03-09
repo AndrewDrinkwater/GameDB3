@@ -67,7 +67,7 @@ export const validateEntityInput = ({
 
     if (field.fieldType === EntityFieldType.NUMBER) {
       const numericValue = Number(rawValue);
-      if (Number.isNaN(numericValue)) {
+      if (!Number.isFinite(numericValue)) {
         invalidNumbers.push(fieldKey);
       }
     }

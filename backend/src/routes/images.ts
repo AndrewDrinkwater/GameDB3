@@ -136,7 +136,7 @@ export const registerImageRoutes = (app: express.Express) => {
         res.json({
           uploadUrl,
           uploadKey,
-          expiresInSeconds: 600
+          expiresInSeconds: config.uploadExpirySeconds
         });
       } catch (error) {
         handleError(res, error, "Failed to initialize upload.");
